@@ -1,3 +1,28 @@
-data/
+# Dependencies
 node_modules/
+
+# Local data & state
+data/
+local/
+circuit-breaker-checkpoint.json
+
+# Backups & logs
 pools.json.bak-*
+profiles.json.bak-*
+*.bak
+*.bak-*
+*.log
+
+# Environment & credentials
+.env
+.env.*
+*.pem
+*.key
+
+# Agent / Tooling local caches
+.atl/
+.gentle-shell/
+.pi/
+dist/
+coverage/
+.DS_Store

@@ -250,10 +250,10 @@ different things:
 
 ```
 orchestrator  230.3M tokens · 100% context re-sent
-▸ bueno vamos a empezar a fixear cosas, t…  mu-web           98.5M  100% re-sent  00:53
+▸ implement auth workflow and routing …      app-web          98.5M  100% re-sent  00:53
   legacy                                    (before histo…   53.8M   99% re-sent  10-18 03:49
 gentle-ai-verify  10.3M tokens · 99% context re-sent
-  verify login token (credentials)          mu-web            5.0M   99% re-sent  00:51
+  verify token validation (credentials)      app-web           5.0M   99% re-sent  00:51
 ```
 
 - Roles come biggest first (the orchestrator and each subagent type), with up to 5 of their
@@ -275,7 +275,7 @@ The suggestions view analyzes real usage against four optimization rules (ranked
 - **Provider switch**: sessions where model/provider flips caused large cache rewrites.
 - **Expensive role**: subagent roles with small outputs running on expensive models where a cheaper
   model already tested in history costs less than half. Pressing `c` or `enter` on an expensive role suggestion
-  automatically creates a new profile in `profiles.json` (e.g. `mu-privado-opt-gentle-ai-verify`)
+  automatically creates a new profile in `profiles.json` (e.g. `balanced-opt-gentle-ai-verify`)
   after making a timestamped backup (`profiles.json.bak-YYYYMMDDHHMMSS`).
 - **Idle quota**: subscription windows projecting >=50% unused at reset while another window fills.
 

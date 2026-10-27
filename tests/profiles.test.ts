@@ -19,13 +19,13 @@ const SAMPLE_STORE: ProfilesStore = {
   kind: "gentle-pi.agent_model_profiles",
   version: 1,
   profiles: {
-    "mu-privado": {
+    "balanced": {
       orchestrator: { model: "pool/orchestrator", thinking: "medium" },
       "gentle-ai-verify": { model: "claude-bridge/claude-opus-5-5", thinking: "medium" },
       "gentle-ai-worker": { model: "pool/claude-sonnet-5-5", thinking: "medium" },
     },
   },
-  active: "mu-privado",
+  active: "balanced",
 };
 
 test("loadProfilesStore reads valid store and returns null for missing or invalid JSON", () => {
@@ -100,7 +100,7 @@ test("readProfiles returns the store and its raw text, or why it cannot be used"
 test("saveProfilesStore backs up the previous file, writes atomically with mode 0600 and leaves no temp file", () => {
   const { dir, file } = profilesFile(JSON.stringify(SAMPLE_STORE, null, 2), 0o644);
   try {
-    const updated = withRole(SAMPLE_STORE, "mu-new", "gentle-ai-worker", "antigravity/gemini-3-8-flash");
+    const updated = withRole(SAMPLE_STORE, "test-new", "gentle-ai-worker", "antigravity/gemini-3-8-flash");
     const { backup, removed } = saveProfilesStore(updated, readOk(file), { path: file, now: NOW, hasModel });
     assert.ok(existsSync(backup));
     assert.match(backup, /profiles\.json\.bak-\d{14}$/);
@@ -125,9 +125,9 @@ test("saveProfilesStore refuses, writing nothing, when the file changed since it
   const { dir, file } = profilesFile();
   try {
     const read = readOk(file);
-    const other = JSON.stringify(withRole(SAMPLE_STORE, "mu-privado", "orchestrator", "claude-bridge/claude-opus-5-5"));
+    const other = JSON.stringify(withRole(SAMPLE_STORE, "balanced", "orchestrator", "claude-bridge/claude-opus-5-5"));
     writeFileSync(file, other);
-    const next = withRole(read.store, "mu-new", "orchestrator", "pool/orchestrator");
+    const next = withRole(read.store, "test-new", "orchestrator", "pool/orchestrator");
     assertRefused(file, dir, () => saveProfilesStore(next, read, { path: file, now: NOW, hasModel }), /changed since it was read/, other);
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -160,21 +160,21 @@ test("saveProfilesStore refuses a store with an unknown kind or version", () => 
 });
 
 test("saveProfilesStore checks only new or changed roles against Pi's model registry", () => {
-  const legacy = withRole(SAMPLE_STORE, "mu-privado", "old-role", "retired/model");
+  const legacy = withRole(SAMPLE_STORE, "balanced", "old-role", "retired/model");
   const { dir, file } = profilesFile(JSON.stringify(legacy));
   try {
     const read = readOk(file);
     const before = readFileSync(file, "utf8");
     for (const [model, pattern] of [
-      ["nope/x", /mu-new\.gentle-ai-worker: nope\/x is not in Pi's model registry/],
-      ["no-slash", /mu-new\.gentle-ai-worker: no-slash is not provider\/model/],
-      ["", /mu-new\.gentle-ai-worker:  is not provider\/model/],
+      ["nope/x", /test-new\.gentle-ai-worker: nope\/x is not in Pi's model registry/],
+      ["no-slash", /test-new\.gentle-ai-worker: no-slash is not provider\/model/],
+      ["", /test-new\.gentle-ai-worker:  is not provider\/model/],
     ] as const) {
-      const next = withRole(read.store, "mu-new", "gentle-ai-worker", model);
+      const next = withRole(read.store, "test-new", "gentle-ai-worker", model);
       assertRefused(file, dir, () => saveProfilesStore(next, read, { path: file, now: NOW, hasModel }), pattern, before);
     }
     registry.length = 0;
-    const next = withRole(read.store, "mu-new", "gentle-ai-worker", "pool/claude-sonnet-5-5");
+    const next = withRole(read.store, "test-new", "gentle-ai-worker", "pool/claude-sonnet-5-5");
     saveProfilesStore(next, read, { path: file, now: NOW, hasModel });
     assert.deepEqual(registry, [["pool", "claude-sonnet-5-5"]], "only the new role is looked up; retired/model is left alone");
   } finally {
@@ -189,7 +189,7 @@ test("saveProfilesStore keeps the newest backups in its own format and never tou
     const foreign = ["profiles.json.bak-20261019", "profiles.json.bak-202610161338", "profiles.json.bak-manual"];
     for (const name of [...own, ...foreign]) writeFileSync(join(dir, name), "{}");
     const read = readOk(file);
-    const { backup, removed } = saveProfilesStore(withRole(read.store, "mu-new", "orchestrator", "pool/orchestrator"), read, { path: file, now: NOW, hasModel });
+    const { backup, removed } = saveProfilesStore(withRole(read.store, "test-new", "orchestrator", "pool/orchestrator"), read, { path: file, now: NOW, hasModel });
     assert.deepEqual(removed.map(path => path.split("/").pop()), own.slice(0, 3));
     const left = readdirSync(dir);
     for (const name of foreign) assert.ok(left.includes(name), name);
@@ -233,12 +233,12 @@ test("applySuggestionToProfile creates a new profile with the cheaper model for 
     quality: "Quality note",
   };
 
-  const result = applySuggestionToProfile(SAMPLE_STORE, "mu-privado", "mu-optimized", suggestion);
+  const result = applySuggestionToProfile(SAMPLE_STORE, "balanced", "balanced-optimized", suggestion);
   assert.equal(result.changed, true);
-  assert.deepEqual(result.store.profiles["mu-optimized"]["gentle-ai-verify"], {
+  assert.deepEqual(result.store.profiles["balanced-optimized"]["gentle-ai-verify"], {
     model: "antigravity/gemini-3-8-flash",
     thinking: "medium",
   });
   // Original untouched
-  assert.equal(result.store.profiles["mu-privado"]["gentle-ai-verify"].model, "claude-bridge/claude-opus-5-5");
+  assert.equal(result.store.profiles["balanced"]["gentle-ai-verify"].model, "claude-bridge/claude-opus-5-5");
 });

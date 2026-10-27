@@ -1,14 +1,42 @@
-# ai-balancer
+<p align="center">
+  <img src="assets/banner.png" alt="ai-balancer header banner" width="100%">
+</p>
 
-[Versión en español](README.es.md)
+<p align="center">
+  <img src="assets/logo.png" alt="ai-balancer logo" width="120" height="120">
+</p>
 
-A deterministic, zero-overhead virtual model router and quota balancer for **Gentle Shell** and **Pi** coding agents.
+<h1 align="center">ai-balancer</h1>
 
-`ai-balancer` sits between your agent roles and AI providers. Instead of binding agents directly to single models or subscriptions, you point them at virtual pools (e.g., `pool/orchestrator`, `pool/claude-sonnet-5-5`). Before every request, a deterministic router picks the optimal provider candidate based on real-time quota state, the active agent role, session context size, and customizable rule pipelines—**spending zero LLM tokens and adding no latency**.
+<p align="center">
+  <strong>Deterministic, zero-overhead virtual model router and quota balancer for Gentle Shell and Pi coding agents.</strong>
+</p>
+
+<p align="center">
+  <a href="https://github.com/3lAngel0/balanceria"><img src="https://img.shields.io/badge/Language-TypeScript-3178C6?style=for-the-badge&logo=typescript&logoColor=white" alt="TypeScript"></a>
+  <a href="https://github.com/3lAngel0/balanceria"><img src="https://img.shields.io/badge/Gentle_Shell-Native-6366F1?style=for-the-badge" alt="Gentle Shell Native"></a>
+  <a href="https://github.com/3lAngel0/balanceria"><img src="https://img.shields.io/badge/Pi-Extension-8A2BE2?style=for-the-badge&logo=visualstudiocode&logoColor=white" alt="Pi Extension"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache_2.0-10B981?style=for-the-badge" alt="License"></a>
+  <img src="https://img.shields.io/badge/Overhead-0_LLM_Tokens-06B6D4?style=for-the-badge" alt="Zero Token Overhead">
+  <img src="https://img.shields.io/badge/Latency-%3C_1ms_Routing-10B981?style=for-the-badge" alt="Sub-millisecond Latency">
+</p>
+
+<p align="center">
+  <a href="#key-features">Features</a> •
+  <a href="#how-it-works-two-independent-layers">Architecture</a> •
+  <a href="#supported-providers">Providers</a> •
+  <a href="#quick-start">Quick Start</a> •
+  <a href="#interactive-tui--web-dashboard">Control Center</a> •
+  <a href="README.es.md"><b>🇪🇸 Versión en Español</b></a>
+</p>
 
 ---
 
-## The Problem
+`ai-balancer` sits between your agent roles and AI providers. Instead of binding subagents directly to individual models or single API keys, you point them at **virtual pools** (e.g., `pool/orchestrator`, `pool/claude-sonnet-5-5`). Before every request, a deterministic router picks the optimal provider candidate based on real-time quota state, active agent role, session context size, and customizable rule pipelines—**spending zero LLM tokens and adding no latency**.
+
+---
+
+## ⚡ The Problem
 
 Modern agentic coding harnesses rely on multiple specialized subagents (explorers, task workers, code reviewers, judges). Running these workloads against single subscriptions quickly creates operational bottlenecks:
 
@@ -20,7 +48,11 @@ Modern agentic coding harnesses rely on multiple specialized subagents (explorer
 
 ---
 
-## How It Works: Two Independent Layers
+## 🏗️ How It Works: Two Independent Layers
+
+<p align="center">
+  <img src="assets/architecture.png" alt="ai-balancer Architecture Diagram" width="100%">
+</p>
 
 Model assignment in `ai-balancer` is cleanly decoupled into two layers:
 
@@ -44,23 +76,44 @@ flowchart TD
 ```
 
 1. **Layer 1 (Gentle Profile)**: `~/.gentle-shell/config/gentle-ai/profiles.json` maps each agent role to either a direct model or a virtual pool (`pool/<id>`). Child processes receive their assignment via `--model <target>:thinking`.
-2. **Layer 2 (Virtual Pools)**: `pools.json` defines candidate models and routing rules. **Only roles pointing at a `pool/<id>` are balanced.** Roles pointing at a direct physical model bypass the balancer completely and are never balanced.
+2. **Layer 2 (Virtual Pools)**: `pools.json` defines candidate models and routing rules. **Only roles pointing at a `pool/<id>` are balanced.** Roles pointing at a direct physical model bypass the balancer completely.
 
 ---
 
-## Key Features
+## ✨ Key Features
 
-- **Deterministic Routing**: Zero LLM overhead. Decisions execute in pure TypeScript using in-memory cached quota state and token counts.
-- **Cache-Preserving Stickiness**: Continuation turns pin to the provider that handled the previous turn, keeping prompt caches and thinking signatures warm.
-- **Transparent Failover**: Intercepts provider quota exhaustion and stalls, rewriting them into retryable `429` signals that trigger Pi's native retry against the next available candidate.
-- **Failover Cost Containment**: When an expensive candidate (`input + output` > $15/M, such as Opus) fails, retries strictly filter for cheaper candidates first.
-- **Circuit Breaker**: When all candidates in a pool are exhausted, the circuit breaker halts retries immediately, saves an emergency checkpoint to `data/circuit-breaker-checkpoint.json`, and alerts the user.
-- **Interactive TUI & Web Control Center**: Live status bar, side panel overlay (`Ctrl+Alt+B`), comprehensive 5-tab usage console (`Ctrl+Alt+U`), Heads-Up Display (`/hud`), and an authenticated local/LAN web dashboard (`/balancer serve`).
-- **Offline & Private**: All data is stored strictly on your local disk in `data/`. No external telemetry, no remote tracker, and no stored API keys. See [Security and Privacy](docs/SECURITY-AND-PRIVACY.md).
+- 🎯 **Deterministic Routing**: Zero LLM overhead. Decisions execute in pure TypeScript using in-memory cached quota state and token counts (< 1ms).
+- 🧠 **Cache-Preserving Stickiness**: Continuation turns pin to the provider that handled the previous turn, keeping prompt caches and thinking signatures warm.
+- 🔄 **Transparent Failover**: Intercepts provider quota exhaustion and stalls, rewriting them into retryable `429` signals that trigger Pi's native retry against the next available candidate.
+- 🛡️ **Failover Cost Containment**: When an expensive candidate (`input + output` > $15/M, such as Opus) fails, retries strictly filter for cheaper candidates first.
+- ⚡ **Circuit Breaker**: When all candidates in a pool are exhausted, the circuit breaker halts retries immediately, saves an emergency checkpoint to `data/circuit-breaker-checkpoint.json`, and alerts the user.
+- 📊 **Interactive TUI & Web Control Center**: Live status bar, side panel overlay (`Ctrl+Alt+B`), comprehensive 5-tab usage console (`Ctrl+Alt+U`), Heads-Up Display (`/hud`), and an authenticated local/LAN web dashboard (`/balancer serve`).
+- 🔒 **100% Offline & Private**: All data is stored strictly on your local disk in `data/`. No external telemetry, no remote tracker, and no stored API keys. See [Security and Privacy](docs/SECURITY-AND-PRIVACY.md).
 
 ---
 
-## Supported Providers
+## 🖥️ Interactive TUI & Web Dashboard
+
+<p align="center">
+  <img src="assets/hud-preview.png" alt="ai-balancer Terminal HUD Display" width="100%">
+</p>
+
+Monitor live token throughput, model health, quota windows, and real-time routing decisions right inside your terminal or in the browser:
+
+```bash
+# Toggle the interactive HUD in terminal
+/hud
+
+# Open the 5-tab usage console
+/balancer usage
+
+# Launch the secure local/LAN web console
+/balancer serve
+```
+
+---
+
+## 🔌 Supported Providers
 
 | Provider | ID | Kind | Detection / Integration |
 |---|---|---|---|
@@ -75,7 +128,7 @@ flowchart TD
 
 ---
 
-## Quick Start
+## 🚀 Quick Start
 
 ### 1. Installation
 
@@ -83,6 +136,12 @@ Install `ai-balancer` into Gentle Shell:
 
 ```bash
 gentle-shell install https://github.com/3lAngel0/balanceria
+```
+
+Or install it as a standard Pi extension:
+
+```bash
+pi install git:github.com/3lAngel0/balanceria
 ```
 
 ### 2. Interactive Setup Wizard
@@ -93,7 +152,7 @@ Launch the configuration hub to auto-detect installed providers, configure pools
 /balancer setup
 ```
 
-The wizard detects local providers, guides strategy selection (`hybrid` or `waterfall`), lets you customize candidate priorities, and provides an AI Setup Advisor (cost-safe; never recommends Opus) to optimize role assignments. Changes are written safely with automatic `.bak` file backups.
+The wizard detects local providers, guides strategy selection (`hybrid` or `waterfall`), lets you customize candidate priorities, and provides an AI Setup Advisor (cost-safe; never recommends Opus) to optimize role assignments. Changes are written safely with automatic `.bak` backups.
 
 ### 3. Assign Agent Roles to Pools
 
@@ -116,7 +175,7 @@ Select a pool model directly in chat via `/model pool/claude-sonnet-5-5` or conf
 
 ---
 
-## Key Commands & Shortcuts
+## ⌨️ Commands & Shortcuts
 
 | Command / Shortcut | Description |
 |---|---|
@@ -132,7 +191,7 @@ Select a pool model directly in chat via `/model pool/claude-sonnet-5-5` or conf
 
 ---
 
-## Documentation
+## 📖 Documentation
 
 - **[Complete Step-by-Step Guide](docs/guide.md)**: Exhaustive manual covering two-layer configuration, deterministic rule pipelines, failover mechanics, adding providers, worked multi-role examples, and troubleshooting.
 - **[Guía completa en Español](docs/guide.es.md)**: Versión en español de la guía exhaustiva y arquitectura.
@@ -142,7 +201,7 @@ Select a pool model directly in chat via `/model pool/claude-sonnet-5-5` or conf
 
 ---
 
-## Development
+## 🧪 Development
 
 Run the automated test suite with the built-in Node.js runner:
 
@@ -152,6 +211,8 @@ npm test
 
 Tests execute under `AI_BALANCER_LANG=en` to guarantee deterministic evaluation across environments.
 
-## License
+---
+
+## 📄 License
 
 Apache-2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
