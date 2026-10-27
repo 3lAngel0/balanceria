@@ -1,0 +1,33 @@
+{
+	"asOf": "2026-10-18",
+	"sources": [
+		"https://platform.claude.com/docs/en/about-claude/pricing",
+		"https://ai.google.dev/gemini-api/docs/pricing"
+	],
+	"note": "Official list prices in USD per million tokens. For Claude, cacheWrite is the 5-minute cache write price; for Gemini it equals input because Gemini charges no write. Gemini 4 Argon and 3.8 Flash are introductory prices that double on 2026-12-01 and 2027-01-01 respectively.",
+	"models": {
+		"claude-fable-5-1": { "input": 10, "output": 50, "cacheRead": 0.25, "cacheWrite": 12.5 },
+		"claude-opus-5-5": { "input": 4, "output": 20, "cacheRead": 0.2, "cacheWrite": 5 },
+		"claude-sonnet-5-5": { "input": 2, "output": 10, "cacheRead": 0.1, "cacheWrite": 2.5 },
+		"claude-haiku-5-5": {
+			"input": 0.1,
+			"output": 0.5,
+			"cacheRead": 0.01,
+			"cacheWrite": 0.125,
+			"longContext": { "threshold": 100000, "input": 0.5, "output": 2.5, "cacheRead": 0.05, "cacheWrite": 0.625 }
+		},
+		"gemini-4-argon": { "input": 2, "output": 10, "cacheRead": 0.1, "cacheWrite": 2 },
+		"gemini-3.8-flash": { "input": 0.75, "output": 3.75, "cacheRead": 0.075, "cacheWrite": 0.75 },
+		"gemini-3.6-flash": { "input": 0.75, "output": 3.75, "cacheRead": 0.075, "cacheWrite": 0.75 },
+		"gemini-3.1-pro": {
+			"input": 2,
+			"output": 12,
+			"cacheRead": 0.2,
+			"cacheWrite": 2,
+			"longContext": { "threshold": 200000, "input": 4, "output": 18, "cacheRead": 0.4, "cacheWrite": 4 }
+		},
+		"gemini-3-flash": { "input": 0.5, "output": 3, "cacheRead": 0.05, "cacheWrite": 0.5 }
+	},
+	"subscriptionsNote": "Monthly USD paid for each subscription; fill in the numbers to compare against API cost.",
+	"subscriptions": { "claude-bridge": null, "antigravity": null }
+}

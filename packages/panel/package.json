@@ -1,0 +1,22 @@
+{
+  "name": "pi-panel",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Pi control panel: a multi-project monitor served on loopback, running with Pi open or closed.",
+  "type": "module",
+  "scripts": {
+    "start": "node src/main.ts serve",
+    "build": "node build.ts",
+    "test": "node --test tests/*.test.ts"
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "dependencies": {
+    "gridstack": "14.0.0",
+    "preact": "11.0.2"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2"
+  }
+}

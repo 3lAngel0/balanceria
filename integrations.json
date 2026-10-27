@@ -1,0 +1,24 @@
+{
+  "integrations": [
+    {
+      "provider": "claude-bridge",
+      "kind": "subscription",
+      "label": "Claude Pro (claude-bridge)"
+    },
+    {
+      "provider": "antigravity",
+      "kind": "subscription",
+      "label": "Google AI Pro (agy)"
+    },
+    {
+      "provider": "anthropic",
+      "kind": "api",
+      "label": "Anthropic API"
+    },
+    {
+      "provider": "google",
+      "kind": "api",
+      "label": "Gemini API"
+    }
+  ]
+}

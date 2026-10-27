@@ -1,0 +1,24 @@
+{
+  "pools": [
+    {
+      "id": "claude-sonnet-5-5",
+      "name": "Sonnet 5.5 (pool: agy → claude-bridge → flash)",
+      "candidates": [
+        "antigravity/claude-sonnet-5-5",
+        "claude-bridge/claude-sonnet-5-5",
+        "antigravity/gemini-3-8-flash"
+      ],
+      "strategy": "hybrid"
+    },
+    {
+      "id": "orchestrator",
+      "name": "Orchestrator (pool: argon → gemini flash → claude-bridge sonnet)",
+      "candidates": [
+        "antigravity/gemini-4-argon",
+        "antigravity/gemini-3-8-flash",
+        "claude-bridge/claude-sonnet-5-5"
+      ],
+      "strategy": "hybrid"
+    }
+  ]
+}

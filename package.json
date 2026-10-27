@@ -1,0 +1,17 @@
+{
+  "name": "ai-balancer",
+  "version": "0.1.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "description": "Gentle Shell / Pi extension that spends one subscription before failing over to the next, with a live usage side panel.",
+  "type": "module",
+  "pi": {
+    "extensions": ["./src/extension.ts"]
+  },
+  "scripts": {
+    "test": "AI_BALANCER_LANG=en node --test tests/*.test.ts packages/panel/tests/*.test.ts"
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  }
+}
