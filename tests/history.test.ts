@@ -121,12 +121,12 @@ test("legacyRecords turns usage and exhausted events older than the cutoff into 
 
 test("child and sessionName round-trip, rows without them stay valid, and wrong types are skipped", () => {
 	const dir = tempDir();
-	appendHistory(dir, entry(NOW, { child: true, sessionName: "fix login mu-web" }));
+	appendHistory(dir, entry(NOW, { child: true, sessionName: "fix login web-app" }));
 	appendHistory(dir, entry(NOW + 1, { child: false, sessionName: null }));
 	appendHistory(dir, entry(NOW + 2));
 	appendFileSync(join(dir, HISTORY_DIR, "2026-10-18.jsonl"), `${JSON.stringify({ ...entry(NOW + 3), child: "yes" })}\n${JSON.stringify({ ...entry(NOW + 4), sessionName: 5 })}\n`);
 	const requests = readHistory(dir, NOW).requests;
-	assert.deepEqual(requests.map(item => [item.ts - NOW, item.child, item.sessionName]), [[0, true, "fix login mu-web"], [1, false, null], [2, undefined, undefined]]);
+	assert.deepEqual(requests.map(item => [item.ts - NOW, item.child, item.sessionName]), [[0, true, "fix login web-app"], [1, false, null], [2, undefined, undefined]]);
 });
 
 test("route decisions round-trip into their own list, leave requests alone, and malformed ones are skipped", () => {

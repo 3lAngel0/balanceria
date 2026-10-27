@@ -87,7 +87,7 @@ Translate telemetry and quota consumption into intuitive RPG status meters:
 | **Primary Provider Quota** | **HP (Hit Points)** | 🟢 Green (`#38b764`) → 🟡 Yellow (`#f77622`) → 🔴 Red (`#b13e53`) | `<meter min="0" max="100" value="..">` |
 | **Secondary / Fallback Quota** | **MP (Mana Points)** | 🔵 Cyan / Mana Blue (`#257179` / `#3b5dc9`) | `<meter>` with custom mana gradient |
 | **Prompt Cache Efficiency** | **XP (Experience / Shield)** | 🟣 Purple / Gold (`#a363d9` / `#ef7d57`) | Progress towards optimal cache reuse |
-| **Active Session State** | **Character Class / Level** | Status badges (e.g. `LVL 2: mu-privado`) | Metadata chip with pixel border |
+| **Active Session State** | **Character Class / Level** | Status badges (e.g. `LVL 2: balanced`) | Metadata chip with pixel border |
 
 ### Accessible RPG Meter Component
 

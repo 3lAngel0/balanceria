@@ -247,10 +247,10 @@ Cada petición reenvía la conversación íntegra al modelo, por lo que los toke
 
 ```
 orchestrator  230.3M tokens · 100% context re-sent
-▸ bueno vamos a empezar a fixear cosas, t…  mu-web           98.5M  100% re-sent  00:53
+▸ implement auth workflow and routing …      app-web          98.5M  100% re-sent  00:53
   legacy                                    (before histo…   53.8M   99% re-sent  10-18 03:49
 gentle-ai-verify  10.3M tokens · 99% context re-sent
-  verify login token (credentials)          mu-web            5.0M   99% re-sent  00:51
+  verify token validation (credentials)      app-web           5.0M   99% re-sent  00:51
 ```
 
 - Los roles se ordenan por volumen de consumo decreciente (orchestrator y cada subagent), con hasta 5
@@ -267,7 +267,7 @@ gentle-ai-verify  10.3M tokens · 99% context re-sent
 La vista de sugerencias evalúa patrones de uso reales según cuatro reglas de optimización:
 - **Large context**: sesiones que reenvían >=120k tokens de context durante >=5 turnos. Proyecta ahorro al compactar o segmentar.
 - **Provider switch**: sesiones con alternancia frecuente de provider/modelo que provocaron invalidación masiva de cache.
-- **Expensive role**: roles de subagent con salidas breves en modelos de alto costo cuando existe un modelo alternativo probado con costo inferior a la mitad. Pulsar `c` o `enter` genera automáticamente un nuevo profile en `profiles.json` (ej. `mu-privado-opt-gentle-ai-verify`) tras respaldar el archivo (`profiles.json.bak-YYYYMMDDHHMMSS`).
+- **Expensive role**: roles de subagent con salidas breves en modelos de alto costo cuando existe un modelo alternativo probado con costo inferior a la mitad. Pulsar `c` o `enter` genera automáticamente un nuevo profile en `profiles.json` (ej. `balanced-opt-gentle-ai-verify`) tras respaldar el archivo (`profiles.json.bak-YYYYMMDDHHMMSS`).
 - **Idle quota**: ventanas de subscription con proyección de >=50% sin utilizar al momento del reset mientras otra ventana paralela se satura.
 
 Cada sugerencia identifica la sesión por su alias, muestra una línea explicativa `why:`, y al seleccionarse

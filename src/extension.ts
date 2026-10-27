@@ -807,7 +807,7 @@ export default function aiBalancer(pi: ExtensionAPI) {
 		const read = readProfiles();
 		if ("error" in read) return `could not use profiles.json: ${read.error}`;
 		const store = read.store;
-		const base = store.active || Object.keys(store.profiles)[0] || "mu-privado";
+		const base = store.active || Object.keys(store.profiles)[0] || "default";
 		const newProfileName = `${base}-opt-${selected.target.role || "role"}`;
 		// Suggestions name a bare model id; the profile needs provider/model, which Pi's registry settles when it is unique.
 		const cheaper = selected.target.cheaperModel && qualifyModel(selected.target.cheaperModel, ctx.modelRegistry.getAll());

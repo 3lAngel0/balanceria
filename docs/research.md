@@ -7,7 +7,7 @@ Collected 2026-10-16 while auditing the Gentle Shell model routing.
 - Gentle Shell 4.3.0 on Pi 1.2.0, isolated home `~/.gentle-shell/agent`.
 - Providers in use: `antigravity` (npm:@estebanforge/pi-antigravity-bridge 1.8.4, wraps the `agy` CLI)
   and `claude-bridge` (npm:pi-claude-bridge). Usage display: npm:@danielgap/pi-claude-usage.
-- Profiles store: `~/.gentle-shell/config/gentle-ai/profiles.json` (active `mu-privado`).
+- Profiles store: `~/.gentle-shell/config/gentle-ai/profiles.json` (active `balanced`).
   Orchestrator defaults: `~/.gentle-shell/agent/settings.json`.
 
 ## Antigravity quota
