@@ -30,6 +30,12 @@
   <a href="README.es.md"><b>🇪🇸 Versión en Español</b></a>
 </p>
 
+<p align="center">
+  <a href="https://github.com/Gentleman-Programming/gentle-shell">
+    <img src="assets/powered-by-gentle-shell.png" alt="Powered by Gentle Shell" width="100%">
+  </a>
+</p>
+
 ---
 
 `ai-balancer` sits between your agent roles and AI providers. Instead of binding subagents directly to individual models or single API keys, you point them at **virtual pools** (e.g., `pool/orchestrator`, `pool/claude-sonnet-5-5`). Before every request, a deterministic router picks the optimal provider candidate based on real-time quota state, active agent role, session context size, and customizable rule pipelines—**spending zero LLM tokens and adding no latency**.
