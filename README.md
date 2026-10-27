@@ -100,8 +100,14 @@ flowchart TD
 
 ## 🖥️ Interactive TUI & Web Dashboard
 
+### Terminal Heads-Up Display (`/hud`)
 <p align="center">
-  <img src="assets/hud-preview.png" alt="ai-balancer Terminal HUD Display" width="100%">
+  <img src="assets/hud-terminal.svg" alt="ai-balancer Terminal HUD Display" width="100%">
+</p>
+
+### Live Web Control Center (`/balancer serve`)
+<p align="center">
+  <img src="assets/web-dashboard.png" alt="ai-balancer Web Dashboard" width="100%">
 </p>
 
 Monitor live token throughput, model health, quota windows, and real-time routing decisions right inside your terminal or in the browser:
