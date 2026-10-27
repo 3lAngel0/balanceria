@@ -30,6 +30,12 @@
   <a href="README.md"><b>🇬🇧 English Version</b></a>
 </p>
 
+<p align="center">
+  <a href="https://github.com/Gentleman-Programming/gentle-shell">
+    <img src="assets/powered-by-gentle-shell.png" alt="Powered by Gentle Shell" width="100%">
+  </a>
+</p>
+
 ---
 
 `ai-balancer` se ubica entre los roles de sus agentes y los proveedores de IA. En lugar de vincular los subagentes directamente a modelos o suscripciones individuales, se les asignan **pools virtuales** (por ejemplo, `pool/orchestrator`, `pool/claude-sonnet-5-5`). Antes de cada petición, un enrutador determinista selecciona el candidato óptimo basándose en el estado de cuota en tiempo real, el rol activo del agente, el tamaño del contexto de la sesión y un pipeline de reglas personalizable, **consumiendo cero tokens de LLM y sin añadir latencia**.
@@ -94,8 +100,14 @@ flowchart TD
 
 ## 🖥️ Centro de control interactivo en TUI y Web
 
+### Heads-Up Display en Terminal (`/hud`)
 <p align="center">
-  <img src="assets/hud-preview.png" alt="Heads-Up Display de ai-balancer en terminal" width="100%">
+  <img src="assets/hud-terminal.svg" alt="ai-balancer Terminal HUD Display" width="100%">
+</p>
+
+### Centro de Control Web en Vivo (`/balancer serve`)
+<p align="center">
+  <img src="assets/web-dashboard.png" alt="ai-balancer Web Dashboard" width="100%">
 </p>
 
 Supervise en tiempo real el consumo de tokens, el estado de las cuotas por proveedor y las decisiones del enrutador directamente en su terminal o navegador:

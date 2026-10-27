@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="840" height="610" viewBox="0 0 840 610">
+  <defs>
+    <filter id="shadow" x="-5%" y="-5%" width="110%" height="110%">
+      <feDropShadow dx="0" dy="12" stdDeviation="16" flood-color="#000" flood-opacity="0.45"/>
+    </filter>
+  </defs>
+
+  <!-- Window Container with drop shadow -->
+  <rect x="8" y="8" width="824" height="594" rx="12" fill="#0b0f19" stroke="#1e293b" stroke-width="1.5" filter="url(#shadow)"/>
+
+  <!-- Terminal Window Bar -->
+  <path d="M 8 20 A 12 12 0 0 1 20 8 L 820 8 A 12 12 0 0 1 832 20 L 832 42 L 8 42 Z" fill="#111827"/>
+  <line x1="8" y1="42" x2="832" y2="42" stroke="#1e293b" stroke-width="1"/>
+
+  <!-- Mac Window Controls -->
+  <circle cx="26" cy="25" r="5.5" fill="#f43f5e"/>
+  <circle cx="44" cy="25" r="5.5" fill="#fbbf24"/>
+  <circle cx="62" cy="25" r="5.5" fill="#10b981"/>
+
+  <!-- Title -->
+  <text x="420" y="29" fill="#94a3b8" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif" font-size="12" font-weight="500" text-anchor="middle">ai-balancer — Heads-Up Display (/hud)</text>
+
+  <!-- Terminal Content Lines -->
+  <g xml:space="preserve">
+    <text x="24" y="86" font-family="ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace" font-size="13"><tspan fill="#38bdf8">[1 subscriptions]</tspan><tspan fill="#64748b">2 apis</tspan><tspan fill="#64748b">3 sessions</tspan><tspan fill="#64748b">4 suggestions</tspan></text>
+    <text x="24" y="106" font-family="ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace" font-size="13"></text>
+    <text x="24" y="126" font-family="ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace" font-size="13"><tspan fill="#38bdf8">Subscriptions · bridges and plugins, window use and pace</tspan></text>
+    <text x="24" y="146" font-family="ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace" font-size="13"><tspan fill="#34d399">●</tspan><tspan fill="#fbbf24">●</tspan><tspan fill="#f87171">●</tspan></text>
+    <text x="24" y="166" font-family="ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace" font-size="13"><tspan fill="#64748b">chart: █ used so far · • current pace · ▲ full · ┴ now · ┤ reset · · no reading</tspan></text>
+    <text x="24" y="186" font-family="ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace" font-size="13"></text>
+    <text x="24" y="206" font-family="ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace" font-size="13"><tspan fill="#38bdf8">Claude Pro / Max (claude-bridge)</tspan></text>
+    <text x="24" y="226" font-family="ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace" font-size="13"></text>
+    <text x="24" y="246" font-family="ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace" font-size="13"><tspan fill="#34d399">▰▰▰▰▰▰▰▰▱▱▱▱▱▱▱▱▱▱▱▱</tspan><tspan fill="#34d399"> 38%</tspan><tspan fill="#64748b">resets 17:45 (in 3h 15m)</tspan></text>
+    <text x="24" y="266" font-family="ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace" font-size="13"><tspan fill="#34d399">after the reset</tspan></text>
+    <text x="24" y="286" font-family="ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace" font-size="13"><tspan fill="#64748b">chart after the next reading</tspan></text>
+    <text x="24" y="306" font-family="ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace" font-size="13"><tspan fill="#34d399">▰▰▰▰▰▰▰▰▰▰▰▰▱▱▱▱▱▱▱▱</tspan><tspan fill="#34d399"> 62%</tspan><tspan fill="#64748b">resets 10-29 14:30 (in 2d 0h)</tspan></text>
+    <text x="24" y="326" font-family="ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace" font-size="13"><tspan fill="#34d399">after the reset</tspan></text>
+    <text x="24" y="346" font-family="ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace" font-size="13"><tspan fill="#64748b">chart after the next reading</tspan></text>
+    <text x="24" y="366" font-family="ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace" font-size="13"></text>
+    <text x="24" y="386" font-family="ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace" font-size="13"><tspan fill="#38bdf8">Google AI Pro (agy)</tspan></text>
+    <text x="24" y="406" font-family="ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace" font-size="13"></text>
+    <text x="24" y="426" font-family="ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace" font-size="13"><tspan fill="#f87171">▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▱▱▱▱▱</tspan><tspan fill="#f87171"> 74%</tspan><tspan fill="#64748b">resets 10-29 21:30 (in 2d 7h)</tspan></text>
+    <text x="24" y="446" font-family="ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace" font-size="13"><tspan fill="#f87171">before the reset ⚠</tspan></text>
+    <text x="24" y="466" font-family="ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace" font-size="13"><tspan fill="#64748b">chart after the next reading</tspan></text>
+    <text x="24" y="486" font-family="ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace" font-size="13"><tspan fill="#34d399">▰▰▰▰▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱</tspan><tspan fill="#34d399"> 18%</tspan><tspan fill="#64748b">resets 16:30 (in 2h 0m)</tspan></text>
+    <text x="24" y="506" font-family="ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace" font-size="13"><tspan fill="#64748b">no pace yet: needs two reads 5 minutes apart in the last hour</tspan></text>
+    <text x="24" y="526" font-family="ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace" font-size="13"><tspan fill="#64748b">chart after the next reading</tspan></text>
+    <text x="24" y="546" font-family="ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace" font-size="13"><tspan fill="#34d399">▰▰▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱</tspan><tspan fill="#34d399"> 12%</tspan><tspan fill="#64748b">resets 10-31 08:30 (in 3d 18h)</tspan></text>
+    <text x="24" y="566" font-family="ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace" font-size="13"><tspan fill="#64748b">no pace yet: needs two reads 5 minutes apart in the last hour</tspan></text>
+    <text x="24" y="586" font-family="ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace" font-size="13"><tspan fill="#64748b">chart after the next reading</tspan></text>
+  </g>
+</svg>
