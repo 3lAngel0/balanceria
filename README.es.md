@@ -1,8 +1,4 @@
 <p align="center">
-  <img src="assets/banner.png" alt="Banner de ai-balancer" width="100%">
-</p>
-
-<p align="center">
   <img src="assets/logo.png" alt="Logo de ai-balancer" width="120" height="120">
 </p>
 
