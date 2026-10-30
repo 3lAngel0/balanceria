@@ -6,6 +6,8 @@ import { fileURLToPath } from "node:url";
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Key, matchesKey, SelectList, truncateToWidth, visibleWidth, type TuiMouseEvent, type TuiMouseEventResult } from "@earendil-works/pi-tui";
 import { CONTENT_X, emphasize, hitTest, layoutButtons, sameTarget, tabHitAreas, wheelOffset, type ButtonCell, type HitLayout, type MouseTarget } from "./control-center-mouse.ts";
+import { applyStepper, initStepper, type StepperCurrent } from "./setup-stepper.ts";
+import { initScreen, renderStepper, stepperInput, type StepperEffect, type StepperEvent } from "./setup-stepper-view.ts";
 import { BALANCER_MENU, balancerMenu, glossaryText, resolveBalancerArgs } from "./balancer-menu.ts";
 import { initLang, getLang, setLang, saveLangSetting, t } from "./i18n/index.ts";
 import { detectFirewall, privateIPv4Networks, readAutostart, readTls, runLanSetup, writeAutostart, writeTls, type Runner } from "./lan-setup.ts";
@@ -53,7 +55,7 @@ import { failoverAlternative, routeWithTrace } from "./router.ts";
 import { fitWindows, formatSwitchCostReport, routeSwitchCost, type WindowFit } from "./switch-cost.ts";
 import { DecisionChanges, routeDecision } from "./route-log.ts";
 import { CircuitBreaker } from "./circuit-breaker.ts";
-import { runSetupWizard, detectSystemProviders, writeConfigSafely, toggleCandidateInList, moveCandidateInList, type DetectedProvider, type PoolConfig } from "./setup.ts";
+import { runSetupWizard, detectSystemProviders, generateRecommendedConfig, saveProfileRoles, writeConfigSafely, toggleCandidateInList, moveCandidateInList, type DetectedProvider, type PoolConfig } from "./setup.ts";
 import { buildSessionDetail, buildWebReport, readSessionCwd, snapshotSessionIds, type WebReport } from "./web-data.ts";
 import { webSnapshotHtml } from "./web-page.ts";
 import { bindWebHandlers, formatServeStart, isValidSessionId, parseServeArgs, runningWebServer, startServing, stopServing, type WebHandlers } from "./web-serve.ts";
@@ -1076,11 +1078,7 @@ export default function aiBalancer(pi: ExtensionAPI) {
 						if (input === "w") {
 							done();
 							setTimeout(() => {
-								void runSetupWizard(ctx, ROOT, {
-									hasModel: (provider, model) => Boolean(ctx.modelRegistry.find(provider, model)),
-									agyBin: AGY_BIN,
-									onOpenControlCenter: () => openControlCenter(ctx),
-								});
+								void runSetup(ctx);
 							}, 50);
 							return;
 						}
@@ -1508,6 +1506,108 @@ export default function aiBalancer(pi: ExtensionAPI) {
 		await showControlCenter(ctx, initialTab, false);
 	};
 
+	const runClassicSetup = (ctx: ExtensionContext): Promise<boolean> =>
+		runSetupWizard(ctx, ROOT, {
+			hasModel: (provider, model) => Boolean(ctx.modelRegistry.find(provider, model)),
+			agyBin: AGY_BIN,
+			onOpenControlCenter: () => openControlCenter(ctx),
+		});
+
+	/** `/balancer setup`: the stepper overlay, or the classic prompts when there is no UI or no custom overlay. */
+	const runSetup = async (ctx: ExtensionContext): Promise<void> => {
+		if (!ctx.hasUI || typeof ctx.ui?.custom !== "function") {
+			await runClassicSetup(ctx);
+			return;
+		}
+		await openSetupStepper(ctx);
+	};
+
+	/** Pi hands overlays raw input in either terminal protocol; the view works on the legacy sequences. */
+	const canonicalKey = (data: string): string => {
+		if (matchesKey(data, Key.escape)) return "\x1b";
+		if (matchesKey(data, Key.enter)) return "\r";
+		if (matchesKey(data, Key.space)) return " ";
+		if (matchesKey(data, "shift+tab")) return "\x1b[Z";
+		if (matchesKey(data, Key.tab)) return "\t";
+		for (const [name, seq] of [["up", "\x1b[A"], ["down", "\x1b[B"], ["right", "\x1b[C"], ["left", "\x1b[D"]] as const) if (matchesKey(data, name)) return seq;
+		return data;
+	};
+
+	const openSetupStepper = async (ctx: ExtensionContext): Promise<void> => {
+		const detected = detectSystemProviders();
+		if (!detected.some(p => p.detected && p.kind === "subscription")) {
+			ctx.ui.notify(`ai-balancer: ${t("setup.stepper.noProviders")}`, "warning");
+			return;
+		}
+		const readJson = (file: string): unknown => {
+			try {
+				return JSON.parse(readFileSync(join(ROOT, file), "utf8"));
+			} catch {
+				return null;
+			}
+		};
+		const store = loadProfilesStore();
+		const current: StepperCurrent = { pools: readJson("pools.json"), integrations: readJson("integrations.json"), profiles: store };
+		const recommended = generateRecommendedConfig(detected.filter(p => p.detected), { hasModel: (provider, model) => Boolean(ctx.modelRegistry.find(provider, model)) }).pools;
+		let screen = initScreen(initStepper(detected, recommended, store?.profiles?.[store.active ?? ""] ?? {}), current);
+
+		const effect = await ctx.ui.custom<StepperEffect>(
+			(tui, theme, _keybindings, done) => {
+				const bodyRows = () => Math.max(8, ((tui as { terminal?: { rows?: number } }).terminal?.rows ?? 40) - 14);
+				const paint = (tone: "accent" | "dim" | "warn" | "ok", text: string) => theme.fg(tone === "dim" ? "muted" : tone, text);
+				const apply = (event: StepperEvent) => {
+					const result = stepperInput(screen, event);
+					const changed = result.state !== screen;
+					screen = result.state;
+					if (result.effect !== "none") done(result.effect);
+					else if (changed) tui.requestRender();
+				};
+				return {
+					render(width: number): string[] {
+						const inner = Math.max(20, width - 4);
+						const view = renderStepper(screen, { width, bodyRows: bodyRows(), paint });
+						screen = { ...screen, hits: view.hits, offset: view.offset, follow: false };
+						const border = (text: string) => theme.fg("border", text);
+						const row = (text: string) => `${border("│")} ${truncateToWidth(text, inner, "…", true)} ${border("│")}`;
+						return [border(`╭${"─".repeat(inner + 2)}╮`), ...view.lines.map(row), border(`╰${"─".repeat(inner + 2)}╯`)];
+					},
+					handleInput(data: string) {
+						apply({ type: "key", data: canonicalKey(data) });
+					},
+					// Pointer events only reach overlays under TuiAltScreen; in the main screen this is never called and the keys still work.
+					handleMouse(event: TuiMouseEvent): TuiMouseEventResult | undefined {
+						if (event.type === "wheel") apply({ type: "mouse", kind: "wheel", x: event.x, y: event.y, wheelDelta: event.wheelDelta });
+						else if (event.type === "move" || (event.type === "click" && event.button === "left")) apply({ type: "mouse", kind: event.type, x: event.x, y: event.y });
+						else return undefined;
+						// `apply` requests the render itself, and only when something changed.
+						return { handled: true, render: false };
+					},
+					invalidate() {},
+				};
+			},
+			{ overlay: true, overlayOptions: { width: "86%", minWidth: 72, anchor: "center" } },
+		);
+
+		if (effect !== "save") {
+			ctx.ui.notify(`ai-balancer: ${t("setup.stepper.cancelled")}`, "info");
+			return;
+		}
+		const result = applyStepper(screen.stepper, {
+			root: ROOT,
+			current,
+			profilesPath: DEFAULT_PROFILES_PATH,
+			writeConfig: writeConfigSafely,
+			writeProfiles: (name, roles) => saveProfileRoles(DEFAULT_PROFILES_PATH, name, roles, (provider, model) => Boolean(ctx.modelRegistry.find(provider, model))),
+		});
+		if (!result.ok) {
+			ctx.ui.notify(`ai-balancer: ${t("setup.stepper.saveFailed", { error: result.error ?? "" })}`, "error");
+			return;
+		}
+		if (result.profilesError) ctx.ui.notify(`ai-balancer: ${t("setup.stepper.profilesFailed", { error: result.profilesError })}`, "warning");
+		ctx.ui.notify(`ai-balancer: ${t("setup.stepper.saved", { files: result.written.join(", ") })}${result.backups.length ? ` (backups: ${result.backups.join(", ")})` : ""}`, "info");
+		refreshStatus(ctx);
+	};
+
 	const togglePanel = (ctx: ExtensionContext) => {
 		if (!ctx.hasUI) return;
 		if (closePanel) {
@@ -1816,11 +1916,11 @@ export default function aiBalancer(pi: ExtensionAPI) {
 				return;
 			}
 			if (command === "setup") {
-				await runSetupWizard(ctx, ROOT, {
-					hasModel: (provider, model) => Boolean(ctx.modelRegistry.find(provider, model)),
-					agyBin: AGY_BIN,
-					onOpenControlCenter: () => openControlCenter(ctx),
-				});
+				await runSetup(ctx);
+				return;
+			}
+			if (command === "setup classic") {
+				await runClassicSetup(ctx);
 				return;
 			}
 			if (command === "report") {
@@ -2037,7 +2137,7 @@ export default function aiBalancer(pi: ExtensionAPI) {
 	};
 
 	pi.registerCommand("balancer", {
-		description: "ai-balancer: `/balancer` opens the Control Center (`/balancer roles|pools|advisor` jumps to a tab, `/balancer menu` lists every action); or run one directly: `/balancer panel|usage|refresh|setup|report|simulate|switch-cost|loans|lab|permissions`, `/balancer serve [lan] [port|stop|status]`, `/balancer open <id>`, `/balancer lang [es|en|auto]`",
+		description: "ai-balancer: `/balancer` opens the Control Center (`/balancer roles|pools|advisor` jumps to a tab, `/balancer menu` lists every action); or run one directly: `/balancer panel|usage|refresh|setup [classic]|report|simulate|switch-cost|loans|lab|permissions`, `/balancer serve [lan] [port|stop|status]`, `/balancer open <id>`, `/balancer lang [es|en|auto]`",
 		handler: async (args, ctx) => {
 			const resolved = resolveBalancerArgs(args);
 			if (resolved.kind === "unknown") {

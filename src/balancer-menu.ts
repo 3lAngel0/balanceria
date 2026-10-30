@@ -12,6 +12,7 @@ export function balancerMenu(): SelectItem[] {
 		{ value: "usage", label: t("menu.usage.label"), description: t("menu.usage.desc") },
 		{ value: "refresh", label: t("menu.refresh.label"), description: t("menu.refresh.desc") },
 		{ value: "setup", label: t("menu.setup.label"), description: t("menu.setup.desc") },
+		{ value: "setup classic", label: t("menu.setupClassic.label"), description: t("menu.setupClassic.desc") },
 		{ value: "report", label: t("menu.report.label"), description: t("menu.report.desc") },
 		{ value: "simulate", label: t("menu.simulate.label"), description: t("menu.simulate.desc") },
 		{ value: "switch-cost", label: t("menu.switchCost.label"), description: t("menu.switchCost.desc") },
@@ -67,7 +68,7 @@ export type BalancerArgs =
 
 const TAB_COMMANDS: readonly ControlCenterTab[] = ["overview", "roles", "pools", "advisor"];
 
-const SIMPLE = new Set(["panel", "usage", "refresh", "setup", "report", "simulate", "switch-cost", "loans", "help"]);
+const SIMPLE = new Set(["panel", "usage", "refresh", "setup", "setup classic", "report", "simulate", "switch-cost", "loans", "help"]);
 
 export function resolveBalancerArgs(args: string): BalancerArgs {
 	const command = args.trim();

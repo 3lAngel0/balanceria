@@ -481,7 +481,9 @@ gentle-shell install <path-to-repo>
 ```
 
 ### Interactive Setup Hub (`/balancer setup`)
-Running `/balancer setup` starts the wizard:
+Running `/balancer setup` opens a step-by-step overlay: **Providers → Strategy → Roles → Confirm**. Each step shows a short description; the Confirm step shows a diff of what Save will write to `pools.json`, `integrations.json` and `profiles.json`. Nothing is written until **Save**; **Discard** (or `Esc`, which asks first when you have edits) leaves every file untouched. Keys: `←/→`/`h`/`l` or `Tab`/`Shift+Tab` change step, `↑/↓`/`j`/`k` move between rows, `Space`/`Enter` toggle or cycle (provider on/off, candidate on/off, pool strategy, role model), `u`/`d` reorder a candidate, `t` cycles a role's thinking level, `s` saves on the Confirm step. Mouse (click breadcrumb steps, rows and buttons; wheel scrolls) works only when Pi runs fullscreen (`TuiAltScreen`); otherwise the overlay is keyboard-only. Without a UI, or if overlays are unavailable, `/balancer setup` falls back to the classic wizard. The AI role advisor is only in the classic wizard.
+
+`/balancer setup classic` runs the previous prompt-based wizard:
 1. **Auto-Detection**: Probes installed CLI tools (`agy`, `claude`, `opencode`, `ollama`), NPM packages, and environment keys.
 2. **Strategy Selection**: Choose `hybrid` (recommended) or `waterfall`.
 3. **Profile Resolution**:
@@ -521,7 +523,8 @@ Operational overlay showing real-time subscription burn velocity (`+X%/h`), rese
 | `/balancer` | *(none)* | Opens the Control Center overlay; `roles`, `pools`, `advisor` jump to a tab, `menu` lists every action. Mouse works under the alternate screen only. |
 | `/balancer panel` | *(none)* | Toggles sidebar overlay and Control Center (`Ctrl+Alt+B`). |
 | `/balancer usage` | *(none)* | Opens 5-tab usage and quota console (`Ctrl+Alt+U`). |
-| `/balancer setup` | *(none)* | Launches interactive setup wizard. |
+| `/balancer setup` | *(none)* | Opens the step-by-step setup overlay. |
+| `/balancer setup classic` | *(none)* | Runs the previous prompt-based setup wizard (includes the AI role advisor). |
 | `/balancer refresh` | *(none)* | Triggers immediate poll of Antigravity usage. |
 | `/balancer report` | *(none)* | Generates standalone offline HTML report (`report.html`). |
 | `/balancer serve` | `[port]` | Starts local web dashboard (default port: 8787). |
