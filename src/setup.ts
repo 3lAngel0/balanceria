@@ -727,6 +727,28 @@ function usableCandidatesForProviders(
 	return refs;
 }
 
+/** Saves `roles` as profile `name` (made active) in profiles.json, creating the file when it does not exist. */
+export function saveProfileRoles(
+	profilesPath: string,
+	name: string,
+	roles: ProfileConfig,
+	hasModel: (provider: string, model: string) => boolean,
+): void {
+	const existingStore = loadProfilesStore(profilesPath);
+	if (existingStore) {
+		existingStore.profiles[name] = roles;
+		existingStore.active = name;
+		const read = readProfiles(profilesPath);
+		saveProfilesStore(existingStore, read, { path: profilesPath, hasModel });
+	} else {
+		writeFileSync(
+			profilesPath,
+			`${JSON.stringify({ kind: PROFILES_KIND, version: PROFILES_VERSION, active: name, profiles: { [name]: roles } }, null, 2)}\n`,
+			{ encoding: "utf8", mode: 0o600 },
+		);
+	}
+}
+
 export async function runSetupWizard(
 	ctx: { ui: WizardUI },
 	root: string,
@@ -1204,19 +1226,7 @@ export async function runSetupWizard(
 	const res = writeConfigSafely(root, { integrations: recommended.integrations, pools: recommended.pools });
 	if (rolesModified) {
 		try {
-			const existingStore = loadProfilesStore(profilesPath);
-			if (existingStore) {
-				existingStore.profiles[activeProfileName] = draftRoles;
-				existingStore.active = activeProfileName;
-				const read = readProfiles(profilesPath);
-				saveProfilesStore(existingStore, read, { path: profilesPath, hasModel: options?.hasModel ?? (() => true) });
-			} else {
-				writeFileSync(
-					profilesPath,
-					`${JSON.stringify({ kind: PROFILES_KIND, version: PROFILES_VERSION, active: activeProfileName, profiles: { [activeProfileName]: draftRoles } }, null, 2)}\n`,
-					{ encoding: "utf8", mode: 0o600 },
-				);
-			}
+			saveProfileRoles(profilesPath, activeProfileName, draftRoles, options?.hasModel ?? (() => true));
 		} catch (err) {
 			ctx.ui.notify(`Warning: failed to save profiles.json: ${err instanceof Error ? err.message : String(err)}`, "warning");
 		}
