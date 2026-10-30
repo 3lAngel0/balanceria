@@ -4,7 +4,7 @@ Collected 2026-10-16 while auditing the Gentle Shell model routing.
 
 ## Environment
 
-- Gentle Shell 4.3.0 on Pi 1.2.0, isolated home `~/.gentle-shell/agent`.
+- Gentle Shell 4.5.1 on Pi 1.4.0, isolated home `~/.gentle-shell/agent`.
 - Providers in use: `antigravity` (npm:@estebanforge/pi-antigravity-bridge 1.8.4, wraps the `agy` CLI)
   and `claude-bridge` (npm:pi-claude-bridge). Usage display: npm:@danielgap/pi-claude-usage.
 - Profiles store: `~/.gentle-shell/config/gentle-ai/profiles.json` (active `balanced`).
@@ -65,4 +65,4 @@ so the 5h and weekly windows appear after the first turn.
 ## OpenCode Go (future, S6)
 
 $10/month (Go) or $40/month (Go Plus); open models (Kimi K3, GLM-5.3, DeepSeek V4 Pro, Qwen3.8,
-MiniMax M3, MiMo, ...). Pi 1.2 has a native `opencode-go` provider (`OPENCODE_API_KEY`).
+MiniMax M3, MiMo, ...). Pi 1.4 has a native `opencode-go` provider (`OPENCODE_API_KEY`).

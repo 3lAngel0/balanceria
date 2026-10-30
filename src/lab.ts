@@ -185,7 +185,7 @@ function diffProfiles(current: ProfilesStore, draft: ProfilesStore): { changes: 
 			if (role === ORCHESTRATOR_ROLE && JSON.stringify(before) !== JSON.stringify(after)) orchestratorChanged = true;
 		}
 		if (orchestratorChanged) {
-			notes.push(`profile ${name}: the orchestrator entry reaches Pi's settings.json only when the profile is selected in /gentle:profiles; the lab does not simulate it`);
+			notes.push(`profile ${name}: the orchestrator entry reaches Pi's settings.json only when the profile is used in this session from /gentle:profiles (Use in this session); the lab does not simulate it`);
 		}
 	}
 	return { changes, notes };
@@ -332,7 +332,7 @@ export function formatApplyConfirm(diff: LabDiff): string {
 		"1. Silent quality loss when a role moves to a cheaper model.",
 		"2. Global effect: every new session of every project.",
 		"3. pools.json takes effect from the next Pi start or /reload; profiles.json from new sessions only (open sessions keep their frozen profile).",
-		"4. The orchestrator entry only takes effect when the profile is selected in /gentle:profiles.",
+		"4. The orchestrator entry only takes effect when the profile is used in this session from /gentle:profiles (Use in this session).",
 		"5. A backup of each file is kept and /balancer lab undo restores it.",
 	);
 	return lines.join("\n");
