@@ -518,7 +518,7 @@ Superposición operativa en terminal que muestra la velocidad de consumo de susc
 
 | Comando | Argumentos | Descripción |
 |---|---|---|
-| `/balancer` | *(ninguno)* | Abre el menú interactivo de comandos. |
+| `/balancer` | *(ninguno)* | Abre el Centro de control; `roles`, `pools`, `advisor` saltan a una pestaña, `menu` lista todas las acciones. El ratón solo funciona en pantalla alterna. |
 | `/balancer panel` | *(ninguno)* | Muestra u oculta el panel lateral y el Control Center (`Ctrl+Alt+B`). |
 | `/balancer usage` | *(ninguno)* | Abre la consola de uso y cuotas en 5 pestañas (`Ctrl+Alt+U`). |
 | `/balancer setup` | *(ninguno)* | Inicia el asistente interactivo de configuración. |

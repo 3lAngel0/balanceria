@@ -187,7 +187,7 @@ Select a pool model directly in chat via `/model pool/claude-sonnet-5-5` or conf
 
 | Command / Shortcut | Description |
 |---|---|
-| `/balancer` | Interactive command menu with shortcuts and explanations. |
+| `/balancer` | Opens the Control Center overlay (click or use the keys). `/balancer roles\|pools\|advisor` jumps to a tab; `/balancer menu` (or `/` inside the overlay) lists every action. |
 | `/balancer panel` or `Ctrl+Alt+B` | Toggle live sidebar overlay and 4-tab Control Center. |
 | `/balancer usage` or `Ctrl+Alt+U` | Open full 5-tab Usage Console (Now, Quotas, Days, Sessions, HUD). |
 | `/balancer setup` | Launch interactive configuration wizard and provider detector. |

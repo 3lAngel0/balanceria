@@ -1,3 +1,4 @@
+import { emphasize, parseHintButtons, type HintButton, type MouseTarget } from "./control-center-mouse.ts";
 import type { FoldedEvents } from "./events.ts";
 import type { CircuitBreakerStatus } from "./circuit-breaker.ts";
 import type { ProfileConfig } from "./profiles.ts";
@@ -199,11 +200,26 @@ export interface ControlCenterRenderInput {
 	poolEditOpen?: boolean;
 	poolCandidateOptions?: readonly string[];
 	poolCandidateCursor?: number;
+	/** Pointer feedback: the tab under the pointer and the one clicked in this frame. */
+	hover?: MouseTarget;
+	pressed?: MouseTarget;
+	/** Filled with the content line of every selectable row (roles, pools, advisor), in row order. */
+	rowLines?: number[];
 }
 
 function categoryBadge(cat: RoleCategory): string {
 	// Fixed width keeps the columns aligned whatever the language.
 	return pad(`[${t(`setup.category.${cat}`)}]`, 14);
+}
+
+/** The header cells, shared by the renderer and the mouse hit areas. */
+export function controlCenterTabLabels(): { tab: ControlCenterTab; label: string }[] {
+	return CONTROL_CENTER_TABS.map((tab, index) => ({ tab, label: `${index + 1} ${t(`setup.tab.${tab}`)}` }));
+}
+
+/** The footer buttons: the tab's hints plus the glossary and the action list. */
+export function controlCenterButtons(tab: ControlCenterTab): HintButton[] {
+	return parseHintButtons([controlCenterHints(tab), t("setup.hints.help"), t("setup.hints.actions")].join(" · "));
 }
 
 export function controlCenterHints(tab: ControlCenterTab): string {
@@ -220,12 +236,11 @@ export function controlCenterHints(tab: ControlCenterTab): string {
 }
 
 export function renderControlCenter(input: ControlCenterRenderInput): string[] {
-	const tabHeaders = [
-		...CONTROL_CENTER_TABS.map((tab, index) => {
-			const label = `${index + 1} ${t(`setup.tab.${tab}`)}`;
-			return input.tab === tab ? tone("accent", `[${label}]`) : ` ${label} `;
-		}),
-	].join("  ");
+	const feedback = (tab: ControlCenterTab) =>
+		input.pressed?.kind === "tab" && input.pressed.tab === tab ? "pressed" : input.hover?.kind === "tab" && input.hover.tab === tab ? "hover" : undefined;
+	const tabHeaders = controlCenterTabLabels()
+		.map(({ tab, label }) => emphasize(input.tab === tab ? tone("accent", `[${label}]`) : ` ${label} `, feedback(tab)))
+		.join("  ");
 
 	const lines: string[] = [tabHeaders, ""];
 
@@ -290,6 +305,7 @@ export function renderControlCenter(input: ControlCenterRenderInput): string[] {
 		);
 		const cur = Math.max(0, Math.min(rows.length - 1, input.cursor ?? 0));
 		rows.forEach((row, idx) => {
+			input.rowLines?.push(lines.length);
 			const prefix = idx === cur ? "▸ " : "  ";
 			const line = `${prefix}${pad(row.role, 20)} ${categoryBadge(row.category)}  ${t("setup.cc.model")}: ${pad(displayModel(row.configuredModel), 30)} ${t("setup.cc.thinking")}: ${displayThinking(row.thinking)}`;
 			lines.push(idx === cur ? tone("accent", line) : line);
@@ -324,6 +340,7 @@ export function renderControlCenter(input: ControlCenterRenderInput): string[] {
 			lines.push(tone("dim", `  ${t("setup.cc.noPoolsWizard")}`));
 		} else {
 			input.pools.forEach((pool, idx) => {
+				input.rowLines?.push(lines.length);
 				const prefix = idx === pCur ? "▸ " : "  ";
 				const head = `${prefix}pool/${pool.id}  [${pool.strategy ?? "hybrid"}] — ${pool.name}`;
 				lines.push(idx === pCur ? tone("accent", head) : head);
@@ -376,6 +393,7 @@ export function renderControlCenter(input: ControlCenterRenderInput): string[] {
 	);
 	const rCur = Math.max(0, Math.min(input.advisor.recommendations.length - 1, input.cursor ?? 0));
 	input.advisor.recommendations.forEach((rec, idx) => {
+		input.rowLines?.push(lines.length);
 		const prefix = idx === rCur ? "▸ " : "  ";
 		const currentModel = input.roles?.[rec.role]?.model ?? UNASSIGNED;
 		const changed = currentModel !== rec.recommendedModel ? `${displayModel(currentModel)} → ${rec.recommendedModel}` : `${rec.recommendedModel} (${t("setup.tag.matches")})`;
