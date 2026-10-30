@@ -190,7 +190,7 @@ test("diffLab lists every profile change, and notes the orchestrator entry", () 
 		"profile main: review-risk added pool/opus",
 	]);
 	assert.deepEqual(diff.notes, [
-		"profile main: the orchestrator entry reaches Pi's settings.json only when the profile is selected in /gentle:profiles; the lab does not simulate it",
+		"profile main: the orchestrator entry reaches Pi's settings.json only when the profile is used in this session from /gentle:profiles (Use in this session); the lab does not simulate it",
 	]);
 	const removed = structuredClone(PROFILES) as { profiles: { main: Record<string, unknown> } };
 	delete removed.profiles.main["gentle-ai-verify"];

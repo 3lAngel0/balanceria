@@ -1,6 +1,6 @@
 {
   "name": "ai-balancer",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "license": "Apache-2.0",
   "description": "Gentle Shell / Pi extension that spends one subscription before failing over to the next, with a live usage side panel.",
