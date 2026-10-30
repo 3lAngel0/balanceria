@@ -485,11 +485,11 @@ Running `/balancer setup` starts the wizard:
 1. **Auto-Detection**: Probes installed CLI tools (`agy`, `claude`, `opencode`, `ollama`), NPM packages, and environment keys.
 2. **Strategy Selection**: Choose `hybrid` (recommended) or `waterfall`.
 3. **Profile Resolution**:
-   - **Active profile detected**: Prompts `"Tenés un perfil activo: '<name>'. ¿Querés armar uno personalizado con el balanceador?"`, allowing you to keep the existing profile or generate a fresh `balanceador_<id>` profile.
-   - **No active profile**: Prompts `"profiles.json: No active profile found. ¿Creamos un perfil para vos?"` to bootstrap a `balanceador_<id>` profile.
+   - **Active profile detected**: Prompts `"You have an active profile: '<name>'. Do you want to build a custom one with the balancer?"`, allowing you to keep the existing profile or generate a fresh `balanceador_<id>` profile.
+   - **No active profile**: Prompts `"profiles.json: No active profile found. Create a profile for you?"` to bootstrap a `balanceador_<id>` profile.
 4. **Candidate Reordering**: Move candidates up or down (`u`/`d`), toggle candidates on or off.
 5. **Role Assignment Advisor**: Run the lightweight heuristic or AI advisor (~350 tokens) to configure role targets.
-6. **Hub Menu**: Access custom balancer profile creation (`👤 ¿Creamos un perfil para vos? / Nuevo perfil (balanceador_<id>)…`) at any time.
+6. **Hub Menu**: Access custom balancer profile creation (`👤 New profile (balanceador_<id>)…`) at any time.
 7. **Atomic Writing**: Writes `pools.json`, `integrations.json`, and `profiles.json` with timestamped backups (`.bak`).
 
 ---
@@ -540,6 +540,7 @@ Operational overlay showing real-time subscription burn velocity (`+X%/h`), rese
 | `/balancer loans` | *(none)* | Opens temporary model loan console. |
 | `/balancer permissions` | *(none)* | Lists active autonomous model loan permissions. |
 | `/balancer lang` | `[es\|en\|auto]` | Inspects or sets UI language. |
+| `/balancer help` | | Shows the glossary of terms. |
 | `/hud` | *(none)* | Opens terminal Heads-Up Display. |
 
 ---

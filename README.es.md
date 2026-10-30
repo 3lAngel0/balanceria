@@ -192,6 +192,7 @@ Seleccione un pool directamente en el chat mediante `/model pool/claude-sonnet-5
 | `/balancer usage` o `Ctrl+Alt+U` | Abre la consola completa de uso en 5 pestañas (Now, Quotas, Days, Sessions, HUD). |
 | `/balancer setup` | Ejecuta el asistente interactivo de configuración y detección de proveedores. |
 | `/balancer lang [es\|en\|auto]` | Consulta o modifica el idioma de la interfaz sin reiniciar la sesión. |
+| `/balancer help` | Glosario breve: pool, candidato, préstamo, permiso, circuit breaker, rol, ritmo de ventana, contexto reenviado. |
 | `/balancer serve [lan] [port]` | Inicia el dashboard web en tiempo real con autenticación (soporta LAN y TLS). |
 | `/balancer lab` | Modo laboratorio: borrador, diferencias, simulación y aplicación segura de reglas. |
 | `/balancer switch-cost` | Reporta el beneficio de retención de caché frente al costo de conmutación de proveedor. |

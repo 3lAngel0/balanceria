@@ -1,13 +1,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { BALANCER_MENU, balancerMenu, resolveBalancerArgs } from "../src/balancer-menu.ts";
+import { BALANCER_MENU, balancerMenu, glossaryText, resolveBalancerArgs } from "../src/balancer-menu.ts";
 import { setLang } from "../src/i18n/index.ts";
 
 test("the menu offers every action with a label and a description, in a stable order", () => {
 	setLang("en");
 	assert.deepEqual(
 		BALANCER_MENU.map(item => item.value),
-		["panel", "usage", "refresh", "setup", "report", "simulate", "switch-cost", "loans", "permissions", "permissions grant", "permissions revoke", "lab", "lab new", "lab diff", "lab simulate", "lab apply", "lab undo", "lab discard", "serve", "serve lan", "serve setup", "serve status", "serve stop", "serve autostart off", "lang"],
+		["panel", "usage", "refresh", "setup", "report", "simulate", "switch-cost", "loans", "permissions", "permissions grant", "permissions revoke", "lab", "lab new", "lab diff", "lab simulate", "lab apply", "lab undo", "lab discard", "serve", "serve lan", "serve setup", "serve status", "serve stop", "serve autostart off", "lang", "help"],
 	);
 	for (const item of BALANCER_MENU) {
 		assert.ok(item.label.length > 0, item.value);
@@ -21,7 +21,7 @@ test("no arguments opens the menu", () => {
 });
 
 test("known subcommands still run directly", () => {
-	for (const command of ["panel", "usage", "refresh", "setup", "report", "simulate", "simulate pools.draft.json", "switch-cost", "loans", "serve", "serve 9000", "serve lan", "serve lan 9000", "serve stop", "serve status", "open abc", "permissions", "permissions grant", "permissions revoke", "permissions revoke g-abc-123", "permissions revoke all", "lang", "lang es", "lang en", "lang auto"]) {
+	for (const command of ["panel", "usage", "refresh", "setup", "report", "simulate", "simulate pools.draft.json", "switch-cost", "loans", "serve", "serve 9000", "serve lan", "serve lan 9000", "serve stop", "serve status", "open abc", "permissions", "permissions grant", "permissions revoke", "permissions revoke g-abc-123", "permissions revoke all", "lang", "lang es", "lang en", "lang auto", "help"]) {
 		assert.deepEqual(resolveBalancerArgs(command), { kind: "command", command }, command);
 	}
 	assert.deepEqual(resolveBalancerArgs("  serve lan  "), { kind: "command", command: "serve lan" });
@@ -66,5 +66,20 @@ test("Spanish menu labels differ from English while values are identical", () =>
 	assert.ok(differentCount > 0, "Expected Spanish menu labels to differ from English");
 
 	// Reset
+	setLang("en");
+});
+
+test("the glossary explains each term in English and Spanish", () => {
+	const terms = ["pool", "candidate", "loan", "grant", "circuit breaker", "role", "window pace", "context re-sent"];
+	for (const lang of ["en", "es"] as const) {
+		setLang(lang);
+		const text = glossaryText();
+		for (const term of terms) assert.ok(lang === "es" || text.includes(term), `${lang}: ${term}`);
+		assert.equal(text.split("\n").length, terms.length + 1, lang);
+	}
+	setLang("en");
+	assert.match(glossaryText(), /loan: a temporary fallback/);
+	setLang("es");
+	assert.match(glossaryText(), /préstamo/);
 	setLang("en");
 });

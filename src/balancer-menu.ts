@@ -31,6 +31,7 @@ export function balancerMenu(): SelectItem[] {
 		{ value: "serve stop", label: t("menu.serveStop.label"), description: t("menu.serveStop.desc") },
 		{ value: "serve autostart off", label: t("menu.serveAutostartOff.label"), description: t("menu.serveAutostartOff.desc") },
 		{ value: "lang", label: t("menu.lang.label"), description: t("menu.lang.desc") },
+		{ value: "help", label: t("menu.help.label"), description: t("menu.help.desc") },
 	];
 }
 
@@ -50,9 +51,14 @@ export const BALANCER_MENU: SelectItem[] = new Proxy([] as unknown as SelectItem
 	},
 });
 
+/** Plain-language glossary shown by `/balancer help`: a title and one line per term. */
+export function glossaryText(): string {
+	return [t("menu.help.title"), ...["pool", "candidate", "loan", "grant", "breaker", "role", "pace", "resent"].map(term => `  ${t(`menu.help.${term}`)}`)].join("\n");
+}
+
 export type BalancerArgs = { kind: "menu" } | { kind: "command"; command: string } | { kind: "unknown"; message: string };
 
-const SIMPLE = new Set(["panel", "usage", "refresh", "setup", "report", "simulate", "switch-cost", "loans"]);
+const SIMPLE = new Set(["panel", "usage", "refresh", "setup", "report", "simulate", "switch-cost", "loans", "help"]);
 
 export function resolveBalancerArgs(args: string): BalancerArgs {
 	const command = args.trim();

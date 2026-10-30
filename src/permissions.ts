@@ -149,12 +149,12 @@ export function pruneExpired(dataDir: string, now: number): Grant[] {
 const minute = (ts: number) => `${new Date(ts).toISOString().slice(0, 16)}Z`;
 
 export function formatGrants(grants: readonly Grant[], now: number): string {
-	if (grants.length === 0) return "ai-balancer: no permissions granted (level off: show only). Grant one with /balancer permissions grant";
+	if (grants.length === 0) return "ai-balancer: no grants yet. A grant is your permission for the balancer to use another model for a role (level off: show only). Create one with /balancer permissions grant";
 	const lines = grants.map(grant => {
 		const expiry = grant.expiresAt > now ? `expires ${minute(grant.expiresAt)}` : `expired ${minute(grant.expiresAt)}`;
 		return `  ${grant.id} · ${grant.level} · profiles ${grant.profiles.join(", ")} · roles ${grant.roles.join(", ")} · models ${grant.models.join(", ")} · ${expiry}`;
 	});
-	return ["ai-balancer permissions (revoke with /balancer permissions revoke <id>|all):", ...lines].join("\n");
+	return ["ai-balancer grants, your permissions for using another model in a role (revoke with /balancer permissions revoke <id>|all):", ...lines].join("\n");
 }
 
 export interface ModelGroup {
@@ -230,7 +230,7 @@ export async function runPermissionGrant(deps: PermissionGrantDeps): Promise<Omi
 		return undefined;
 	}
 
-	const levelLabel = await ui.select("Permission level (1/5)", LEVELS.map(entry => entry.label));
+	const levelLabel = await ui.select("Permission level (1/5): who decides when a role falls back to another model", LEVELS.map(entry => entry.label));
 	const level = LEVELS.find(entry => entry.label === levelLabel)?.level;
 	if (!level) return undefined;
 
@@ -243,7 +243,7 @@ export async function runPermissionGrant(deps: PermissionGrantDeps): Promise<Omi
 	const roles = await pickSeveral(ui, `Roles of ${profile} (3/5)`, Object.keys(routes).sort());
 	if (!roles || roles.length === 0) return undefined;
 
-	const groupLabels = await pickSeveral(ui, "Interchangeable models (4/5)", groups.map(group => group.label));
+	const groupLabels = await pickSeveral(ui, "Interchangeable models (4/5): the models a role may fall back to", groups.map(group => group.label));
 	if (!groupLabels || groupLabels.length === 0) return undefined;
 	const models = [...new Set(groupLabels.flatMap(label => groups.find(group => group.label === label)?.models ?? []))];
 

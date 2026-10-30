@@ -592,8 +592,8 @@ test("runSetupWizard allows custom provider combination toggling, per-pool candi
 				if (title === "Select Routing Strategy") {
 					return options[0]; // hybrid
 				}
-				if (title.includes("Tenés un perfil activo")) {
-					return options.find(o => o.includes("Mantener perfil")) ?? options[0];
+				if (title.includes("You have an active profile")) {
+					return options.find(o => o.includes("Keep current profile")) ?? options[0];
 				}
 				if (title.startsWith("ai-balancer Setup: Customize")) {
 					hubVisits++;
@@ -701,14 +701,14 @@ test("runSetupWizard offers to create profile when no profiles exist and saves w
 		const ui = {
 			confirm: async () => true,
 			select: async (title: string, options: string[]) => {
-				if (title.includes("¿Creamos un perfil para vos?")) {
+				if (title.includes("Create a profile for you?")) {
 					promptedCreate = true;
-					return options.find(o => o.includes("Sí, crear perfil")) ?? options[0];
+					return options.find(o => o.includes("Yes, create profile")) ?? options[0];
 				}
 				return options[0];
 			},
 			input: async (title: string) => {
-				if (title.includes("Identificador")) {
+				if (title.includes("Identifier")) {
 					inputPrompted = true;
 					return "mi_entorno";
 				}
@@ -768,7 +768,7 @@ test("runSetupWizard allows creating a new balanceador_<id> profile from the hub
 				if (title.startsWith("ai-balancer Setup: Customize")) {
 					hubVisits++;
 					if (hubVisits === 1) {
-						return options.find(o => o.includes("¿Creamos un perfil para vos?"));
+						return options.find(o => o.includes("New profile (balanceador_"));
 					}
 					return options[0]; // Finish
 				}
@@ -824,14 +824,14 @@ test("runSetupWizard prompts when an active profile exists and offers to create 
 		const ui = {
 			confirm: async () => true,
 			select: async (title: string, options: string[]) => {
-				if (title.includes("Tenés un perfil activo: 'perfil_existente'")) {
+				if (title.includes("You have an active profile: 'perfil_existente'")) {
 					promptedActiveProfile = true;
-					return options.find(o => o.includes("Sí, armar perfil")) ?? options[0];
+					return options.find(o => o.includes("Yes, build profile")) ?? options[0];
 				}
 				return options[0];
 			},
 			input: async (title: string) => {
-				if (title.includes("Identificador")) {
+				if (title.includes("Identifier")) {
 					inputPrompted = true;
 					return "equipo";
 				}
@@ -863,3 +863,53 @@ test("runSetupWizard prompts when an active profile exists and offers to create 
 	}
 });
 
+
+test("runSetupWizard asks before the AI advisor spends tokens and skips the query when declined", async () => {
+	for (const accept of [false, true]) {
+		const dir = mkdtempSync(join(tmpdir(), "wizard-advisor-consent-"));
+		try {
+			let hubVisits = 0;
+			let advisorVisits = 0;
+			let aiCalls = 0;
+			const confirms: Array<{ title: string; message: string }> = [];
+			const ui = {
+				confirm: async (title: string, message: string) => {
+					if (title.includes("AI advisor")) {
+						confirms.push({ title, message });
+						return accept;
+					}
+					return true;
+				},
+				select: async (title: string, options: string[]) => {
+					if (title.startsWith("ai-balancer Setup: Customize")) {
+						return ++hubVisits === 1 ? options.find(o => o.includes("Role & Model Advisor")) : options[0];
+					}
+					if (title.startsWith("Role & Model Advisor")) {
+						return ++advisorVisits === 1 ? options.find(o => o.startsWith("⚡ Query")) : options[0];
+					}
+					return options[0];
+				},
+				notify: () => {},
+			};
+			await runSetupWizard({ ui }, dir, {
+				detectOptions: {
+					settings: { packages: ["npm:pi-claude-bridge", "npm:@estebanforge/pi-antigravity-bridge"] },
+					execWhich: bin => bin === "claude",
+					homeDir: dir,
+					env: {},
+				},
+				profilesPath: join(dir, "profiles.json"),
+				aiRunner: async () => {
+					aiCalls++;
+					return { text: "{}", tokensUsed: 0 };
+				},
+			});
+			assert.equal(confirms.length, 1);
+			assert.match(confirms[0].message, /about 350 tokens/);
+			assert.match(confirms[0].message, /AI runner/);
+			assert.equal(aiCalls, accept ? 1 : 0);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	}
+});

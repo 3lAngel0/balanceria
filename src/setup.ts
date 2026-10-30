@@ -6,6 +6,7 @@ import type { Integration } from "./integrations.ts";
 import { validateIntegrationsConfig, validatePoolsConfig } from "./config-schema.ts";
 import { ruleIssues } from "./pools.ts";
 import { DEFAULT_PROFILES_PATH, loadProfilesStore, PROFILES_KIND, PROFILES_VERSION, readProfiles, saveProfilesStore, type ProfileConfig } from "./profiles.ts";
+import { t } from "./i18n/index.ts";
 import type { RoutingStrategy, RuleBlock } from "./router.ts";
 import {
 	ROLE_CATALOG,
@@ -869,19 +870,13 @@ export async function runSetupWizard(
 
 	if (activeProfileName && existingProfilesStore?.profiles?.[activeProfileName]) {
 		const switchChoice = await ctx.ui.select(
-			`profiles.json: Tenés un perfil activo: '${activeProfileName}'. ¿Querés armar uno personalizado con el balanceador?`,
-			[
-				"✨ Sí, armar perfil balanceador_<identificador> (Recomendado)",
-				`Mantener perfil actual '${activeProfileName}'`,
-			],
+			t("setup.profile.activePrompt", { name: activeProfileName }),
+			[t("setup.profile.build"), t("setup.profile.keep", { name: activeProfileName })],
 		);
-		if (switchChoice && switchChoice.startsWith("✨ Sí")) {
+		if (switchChoice === t("setup.profile.build")) {
 			let ident: string | undefined;
 			if (ctx.ui.input) {
-				ident = await ctx.ui.input(
-					"Identificador para el nuevo perfil (se nombrará balanceador_<id>):",
-					"ej: dev, personal, trabajo",
-				);
+				ident = await ctx.ui.input(t("setup.profile.idPrompt"), t("setup.profile.idHint"));
 			}
 			activeProfileName = buildBalancerProfileName(ident);
 			draftRoles = applyRecommendationsToProfile(
@@ -898,19 +893,13 @@ export async function runSetupWizard(
 	} else {
 		// No active profile found or profiles.json is missing/empty
 		const offerChoice = await ctx.ui.select(
-			"profiles.json: No active profile found. ¿Creamos un perfil para vos?",
-			[
-				"✨ Sí, crear perfil balanceador_<identificador> (Recomendado)",
-				"Continuar sin perfil (no se modificará profiles.json)",
-			],
+			t("setup.profile.offerPrompt"),
+			[t("setup.profile.create"), t("setup.profile.skip")],
 		);
-		if (offerChoice && offerChoice.startsWith("✨ Sí")) {
+		if (offerChoice === t("setup.profile.create")) {
 			let ident: string | undefined;
 			if (ctx.ui.input) {
-				ident = await ctx.ui.input(
-					"Identificador para el nuevo perfil (se nombrará balanceador_<id>):",
-					"ej: dev, personal, trabajo",
-				);
+				ident = await ctx.ui.input(t("setup.profile.idPrompt"), t("setup.profile.idHint"));
 			}
 			activeProfileName = buildBalancerProfileName(ident);
 			draftRoles = applyRecommendationsToProfile({}, advisor.recommendations);
@@ -927,7 +916,7 @@ export async function runSetupWizard(
 			"✓ Finish & review configuration summary (Recommended)",
 			`🤖 Role & Model Advisor (${advisor.source === "ai+heuristic" ? "AI + Heuristic" : "Heuristic"}: view/apply recommendations or run ~350-token AI query)…`,
 			`🎭 Customize Agent Roles (${activeProfileName ? `Profile: ${activeProfileName}` : "No profile"} - ${ROLE_CATALOG.length} roles)…`,
-			`👤 ¿Creamos un perfil para vos? / Nuevo perfil (balanceador_<id>)…`,
+			t("setup.profile.hub"),
 			`🏊 Customize Pool Candidates & Priority (${pools.length} pools: toggle/reorder models & strategy per pool)…`,
 			`🔌 Toggle Active Bridges / Providers (${chosenProviders.length}/${detectedActive.length} active)…`,
 		];
@@ -948,19 +937,16 @@ export async function runSetupWizard(
 			break;
 		}
 
-		if (hubChoice.includes("¿Creamos un perfil para vos?")) {
+		if (hubChoice === t("setup.profile.hub")) {
 			let ident: string | undefined;
 			if (ctx.ui.input) {
-				ident = await ctx.ui.input(
-					"Identificador para el nuevo perfil (se nombrará balanceador_<id>):",
-					"ej: dev, personal, trabajo",
-				);
+				ident = await ctx.ui.input(t("setup.profile.idPrompt"), t("setup.profile.idHint"));
 			}
 			const newProfileName = buildBalancerProfileName(ident);
 			activeProfileName = newProfileName;
 			draftRoles = applyRecommendationsToProfile(draftRoles, advisor.recommendations);
 			rolesModified = true;
-			ctx.ui.notify(`Perfil '${activeProfileName}' configurado y marcado como activo.`, "info");
+			ctx.ui.notify(t("setup.profile.configured", { name: activeProfileName }), "info");
 			continue;
 		}
 
@@ -1159,6 +1145,7 @@ export async function runSetupWizard(
 					continue;
 				}
 				if (advChoice.startsWith("⚡ Query")) {
+					if (!(await ctx.ui.confirm(t("setup.advisor.consentTitle"), t("setup.advisor.consentBody")))) continue;
 					const runner = options?.aiRunner ?? createDefaultCliAiRunner(options?.agyBin);
 					advisor = await recommendRolesWithAdvisor(
 						{ providers: chosenProviders, pools },
