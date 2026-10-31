@@ -160,7 +160,9 @@ Launch the configuration hub to auto-detect installed providers, configure pools
 /balancer setup
 ```
 
-The wizard detects local providers, guides strategy selection (`hybrid` or `waterfall`), lets you customize candidate priorities, and provides an AI Setup Advisor (cost-safe; never recommends Opus) to optimize role assignments. Changes are written safely with automatic `.bak` backups.
+`/balancer setup` opens a four-step overlay: **Providers → Strategy → Roles → Confirm**. Each step explains what it decides, the last step shows a diff of exactly what will be written, and nothing changes until you press **Save** (**Discard** or `Esc` leaves every file as it is). Keys: `←/→` steps, `↑/↓` rows, `Space`/`Enter` toggle or cycle, `u`/`d` reorder candidates, `s` save. Mouse clicks and the wheel work in fullscreen terminals only; elsewhere the keys do the same. Without a UI it falls back to the classic wizard, which you can also run with `/balancer setup classic`.
+
+The classic wizard detects local providers, guides strategy selection (`hybrid` or `waterfall`), lets you customize candidate priorities, and provides an AI Setup Advisor (cost-safe; never recommends Opus) to optimize role assignments. Changes are written safely with automatic `.bak` backups.
 
 ### 3. Assign Agent Roles to Pools
 
@@ -190,7 +192,7 @@ Select a pool model directly in chat via `/model pool/claude-sonnet-5-5` or conf
 | `/balancer` | Opens the Control Center overlay (click or use the keys). `/balancer roles\|pools\|advisor` jumps to a tab; `/balancer menu` (or `/` inside the overlay) lists every action. |
 | `/balancer panel` or `Ctrl+Alt+B` | Toggle live sidebar overlay and 4-tab Control Center. |
 | `/balancer usage` or `Ctrl+Alt+U` | Open full 5-tab Usage Console (Now, Quotas, Days, Sessions, HUD). |
-| `/balancer setup` | Launch interactive configuration wizard and provider detector. |
+| `/balancer setup` | Open the step-by-step setup overlay (Providers → Strategy → Roles → Confirm). `/balancer setup classic` runs the previous prompt-based wizard. |
 | `/balancer lang [es\|en\|auto]` | Inspect or switch active UI language without restarting. |
 | `/balancer help` | Short glossary: pool, candidate, loan, grant, circuit breaker, role, window pace, context re-sent. |
 | `/balancer serve [lan] [port]` | Start real-time authenticated web dashboard (supports LAN mode & TLS). |

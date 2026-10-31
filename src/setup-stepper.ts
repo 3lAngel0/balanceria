@@ -7,6 +7,7 @@ import type { RoutingStrategy } from "./router.ts";
 import { t } from "./i18n/index.ts";
 import {
 	buildBalancerProfileName,
+	carryRules,
 	generateConfigPreview,
 	generateRecommendedConfig,
 	mergeIntegrations,
@@ -170,18 +171,28 @@ function roleChanges(draft: ProfileConfig, live: ProfileConfig): string[] {
 	return lines;
 }
 
-function nextConfig(state: SetupStepperState, current: StepperCurrent): { pools: PoolConfig[]; integrations: Integration[] } {
-	const pools = effectivePools(state);
+function nextConfig(state: SetupStepperState, current: StepperCurrent): { pools: PoolConfig[]; integrations: Integration[]; notes: string[] } {
+	// Same carry-over the classic wizard does: keep a pool's name and rules unless a removed candidate breaks them.
+	const live = (current.pools as { pools?: { id?: unknown; name?: unknown; rules?: unknown }[] } | null | undefined)?.pools;
+	const existing = new Map((Array.isArray(live) ? live : []).filter(pool => typeof pool?.id === "string").map(pool => [pool.id as string, pool]));
+	const notes: string[] = [];
+	const pools = effectivePools(state).map(pool => {
+		const old = existing.get(pool.id);
+		const named = typeof old?.name === "string" ? { ...pool, name: old.name } : pool;
+		const carried = carryRules(old?.rules, named);
+		notes.push(...carried.notes);
+		return carried.rules ? { ...named, rules: carried.rules } : named;
+	});
 	const used = new Set(pools.flatMap(pool => pool.candidates.map(ref => ref.slice(0, ref.indexOf("/")))));
 	const generated = generateRecommendedConfig(state.detected.filter(p => state.enabled.includes(p.id)));
-	return { pools, integrations: mergeIntegrations(current.integrations ?? null, generated.integrations.filter(entry => used.has(entry.provider))) };
+	return { pools, notes, integrations: mergeIntegrations(current.integrations ?? null, generated.integrations.filter(entry => used.has(entry.provider))) };
 }
 
 /** A line-oriented summary of what Save would write, plus which files it would touch. */
 export function buildStepperDiff(state: SetupStepperState, current: StepperCurrent): { lines: string[]; writes: { pools: boolean; integrations: boolean; profiles: boolean } } {
 	const next = nextConfig(state, current);
 	const preview = generateConfigPreview({ pools: current.pools, integrations: current.integrations }, next);
-	const lines = preview.split("\n");
+	const lines = [...preview.split("\n"), ...next.notes.map(note => `  ${note}`)];
 	const { name, live } = profileTarget(state, current);
 	const roles = roleChanges(state.roles, live);
 	if (roles.length > 0) lines.push(`  • profiles.json [${name}] role assignments:`, ...roles.map(line => `      ${line}`));
@@ -202,7 +213,7 @@ export function applyStepper(state: SetupStepperState, deps: StepperDeps): Stepp
 	const next = nextConfig(state, deps.current);
 	let res: ReturnType<StepperDeps["writeConfig"]>;
 	try {
-		res = deps.writeConfig(deps.root, next);
+		res = deps.writeConfig(deps.root, { pools: next.pools, integrations: next.integrations });
 	} catch (err) {
 		return { ok: false, written: [], backups: [], error: err instanceof Error ? err.message : String(err) };
 	}

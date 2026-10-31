@@ -913,3 +913,43 @@ test("runSetupWizard asks before the AI advisor spends tokens and skips the quer
 		}
 	}
 });
+
+for (const [label, profiles] of [
+	["no active profile", undefined],
+	["an active profile", { kind: "gentle-pi.agent_model_profiles", version: 1, active: "main", profiles: { main: { orchestrator: { model: "pool/orchestrator" } } } }],
+] as const) {
+	test(`runSetupWizard cancels and writes nothing when user escapes the profile question (${label})`, async () => {
+		const dir = mkdtempSync(join(tmpdir(), "wizard-cancel-profile-"));
+		try {
+			const poolsPath = join(dir, "pools.json");
+			const profilesPath = join(dir, "profiles.json");
+			writeFileSync(poolsPath, '{"initial":true}', "utf8");
+			if (profiles) writeFileSync(profilesPath, JSON.stringify(profiles), "utf8");
+
+			const notifications: string[] = [];
+			let selectCallCount = 0;
+			const mockUi = {
+				confirm: async () => true,
+				select: async (_title: string, options: string[]) => {
+					selectCallCount++;
+					if (selectCallCount <= 2) return options[0]; // providers, strategy
+					return undefined; // Escape the profile question
+				},
+				notify: (msg: string) => { notifications.push(msg); },
+			};
+
+			const completed = await runSetupWizard({ ui: mockUi }, dir, {
+				profilesPath,
+				detectOptions: { settings: { packages: ["npm:pi-claude-bridge"] } },
+			});
+
+			assert.equal(completed, false);
+			assert.equal(selectCallCount, 3, "the wizard must stop at the profile question");
+			assert.equal(readFileSync(poolsPath, "utf8"), '{"initial":true}');
+			assert.ok(notifications.some(n => n.includes("setup cancelled, nothing written")));
+			assert.ok(!notifications.some(n => n.includes("Created balanced profile")));
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+}

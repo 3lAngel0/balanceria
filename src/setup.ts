@@ -895,6 +895,10 @@ export async function runSetupWizard(
 			t("setup.profile.activePrompt", { name: activeProfileName }),
 			[t("setup.profile.build"), t("setup.profile.keep", { name: activeProfileName })],
 		);
+		if (!switchChoice) {
+			ctx.ui.notify("setup cancelled, nothing written", "info");
+			return false;
+		}
 		if (switchChoice === t("setup.profile.build")) {
 			let ident: string | undefined;
 			if (ctx.ui.input) {
@@ -918,6 +922,10 @@ export async function runSetupWizard(
 			t("setup.profile.offerPrompt"),
 			[t("setup.profile.create"), t("setup.profile.skip")],
 		);
+		if (!offerChoice) {
+			ctx.ui.notify("setup cancelled, nothing written", "info");
+			return false;
+		}
 		if (offerChoice === t("setup.profile.create")) {
 			let ident: string | undefined;
 			if (ctx.ui.input) {

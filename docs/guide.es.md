@@ -481,7 +481,9 @@ gentle-shell install <path-to-repo>
 ```
 
 ### Asistente interactivo de configuración (`/balancer setup`)
-Al ejecutar `/balancer setup` se inicia el asistente:
+Al ejecutar `/balancer setup` se abre un overlay paso a paso: **Providers → Estrategia → Roles → Confirmar**. Cada paso muestra una descripción breve; el paso Confirmar muestra un diff de lo que Guardar escribirá en `pools.json`, `integrations.json` y `profiles.json`. No se escribe nada hasta **Guardar**; **Descartar** (o `Esc`, que pregunta primero si hay cambios) deja todos los archivos intactos. Teclas: `←/→`/`h`/`l` o `Tab`/`Shift+Tab` cambian de paso, `↑/↓`/`j`/`k` mueven entre filas, `Espacio`/`Enter` alternan o ciclan (provider, candidato, estrategia del pool, modelo del rol), `u`/`d` reordenan un candidato, `t` cicla el thinking de un rol, `s` guarda en el paso Confirmar. El ratón (clic en pasos, filas y botones; la rueda desplaza) solo funciona cuando Pi corre a pantalla completa (`TuiAltScreen`); en otros casos el overlay es solo de teclado. Sin interfaz, o si los overlays no están disponibles, `/balancer setup` recurre al asistente clásico. El asesor de roles con IA solo está en el asistente clásico.
+
+`/balancer setup classic` ejecuta el asistente anterior basado en preguntas:
 1. **Detección automática**: Detecta herramientas de línea de comandos instaladas (`agy`, `claude`, `opencode`, `ollama`), paquetes de Pi y variables de entorno.
 2. **Selección de estrategia**: Elija `hybrid` (recomendada) o `waterfall`.
 3. **Resolución de perfil**:
@@ -521,7 +523,8 @@ Superposición operativa en terminal que muestra la velocidad de consumo de susc
 | `/balancer` | *(ninguno)* | Abre el Centro de control; `roles`, `pools`, `advisor` saltan a una pestaña, `menu` lista todas las acciones. El ratón solo funciona en pantalla alterna. |
 | `/balancer panel` | *(ninguno)* | Muestra u oculta el panel lateral y el Control Center (`Ctrl+Alt+B`). |
 | `/balancer usage` | *(ninguno)* | Abre la consola de uso y cuotas en 5 pestañas (`Ctrl+Alt+U`). |
-| `/balancer setup` | *(ninguno)* | Inicia el asistente interactivo de configuración. |
+| `/balancer setup` | *(ninguno)* | Abre el overlay de configuración paso a paso. |
+| `/balancer setup classic` | *(ninguno)* | Ejecuta el asistente anterior basado en preguntas (incluye el asesor de roles con IA). |
 | `/balancer refresh` | *(ninguno)* | Fuerza una consulta inmediata del uso de Antigravity. |
 | `/balancer report` | *(ninguno)* | Genera el reporte estático e independiente en HTML (`report.html`). |
 | `/balancer serve` | `[puerto]` | Inicia el dashboard web local (puerto por defecto: 8787). |

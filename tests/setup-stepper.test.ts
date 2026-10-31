@@ -202,3 +202,32 @@ test("applyStepper refuses an invalid draft without writing", () => {
 	assert.equal(res.ok, false);
 	assert.equal(a.log.length, 0);
 });
+
+test("applyStepper keeps existing pool names and rules, and drops rules whose candidate was removed", () => {
+	const rules = [
+		{ rule: "prefer-for-role", role: "coder", candidate: "antigravity/s" },
+		{ rule: "prefer-for-role", role: "reviewer", candidate: "claude-bridge/s" },
+		{ rule: "pick", mode: "highest-quota" },
+	];
+	const withRules: StepperDeps["current"] = {
+		pools: { pools: [{ id: "sonnet", name: "My Sonnet", candidates: ["claude-bridge/s", "antigravity/s"], strategy: "hybrid", rules }] },
+	};
+	let written: { pools?: unknown } = {};
+	const deps: StepperDeps = {
+		root: "/r",
+		current: withRules,
+		writeConfig: (_root, configs) => {
+			written = configs;
+			return { success: true, integrationsPath: "/r/integrations.json", poolsPath: "/r/pools.json", backupCreated: false };
+		},
+		writeProfiles: () => {},
+		profilesPath: "/r/profiles.json",
+	};
+	const state = toggleCandidate(fresh(), "sonnet", "claude-bridge/s");
+	assert.equal(applyStepper(state, deps).ok, true);
+	const sonnet = (written.pools as PoolConfig[]).find(pool => pool.id === "sonnet") as PoolConfig & { rules?: unknown[] };
+	assert.equal(sonnet.name, "My Sonnet");
+	assert.deepEqual(sonnet.rules, [rules[0], rules[2]]);
+	const diff = buildStepperDiff(state, withRules).lines.join("\n");
+	assert.match(diff, /drops rule prefer-for-role reviewer/);
+});

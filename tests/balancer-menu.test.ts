@@ -7,7 +7,7 @@ test("the menu offers every action with a label and a description, in a stable o
 	setLang("en");
 	assert.deepEqual(
 		BALANCER_MENU.map(item => item.value),
-		["panel", "usage", "refresh", "setup", "report", "simulate", "switch-cost", "loans", "permissions", "permissions grant", "permissions revoke", "lab", "lab new", "lab diff", "lab simulate", "lab apply", "lab undo", "lab discard", "serve", "serve lan", "serve setup", "serve status", "serve stop", "serve autostart off", "lang", "help"],
+		["panel", "usage", "refresh", "setup", "setup classic", "report", "simulate", "switch-cost", "loans", "permissions", "permissions grant", "permissions revoke", "lab", "lab new", "lab diff", "lab simulate", "lab apply", "lab undo", "lab discard", "serve", "serve lan", "serve setup", "serve status", "serve stop", "serve autostart off", "lang", "help"],
 	);
 	for (const item of BALANCER_MENU) {
 		assert.ok(item.label.length > 0, item.value);
@@ -31,7 +31,7 @@ test("tab names open the Control Center on that tab", () => {
 });
 
 test("known subcommands still run directly", () => {
-	for (const command of ["panel", "usage", "refresh", "setup", "report", "simulate", "simulate pools.draft.json", "switch-cost", "loans", "serve", "serve 9000", "serve lan", "serve lan 9000", "serve stop", "serve status", "open abc", "permissions", "permissions grant", "permissions revoke", "permissions revoke g-abc-123", "permissions revoke all", "lang", "lang es", "lang en", "lang auto", "help"]) {
+	for (const command of ["panel", "usage", "refresh", "setup", "setup classic", "report", "simulate", "simulate pools.draft.json", "switch-cost", "loans", "serve", "serve 9000", "serve lan", "serve lan 9000", "serve stop", "serve status", "open abc", "permissions", "permissions grant", "permissions revoke", "permissions revoke g-abc-123", "permissions revoke all", "lang", "lang es", "lang en", "lang auto", "help"]) {
 		assert.deepEqual(resolveBalancerArgs(command), { kind: "command", command }, command);
 	}
 	assert.deepEqual(resolveBalancerArgs("  serve lan  "), { kind: "command", command: "serve lan" });
@@ -92,4 +92,9 @@ test("the glossary explains each term in English and Spanish", () => {
 	setLang("es");
 	assert.match(glossaryText(), /préstamo/);
 	setLang("en");
+});
+
+test("`setup classic` resolves to its own command and other setup suffixes stay unknown", () => {
+	assert.deepEqual(resolveBalancerArgs(" setup classic "), { kind: "command", command: "setup classic" });
+	assert.equal(resolveBalancerArgs("setup other").kind, "unknown");
 });
