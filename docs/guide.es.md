@@ -504,6 +504,8 @@ Al ejecutar `/balancer setup` se abre un overlay paso a paso: **Providers → Es
 - **Pestaña 3 `[Pools]`**: Inspección de candidatos y prioridades en tiempo real. Presione `Space` para activar/desactivar, `u`/`d` para reordenar y `s` para alternar hybrid/waterfall.
 - **Pestaña 4 `[Advisor]`**: Visualice y aplique recomendaciones para roles.
 
+Cada pestaña se dibuja con recuadros con título y tablas alineadas (la fila del cursor empieza con `▸`), y el asistente de configuración usa el mismo diseño. Un recuadro de **Ayuda** explica la vista actual en lenguaje simple: va a la derecha cuando el overlay tiene al menos 96 columnas útiles y se apila debajo del contenido en overlays más angostos. Presione `?` para mostrarlo u ocultarlo. El glosario completo sigue en `/balancer help`.
+
 ### Consola de uso (`Ctrl+Alt+U` o `/balancer usage`)
 - **Now**: Tokens de la sesión activa, medidor de contexto, histograma horario de 24h y tarjetas de cuota activa.
 - **Quotas**: Histogramas de picos a 30 días, cantidad de llenados de cuota, tiempo de llenado y duraciones de bloqueo.

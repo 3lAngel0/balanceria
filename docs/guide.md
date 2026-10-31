@@ -504,6 +504,8 @@ Running `/balancer setup` opens a step-by-step overlay: **Providers → Strategy
 - **Tab 3 `[Pools]`**: Inspect candidates and priorities in real time. Press `Space` to toggle, `u`/`d` to adjust rank, `s` to toggle hybrid/waterfall.
 - **Tab 4 `[Advisor]`**: View and apply role recommendations.
 
+Every tab is drawn as titled boxes and aligned tables (the cursor row starts with `▸`), and the setup overlay uses the same layout. A **Help** box explains the current view in plain language: it sits on the right when the overlay is at least 96 columns wide inside its border, and stacks under the content on narrower overlays. Press `?` to show or hide it. The full glossary stays in `/balancer help`.
+
 ### Usage Console (`Ctrl+Alt+U` or `/balancer usage`)
 - **Now**: Active session tokens, context meter, 24h hourly histogram, active quota cards.
 - **Quotas**: 30-day peak histograms, fill counts, time-to-fill, and blocking durations.
