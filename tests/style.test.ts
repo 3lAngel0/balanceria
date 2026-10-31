@@ -28,3 +28,8 @@ test("the legend names the three colors in plain words", () => {
 	assert.equal(plain(LEGEND), "● ok   ● watch it   ● full, or runs out before it refills");
 	assert.equal(brackets(LEGEND), "<success>●</success> ok   <warning>●</warning> watch it   <error>●</error> full, or runs out before it refills");
 });
+
+test("plain() also strips color escapes, so tests and hit-testing read the same text as the eye", () => {
+	assert.equal(plain(`${tone("dim", "│")} \x1b[38;2;56;183;100m▰▰\x1b[39m \x1b[48;2;1;2;3mx\x1b[49m`), "│ ▰▰ x");
+	assert.equal(plain("\x1b[4munderlined\x1b[24m"), "underlined");
+});

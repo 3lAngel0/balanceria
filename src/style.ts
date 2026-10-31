@@ -18,9 +18,11 @@ export function tone(name: Tone, text: string): string {
 	return `${OPEN}${String.fromCharCode(TONE_BASE + TONES.indexOf(name))}${text}${CLOSE}`;
 }
 
-/** The text without tone marks. */
+const SGR = /\x1b\[[0-9;]*m/g;
+
+/** The text without tone marks or color escapes. */
 export function plain(line: string): string {
-	return line.replace(MARKS, "");
+	return line.replace(MARKS, "").replace(SGR, "");
 }
 
 /** Replace every toned span with `style(tone, text)`; unmarked text is kept. */
