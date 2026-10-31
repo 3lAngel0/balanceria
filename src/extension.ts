@@ -32,7 +32,8 @@ import { formatSimulation, poolOfSelection, readPoolSelections, simulate } from 
 import { activeRoutes, applyDraft, createDraft, diffLab, discardDraft, formatApplyConfirm, formatLabDiff, formatRoleMoves, hasDraft, hasUndo, LAB_POOLS, LAB_PROFILES, profilePoolOf, readDraft, roleMoves, undoApply, type LabTexts } from "./lab.ts";
 import { addGrant, formatGrants, loadPermissions, pruneExpired, revokeGrants, runPermissionGrant } from "./permissions.ts";
 import { summarizeQuota } from "./quota-report.ts";
-import { paint, plain, tone } from "./style.ts";
+import { paint, paint as paintTones, plain, tone } from "./style.ts";
+import { FRAME_MS, colorMode, fillProgress, frameOf, motionEnabled } from "./pixel.ts";
 import { helpMainWidth, helpVisible, withHelp } from "./help-panel.ts";
 import { renderAdvancedUsage, summarizeHistory, USAGE_VIEWS, type CurrentSession, type UsageViewName } from "./usage-panel.ts";
 import { keepRowVisible, scrollStep, sliceViewport } from "./viewport.ts";
@@ -988,6 +989,32 @@ export default function aiBalancer(pi: ExtensionAPI) {
 					tui.requestRender();
 				}, PANEL_REFRESH_MS);
 				interval.unref?.();
+				// Pixel-art look: color mode and motion are read once per overlay; the clock only redraws, and
+				// `fold()` plus the profiles store are re-read at most once a second between key presses.
+				const mode = colorMode();
+				const animate = motionEnabled();
+				const motion = animate ? setInterval(() => tui.requestRender(), FRAME_MS) : undefined;
+				motion?.unref?.();
+				let shownTab = tab;
+				let tabSince = Date.now();
+				const memo = <T,>(ms: number, read: () => T) => {
+					let at = -Infinity;
+					let value: T;
+					return {
+						get(now: number): T {
+							if (now - at >= ms) {
+								value = read();
+								at = now;
+							}
+							return value;
+						},
+						reset() {
+							at = -Infinity;
+						},
+					};
+				};
+				const foldedMemo = memo(1_000, fold);
+				const storeMemo = memo(1_000, () => loadProfilesStore());
 
 				const currentPoolConfigs: PoolConfig[] = getPools().map(p => ({
 					id: p.id,
@@ -1007,6 +1034,8 @@ export default function aiBalancer(pi: ExtensionAPI) {
 				const border = (text: string) => theme.fg("border", text);
 				const component = {
 					handleInput(input: string) {
+						foldedMemo.reset();
+						storeMemo.reset();
 						if (input === "?") {
 							helpShown = !helpVisible(helpShown, lastInner);
 							tui.requestRender();
@@ -1383,7 +1412,12 @@ export default function aiBalancer(pi: ExtensionAPI) {
 						lastInner = inner;
 						const showHelp = helpVisible(helpShown, inner);
 						const height = bodyHeight();
-						const store = loadProfilesStore();
+						const now = Date.now();
+						if (tab !== shownTab) {
+							shownTab = tab;
+							tabSince = now;
+						}
+						const store = storeMemo.get(now);
 						const activeProfileName = store?.active;
 						const activeProfileRoles = activeProfileName ? store?.profiles?.[activeProfileName] : undefined;
 
@@ -1400,8 +1434,12 @@ export default function aiBalancer(pi: ExtensionAPI) {
 							rowLines,
 							tab,
 							width: helpMainWidth(inner, showHelp),
-							folded: fold(),
-							now: Date.now(),
+							folded: foldedMemo.get(now),
+							now,
+							mode,
+							animate,
+							frame: frameOf(now),
+							progress: animate ? fillProgress(now - tabSince, 700) : 1,
 							circuitStatus: circuitStatus(),
 							activeProfile: activeProfileName,
 							pools: currentPoolConfigs,
@@ -1499,6 +1537,7 @@ export default function aiBalancer(pi: ExtensionAPI) {
 					invalidate() {},
 					dispose() {
 						clearInterval(interval);
+						if (motion) clearInterval(motion);
 						closePanel = undefined;
 					},
 				};
@@ -1561,6 +1600,10 @@ export default function aiBalancer(pi: ExtensionAPI) {
 		const effect = await ctx.ui.custom<StepperEffect>(
 			(tui, theme, _keybindings, done) => {
 				const bodyRows = () => Math.max(8, ((tui as { terminal?: { rows?: number } }).terminal?.rows ?? 40) - 14);
+				const mode = colorMode();
+				const animate = motionEnabled();
+				const motion = animate ? setInterval(() => tui.requestRender(), FRAME_MS) : undefined;
+				motion?.unref?.();
 				const paint = (tone: StepperTone, text: string) => theme.fg(stepperThemeColor(tone), text);
 				const apply = (event: StepperEvent) => {
 					const result = stepperInput(screen, event);
@@ -1572,11 +1615,12 @@ export default function aiBalancer(pi: ExtensionAPI) {
 				return {
 					render(width: number): string[] {
 						const inner = Math.max(20, width - 4);
-						const view = renderStepper(screen, { width, bodyRows: bodyRows(), paint });
+						const view = renderStepper(screen, { width, bodyRows: bodyRows(), paint, mode, animate, frame: frameOf(Date.now()) });
 						screen = { ...screen, hits: view.hits, offset: view.offset, helpOn: view.helpOn, follow: false };
 						const border = (text: string) => theme.fg("border", text);
 						const row = (text: string) => `${border("│")} ${truncateToWidth(text, inner, "…", true)} ${border("│")}`;
-						return [border(`╭${"─".repeat(inner + 2)}╮`), ...view.lines.map(row), border(`╰${"─".repeat(inner + 2)}╯`)];
+						const painted = view.lines.map(line => paintTones(line, (name, text) => theme.fg(name, text)));
+						return [border(`╭${"─".repeat(inner + 2)}╮`), ...painted.map(row), border(`╰${"─".repeat(inner + 2)}╯`)];
 					},
 					handleInput(data: string) {
 						apply({ type: "key", data: canonicalKey(data) });
@@ -1590,6 +1634,9 @@ export default function aiBalancer(pi: ExtensionAPI) {
 						return { handled: true, render: false };
 					},
 					invalidate() {},
+					dispose() {
+						if (motion) clearInterval(motion);
+					},
 				};
 			},
 			{ overlay: true, overlayOptions: { width: "90%", minWidth: 72, anchor: "center" } },

@@ -506,6 +506,8 @@ Running `/balancer setup` opens a step-by-step overlay: **Providers → Strategy
 
 Every tab is drawn as titled boxes and aligned tables (the cursor row starts with `▸`), and the setup overlay uses the same layout. A **Help** box explains the current view in plain language: it sits on the right when the overlay is at least 96 columns wide inside its border, and stacks under the content on narrower overlays. Press `?` to show or hide it. The full glossary stays in `/balancer help`.
 
+The panels use a small pixel-art palette (the same one as the web panel): role types and pool strategies are colored chips, thinking levels are pips (`▰▰▱`), quota windows are segmented bars colored by what is left (green, gold, red), and the Overview shows a balance mascot. In a terminal with truecolor (`COLORTERM=truecolor`) they are drawn in RGB; elsewhere they use your theme's colors; with `NO_COLOR` set they are shapes only, and every state keeps its word or shape, never color alone. Light animation (the mascot rocking, the arrow marching along the active route, a moving shine on the bars, bars filling in when a tab opens) runs only while a panel is open; set `AI_BALANCER_REDUCE_MOTION=1` to get still frames.
+
 ### Usage Console (`Ctrl+Alt+U` or `/balancer usage`)
 - **Now**: Active session tokens, context meter, 24h hourly histogram, active quota cards.
 - **Quotas**: 30-day peak histograms, fill counts, time-to-fill, and blocking durations.

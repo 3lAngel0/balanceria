@@ -262,3 +262,48 @@ test("boxing the body keeps every mouse hit aligned with the row it was drawn on
 		assert.ok(view.hits.some(h => h.target.kind === "row"));
 	}
 });
+
+import { paint as paintMarks } from "../src/style.ts";
+
+const colorUi = (mode: "none" | "ansi" | "truecolor", extra: Record<string, unknown> = {}) => ({ ...ui, mode, ...extra });
+const STEPS = ["providers", "strategy", "roles", "confirm"] as const;
+const stepScreen = (step: (typeof STEPS)[number]): StepperScreen => (step === "providers" ? fresh() : onStep(step));
+
+test("color never changes the text or the click geometry of the stepper", () => {
+	for (const step of STEPS) {
+		const base = renderStepper(stepScreen(step), colorUi("none"));
+		for (const mode of ["ansi", "truecolor"] as const) {
+			const colored = renderStepper(stepScreen(step), colorUi(mode, { animate: true, frame: 5 }));
+			assert.deepEqual(colored.lines.map(plain), base.lines.map(plain), `${step} ${mode}`);
+			assert.deepEqual(colored.hits, base.hits, `${step} ${mode}: hit areas`);
+		}
+	}
+});
+
+test("truecolor paints the buttons, statuses and diff; the plain modes carry no raw RGB", () => {
+	const confirm = (mode: "none" | "ansi" | "truecolor") => renderStepper(onStep("confirm"), colorUi(mode)).lines.join("\n");
+	assert.match(confirm("truecolor"), /\x1b\[38;2;56;183;100m\[ Save \]/, "Save is green");
+	assert.match(confirm("truecolor"), /\x1b\[38;2;228;59;68m\[ Discard \]/, "Discard is red");
+	assert.ok(!/\x1b\[(?:38|48);2;/.test(confirm("ansi")), "no raw RGB in ansi");
+	assert.ok(!/\x1b/.test(confirm("none")), "no escapes without color");
+	const providers = renderStepper(fresh(), colorUi("truecolor")).lines.join("\n");
+	assert.match(providers, /\x1b\[38;2;56;183;100m✓ enabled/, "an enabled provider is green");
+	assert.match(providers, /\x1b\[38;2;228;59;68m✗ not found/, "a missing provider is red");
+});
+
+test("a step bar names the current step and fills as the wizard moves on", () => {
+	const bars = STEPS.map(step => plain(renderStepper(stepScreen(step), colorUi("none")).lines[0]!));
+	STEPS.forEach((_step, index) => assert.match(bars[index]!, new RegExp(`${index + 1}/4`)));
+	const filled = bars.map(line => (line.match(/▰/g) ?? []).length);
+	assert.deepEqual(filled, [2, 4, 6, 8], "two segments per step out of eight");
+});
+
+test("no tone mark is left behind in the stepper once the marks are painted", () => {
+	for (const mode of ["none", "ansi", "truecolor"] as const) {
+		for (const step of STEPS) {
+			for (const line of renderStepper(stepScreen(step), colorUi(mode)).lines) {
+				assert.ok(!/[\uE000\uE001\uE010-\uE01F]/.test(paintMarks(line, (_name, text) => text)), `${mode} ${step}: ${JSON.stringify(plain(line))}`);
+			}
+		}
+	}
+});
