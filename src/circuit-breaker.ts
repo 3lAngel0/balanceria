@@ -50,6 +50,17 @@ export class CircuitBreaker {
 	}
 
 	/**
+	 * Clears a tripped breaker once a candidate of the tripped pool has quota again, so the alert
+	 * follows the live quota instead of staying until the next quota error. Returns whether it cleared.
+	 */
+	reopenIfAvailable(candidates: readonly Candidate[], state: QuotaState, now: number = Date.now()): boolean {
+		if (!this.tripped) return false;
+		if (candidates.every(candidate => !state.isAvailable(candidate.quotaKey, now))) return false;
+		this.reset();
+		return true;
+	}
+
+	/**
 	 * Evaluates if a pool is completely spent.
 	 * If so, trips the breaker, saves an Engram-compatible checkpoint,
 	 * and returns the checkpoint.
