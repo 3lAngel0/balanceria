@@ -10,6 +10,7 @@ import {
 	stepRows,
 	stepperButtons,
 	stepperInput,
+	stepperThemeColor,
 	type StepperEvent,
 	type StepperScreen,
 } from "../src/setup-stepper-view.ts";
@@ -190,4 +191,21 @@ test("wheel scrolls the body and stops following the cursor", () => {
 test("stepRows lists no rows on confirm and one per detected provider on providers", () => {
 	assert.equal(stepRows(onStep("confirm").stepper).length, 0);
 	assert.equal(stepRows(fresh().stepper).length, 3);
+});
+
+// Pi's theme.fg throws "Unknown theme color" for names outside its palette, which crashed the overlay on Esc.
+const PI_THEME_COLORS = new Set(["accent", "muted", "warning", "success", "error", "border", "dim", "text"]);
+
+test("every tone the stepper paints maps to a real Pi theme color, including the Esc discard prompt", () => {
+	const tones = new Set<string>();
+	const paint = (tone: "accent" | "dim" | "warn" | "ok", text: string) => (tones.add(tone), text);
+	const edited = onStep("confirm");
+	const dirty = send({ ...edited, stepper: { ...edited.stepper, dirty: true } }, key("\x1b")).state;
+	assert.equal(dirty.confirmDiscard, true);
+	renderStepper(dirty, { ...ui, paint });
+	renderStepper(fresh(), { ...ui, paint });
+	assert.ok(tones.has("warn"), "the discard prompt is painted as a warning");
+	for (const tone of tones) assert.ok(PI_THEME_COLORS.has(stepperThemeColor(tone as "accent" | "dim" | "warn" | "ok")), `${tone} -> ${stepperThemeColor(tone as "warn")}`);
+	assert.equal(stepperThemeColor("warn"), "warning");
+	assert.equal(stepperThemeColor("ok"), "success");
 });

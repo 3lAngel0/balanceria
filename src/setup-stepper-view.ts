@@ -45,6 +45,13 @@ const is = (data: string, name: keyof typeof KEYS): boolean => (KEYS[name] as re
 
 export type StepperEffect = "none" | "save" | "discard" | "cancel";
 
+export type StepperTone = "accent" | "dim" | "warn" | "ok";
+
+/** Pi's `theme.fg` throws on names outside its palette, so the view's tones are mapped to real theme colors here. */
+export function stepperThemeColor(tone: StepperTone): "accent" | "muted" | "warning" | "success" {
+	return tone === "dim" ? "muted" : tone === "warn" ? "warning" : tone === "ok" ? "success" : "accent";
+}
+
 export type StepRow =
 	| { kind: "provider"; id: string }
 	| { kind: "pool"; poolId: string }
@@ -86,7 +93,7 @@ export interface StepperUi {
 	width: number;
 	/** Rows of the scrollable body viewport. */
 	bodyRows: number;
-	paint?: (tone: "accent" | "dim" | "warn" | "ok", text: string) => string;
+	paint?: (tone: StepperTone, text: string) => string;
 }
 
 export interface StepperView {

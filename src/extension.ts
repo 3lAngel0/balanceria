@@ -7,7 +7,7 @@ import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@e
 import { Key, matchesKey, SelectList, truncateToWidth, visibleWidth, type TuiMouseEvent, type TuiMouseEventResult } from "@earendil-works/pi-tui";
 import { CONTENT_X, emphasize, hitTest, layoutButtons, sameTarget, tabHitAreas, wheelOffset, type ButtonCell, type HitLayout, type MouseTarget } from "./control-center-mouse.ts";
 import { applyStepper, initStepper, type StepperCurrent } from "./setup-stepper.ts";
-import { initScreen, renderStepper, stepperInput, type StepperEffect, type StepperEvent } from "./setup-stepper-view.ts";
+import { initScreen, renderStepper, stepperInput, type StepperEffect, type StepperEvent, type StepperTone, stepperThemeColor } from "./setup-stepper-view.ts";
 import { BALANCER_MENU, balancerMenu, glossaryText, resolveBalancerArgs } from "./balancer-menu.ts";
 import { initLang, getLang, setLang, saveLangSetting, t } from "./i18n/index.ts";
 import { detectFirewall, privateIPv4Networks, readAutostart, readTls, runLanSetup, writeAutostart, writeTls, type Runner } from "./lan-setup.ts";
@@ -1554,7 +1554,7 @@ export default function aiBalancer(pi: ExtensionAPI) {
 		const effect = await ctx.ui.custom<StepperEffect>(
 			(tui, theme, _keybindings, done) => {
 				const bodyRows = () => Math.max(8, ((tui as { terminal?: { rows?: number } }).terminal?.rows ?? 40) - 14);
-				const paint = (tone: "accent" | "dim" | "warn" | "ok", text: string) => theme.fg(tone === "dim" ? "muted" : tone, text);
+				const paint = (tone: StepperTone, text: string) => theme.fg(stepperThemeColor(tone), text);
 				const apply = (event: StepperEvent) => {
 					const result = stepperInput(screen, event);
 					const changed = result.state !== screen;
