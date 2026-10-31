@@ -138,3 +138,104 @@ test("renderControlCenter draws boxed tables and its row indexes point at the se
 		rowLines.forEach((at, index) => assert.match(lines[at]!, index === 1 ? /^│ ▸ / : /^│   /, `${tab} row ${index} -> line ${at}: ${lines[at]}`));
 	}
 });
+
+import { paint } from "../src/style.ts";
+
+const PX_POOLS = [
+	{ id: "sonnet", name: "Sonnet", candidates: ["antigravity/s", "claude-bridge/s"], strategy: "hybrid" as const },
+	{ id: "orch", name: "Orch", candidates: ["antigravity/o"], strategy: "waterfall" as const },
+];
+const PX_PROVIDERS = [
+	{ id: "antigravity", label: "Google AI Pro (agy)", kind: "subscription" as const, detected: true, source: "cli", availableModels: ["s", "o"] },
+	{ id: "claude-bridge", label: "Claude Pro", kind: "subscription" as const, detected: false, source: "", availableModels: [] },
+];
+const pixelInput = (extra: Record<string, unknown> = {}) => ({
+	tab: "overview" as const,
+	width: 90,
+	folded: foldEvents(EVENTS, NOW),
+	now: NOW,
+	activeProfile: "p",
+	pools: PX_POOLS,
+	providers: PX_PROVIDERS,
+	...extra,
+});
+const screen = (extra: Record<string, unknown> = {}) => renderControlCenter(pixelInput(extra) as Parameters<typeof renderControlCenter>[0]);
+
+test("color modes: truecolor adds RGB and the pixel mascot, ansi stays on theme tones, none has no escapes", () => {
+	const none = screen().join("\n");
+	assert.ok(!/\x1b/.test(none), "the default is plain");
+	assert.match(none, /⚖/, "the mascot falls back to one glyph");
+	assert.match(none, /▰|▱/, "bars are shapes, readable without color");
+	assert.match(none, /\[READ\/EXPLORE\]/, "a role type is a bracketed label");
+
+	const truecolor = screen({ mode: "truecolor" }).join("\n");
+	assert.match(truecolor, /\x1b\[38;2;\d+;\d+;\d+/);
+	assert.match(truecolor, /\x1b\[48;2;\d+;\d+;\d+/, "chips have a background");
+	assert.match(truecolor, /[▀▄]/, "the mascot is drawn with half blocks");
+
+	const ansi = screen({ mode: "ansi" }).join("\n");
+	assert.ok(!/\x1b\[(?:38|48);2;/.test(ansi), "no raw RGB outside truecolor");
+	assert.match(ansi, /[\uE010-\uE01F]/, "theme tones are marked for the overlay to paint");
+});
+
+test("every box line keeps its exact width in every color mode", () => {
+	for (const mode of ["none", "ansi", "truecolor"] as const) {
+		for (const tab of ["overview", "roles", "pools", "advisor"] as const) {
+			const lines = screen({ mode, tab, animate: true, frame: 7 }).map(plain);
+			for (const line of lines.slice(2)) assert.equal([...line].length, 90, `${mode} ${tab}: ${line}`);
+		}
+	}
+});
+
+test("no tone span is left open or nested: painting every line with an identity style leaves no marks behind", () => {
+	for (const mode of ["none", "ansi", "truecolor"] as const) {
+		for (const tab of ["overview", "roles", "pools", "advisor"] as const) {
+			const lines = screen({ mode, tab, cursor: 1, poolCursor: 1 });
+			for (const line of lines) assert.ok(!/[\uE000\uE001\uE010-\uE01F]/.test(paint(line, (_name, text) => text)), `${mode} ${tab}: ${JSON.stringify(plain(line))}`);
+		}
+	}
+});
+
+test("selectable rows still point at the selected boxed row in every color mode", () => {
+	for (const mode of ["none", "ansi", "truecolor"] as const) {
+		for (const [tab, cursorKey] of [["roles", "cursor"], ["pools", "poolCursor"]] as const) {
+			const rowLines: number[] = [];
+			const lines = screen({ mode, tab, [cursorKey]: 1, rowLines }).map(plain);
+			assert.ok(rowLines.length >= 2);
+			rowLines.forEach((at, index) => assert.match(lines[at]!, index === 1 ? /^│ ▸ / : /^│   /, `${mode} ${tab} row ${index}: ${lines[at]}`));
+		}
+	}
+});
+
+test("the overview animates with the frame, and stands still when motion is off", () => {
+	const frames = (animate: boolean) => new Set([0, 3, 6, 9, 12, 15].map(frame => screen({ mode: "truecolor", animate, frame }).join("\n")));
+	assert.ok(frames(true).size > 1, "mascot, arrows and bar shine move");
+	assert.equal(frames(false).size, 1, "reduced motion renders one still frame");
+	const plainFrames = new Set([0, 1, 2].map(frame => screen({ mode: "none", animate: true, frame }).map(plain).join("\n")));
+	assert.ok(plainFrames.size > 1, "the marching arrows move even without color");
+});
+
+test("quota bars fill in with progress and show the real fraction once drawn", () => {
+	const windowLines = (progress: number) => screen({ mode: "none", progress }).map(plain).filter(line => /agy gemini|agy claude|claude-bridge/.test(line) && /[▰▱]{5}/.test(line));
+	assert.ok(windowLines(1).length >= 1);
+	assert.ok(windowLines(0).every(line => !line.includes("▰")), "nothing is filled at the start of the animation");
+	assert.ok(windowLines(1).some(line => line.includes("▰")), "the bars are filled when it ends");
+	assert.ok(windowLines(1).some(line => /agy gemini\s+▰+▱+\s+40%/.test(line)), "the percentage is still printed");
+});
+
+test("the tabs drop the long help paragraphs now that the Help box and the footer say it", () => {
+	const text = (tab: "roles" | "pools" | "advisor") => screen({ tab }).map(plain).join("\n");
+	assert.ok(!/Select an agent role with/.test(text("roles")));
+	assert.ok(!/Select a pool with/.test(text("pools")));
+	assert.ok(!/Press g to run a lightweight/.test(text("advisor")));
+	assert.match(text("roles"), /p/, "the active profile is still named");
+});
+
+test("role types, strategies and thinking levels are chips and pips in color, and keep their words", () => {
+	const roles = screen({ mode: "truecolor", tab: "roles", roles: { orchestrator: { model: "pool/orch", thinking: "high" } } }).map(plain).join("\n");
+	assert.match(roles, /READ\/EXPLORE/);
+	assert.match(roles, /▰▰▰ high/, "three pips for high");
+	const pools = screen({ mode: "none", tab: "pools" }).map(plain).join("\n");
+	assert.match(pools, /\[hybrid\]/);
+	assert.match(pools, /\[waterfall\]/);
+});

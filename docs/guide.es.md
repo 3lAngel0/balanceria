@@ -506,6 +506,8 @@ Al ejecutar `/balancer setup` se abre un overlay paso a paso: **Providers → Es
 
 Cada pestaña se dibuja con recuadros con título y tablas alineadas (la fila del cursor empieza con `▸`), y el asistente de configuración usa el mismo diseño. Un recuadro de **Ayuda** explica la vista actual en lenguaje simple: va a la derecha cuando el overlay tiene al menos 96 columnas útiles y se apila debajo del contenido en overlays más angostos. Presione `?` para mostrarlo u ocultarlo. El glosario completo sigue en `/balancer help`.
 
+Los paneles usan una paleta pixel art pequeña (la misma del panel web): los tipos de rol y las estrategias de los pools son chips de color, los niveles de razonamiento son puntos (`▰▰▱`), las ventanas de cuota son barras segmentadas coloreadas según lo que queda (verde, dorado, rojo) y el Resumen muestra una balanza como mascota. En una terminal con truecolor (`COLORTERM=truecolor`) se dibujan en RGB; en otras usan los colores de su tema; con `NO_COLOR` definido son solo formas, y cada estado conserva su palabra o su forma, nunca solo el color. Una animación suave (la balanza que se mece, la flecha que avanza por la ruta activa, un brillo que recorre las barras y barras que se llenan al abrir una pestaña) corre solo mientras un panel está abierto; con `AI_BALANCER_REDUCE_MOTION=1` se ven cuadros fijos.
+
 ### Consola de uso (`Ctrl+Alt+U` o `/balancer usage`)
 - **Now**: Tokens de la sesión activa, medidor de contexto, histograma horario de 24h y tarjetas de cuota activa.
 - **Quotas**: Histogramas de picos a 30 días, cantidad de llenados de cuota, tiempo de llenado y duraciones de bloqueo.

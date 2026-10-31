@@ -12,7 +12,8 @@ import {
 	type RoleCategory,
 } from "./setup-advisor.ts";
 import { tone } from "./style.ts";
-import { box, table, wrap } from "./tui-box.ts";
+import { chip, marchingArrows, pixelBar, pixelSpinner, pixelText, remainingColor, renderSprite, scaleSprite, type ColorMode, type PixelColor } from "./pixel.ts";
+import { box, cellWidth, sideBySide, table, wrap } from "./tui-box.ts";
 import { t } from "./i18n/index.ts";
 
 // Plain-text rendering of the side panel, status line, and the interactive
@@ -206,7 +207,22 @@ export interface ControlCenterRenderInput {
 	pressed?: MouseTarget;
 	/** Filled with the content line of every selectable row (roles, pools, advisor), in row order. */
 	rowLines?: number[];
+	/** How much color the terminal gets; plain shapes when omitted. */
+	mode?: ColorMode;
+	/** Animation frame and whether it may move; a still frame when `animate` is off. */
+	frame?: number;
+	animate?: boolean;
+	/** 0..1 fill-in of the quota bars right after the panel opens or the tab changes; fully drawn when omitted. */
+	progress?: number;
 }
+
+const CATEGORY_COLOR: Record<RoleCategory, PixelColor> = { read: "sky", write: "xp", audit: "gold", orchestrate: "hp" };
+const STRATEGY_COLOR: Record<string, PixelColor> = { hybrid: "sky", waterfall: "xp", "highest-quota": "mp" };
+const THINKING_PIPS: Record<string, { pips: number; color: PixelColor }> = {
+	low: { pips: 1, color: "steel" },
+	medium: { pips: 2, color: "gold" },
+	high: { pips: 3, color: "xp" },
+};
 
 function categoryBadge(cat: RoleCategory): string {
 	// Fixed width keeps the columns aligned whatever the language.
@@ -251,6 +267,9 @@ export function renderControlCenter(input: ControlCenterRenderInput): string[] {
 
 	const head = lines.length;
 	const wide = Math.max(40, input.width);
+	const mode: ColorMode = input.mode ?? "none";
+	const animate = input.animate ?? false;
+	const frame = input.frame ?? 0;
 	const edge = (text: string) => tone("dim", text);
 	const heading = (text: string) => tone("accent", text);
 	const col = (key: string) => t(`setup.col.${key}`);
@@ -264,24 +283,45 @@ export function renderControlCenter(input: ControlCenterRenderInput): string[] {
 		if (input.rowLines) for (let i = rowStart; i < input.rowLines.length; i++) input.rowLines[i] += 1;
 		return [...lines, ...box(title, body, wide, edge)];
 	};
-	const note = (text: string) => wrap(text, wide - 4).map(line => tone("dim", line));
-	const category = (cat: RoleCategory) => `[${t(`setup.category.${cat}`)}]`;
+	// Cells carry their own colors, so a selected row only lights its marker and first cell (spans never nest).
+	const category = (cat: RoleCategory) => chip(t(`setup.category.${cat}`), CATEGORY_COLOR[cat], mode);
+	const strategyChip = (name: string | undefined) => chip(name ?? "hybrid", STRATEGY_COLOR[name ?? "hybrid"] ?? "steel", mode);
+	const modelCell = (value: string) =>
+		value === UNASSIGNED ? pixelText("slate", displayModel(value), mode) : value.startsWith("pool/") ? pixelText("sky", value, mode) : value;
+	const thinkingCell = (level: string) => {
+		const { pips, color } = THINKING_PIPS[level] ?? { pips: 0, color: "slate" as PixelColor };
+		return `${pixelText(color, "▰".repeat(pips) + "▱".repeat(3 - pips), mode)} ${pixelText("steel", displayThinking(level), mode)}`;
+	};
+	const activeProviderOf = (pool: PoolConfig) =>
+		input.lastRoutedByPool?.[pool.id] ?? (input.folded.lastRoute?.pool === pool.id ? input.folded.lastRoute.provider : undefined);
+	const chain = (candidates: readonly string[], active?: string) =>
+		candidates.map(ref => (active && ref.startsWith(`${active}/`) ? pixelText("gold", ref, mode) : ref)).join(` ${pixelText("slate", "→", mode)} `);
+	const marker = (selected: boolean) => (selected ? heading("▸ ") : "  ");
+	const first = (selected: boolean, text: string) => (selected ? heading(text) : text);
 
 	if (input.tab === "overview") {
+		const sprite = renderSprite(scaleSprite(frame, animate), mode);
+		const spriteWidth = Math.max(0, ...sprite.map(cellWidth));
+		const info = [
+			heading(t("setup.cc.activeProfile", { name: input.activeProfile ?? t("setup.none") })),
+			input.folded.lastRoute
+				? `${marchingArrows(frame, 3, mode, animate)} ${t("setup.cc.lastRoute", { pool: input.folded.lastRoute.pool, provider: input.folded.lastRoute.provider })}`
+				: tone("dim", t("setup.cc.lastRouteIdle")),
+		];
 		const profile = box(
 			t("setup.box.profile"),
-			[
-				heading(t("setup.cc.activeProfile", { name: input.activeProfile ?? t("setup.none") })),
-				input.folded.lastRoute
-					? t("setup.cc.lastRoute", { pool: input.folded.lastRoute.pool, provider: input.folded.lastRoute.provider })
-					: tone("dim", t("setup.cc.lastRouteIdle")),
-			],
+			sideBySide(sprite, [...(sprite.length > 2 ? [""] : []), ...info], spriteWidth, Math.max(10, wide - 4 - spriteWidth - 2), 2),
 			wide,
 			edge,
 		);
 		const poolRows = input.pools.map(pool => {
-			const active = input.lastRoutedByPool?.[pool.id] ?? (input.folded.lastRoute?.pool === pool.id ? input.folded.lastRoute.provider : undefined);
-			return [`pool/${pool.id}`, pool.strategy ?? "hybrid", active ? `✓ ${active}` : "–", pool.candidates.join(" → ")];
+			const active = activeProviderOf(pool);
+			return [
+				`pool/${pool.id}`,
+				strategyChip(pool.strategy),
+				active ? `${marchingArrows(frame, 3, mode, animate)} ${active}` : pixelText("slate", "–", mode),
+				chain(pool.candidates, active),
+			];
 		});
 		const pools = box(
 			bare(t("setup.cc.poolsTitle")),
@@ -291,7 +331,12 @@ export function renderControlCenter(input: ControlCenterRenderInput): string[] {
 		);
 		const roles = box(
 			bare(t("setup.cc.rolesTitle")),
-			table([col("role"), col("type"), col("model"), col("thinking")], rows.map(row => [row.role, category(row.category), displayModel(row.configuredModel), displayThinking(row.thinking)]), wide - 4, { head: heading }),
+			table(
+				[col("role"), col("type"), col("model"), col("thinking")],
+				rows.map(row => [row.role, category(row.category), modelCell(row.configuredModel), thinkingCell(row.thinking)]),
+				wide - 4,
+				{ head: heading },
+			),
 			wide,
 			edge,
 		);
@@ -301,29 +346,31 @@ export function renderControlCenter(input: ControlCenterRenderInput): string[] {
 			const entry = snapshot.get(key);
 			const available = input.folded.state.isAvailable(key, input.now);
 			const fraction = entry?.remainingFraction;
+			const label = pad(keyLabel(key), 16);
+			const spent = chip(t("setup.window.spent").toUpperCase(), "bad", mode);
 			if (fraction !== undefined) {
-				const percent = `${Math.round(fraction * 100)}%`.padStart(4);
-				windows.push(`${pad(keyLabel(key), 16)} ${bar(fraction)} ${percent}`);
+				const percent = pixelText(remainingColor(fraction), `${Math.round(fraction * 100)}%`.padStart(4), mode);
+				windows.push(`${label} ${pixelBar(fraction, 14, { mode, frame, animate, progress: input.progress })} ${percent}${available ? "" : ` ${spent}`}`);
 			} else {
-				windows.push(`${pad(keyLabel(key), 16)} ${available ? t("setup.window.ok") : t("setup.window.spent")}`);
+				windows.push(`${label} ${available ? chip(t("setup.window.ok").toUpperCase(), "hp", mode) : spent}`);
 			}
 		}
 		return [...lines, ...profile, ...pools, ...roles, ...box(bare(t("setup.cc.windowsTitle")), windows, wide, edge)];
 	}
 
 	if (input.tab === "roles") {
-		lines.push(heading(t("setup.cc.rolesHeader", { name: input.activeProfile ?? t("setup.none") })), ...note(t("setup.cc.rolesHelp")), "");
+		lines.push(`${pixelText("steel", col("profile"), mode)} ${pixelText("gold", input.activeProfile ?? t("setup.none"), mode)}`, "");
 		const cur = Math.max(0, Math.min(rows.length - 1, input.cursor ?? 0));
 		const grid = table(
 			[col("role"), col("type"), col("model"), col("thinking")],
-			rows.map(row => [row.role, category(row.category), displayModel(row.configuredModel), displayThinking(row.thinking)]),
+			rows.map((row, idx) => [first(idx === cur, row.role), category(row.category), modelCell(row.configuredModel), thinkingCell(row.thinking)]),
 			wide - 4,
-			{ prefixes: rows.map((_row, idx) => (idx === cur ? "▸ " : "  ")), head: heading },
+			{ prefixes: rows.map((_row, idx) => marker(idx === cur)), head: heading },
 		);
 		lines.push(grid[0]!, grid[1]!);
 		rows.forEach((row, idx) => {
 			input.rowLines?.push(lines.length);
-			lines.push(idx === cur ? heading(grid[idx + 2]!) : grid[idx + 2]!);
+			lines.push(grid[idx + 2]!);
 			if (idx === cur) {
 				lines.push(tone("dim", `      ${t("setup.cc.task", { purpose: row.purpose })}`));
 				lines.push(tone("dim", `      ${t("setup.cc.effective", { target: displayModel(row.effectiveTarget) })}`));
@@ -345,22 +392,21 @@ export function renderControlCenter(input: ControlCenterRenderInput): string[] {
 	}
 
 	if (input.tab === "pools") {
-		lines.push(heading(t("setup.cc.poolsHeader")), ...note(t("setup.cc.poolsHelp")), "");
 		const pCur = Math.max(0, Math.min(Math.max(0, input.pools.length - 1, 0), input.poolCursor ?? 0));
 		if (input.pools.length === 0) {
 			lines.push(tone("dim", `  ${t("setup.cc.noPoolsWizard")}`));
 		} else {
 			const grid = table(
 				[col("pool"), col("strategy"), col("name")],
-				input.pools.map(pool => [`pool/${pool.id}`, pool.strategy ?? "hybrid", pool.name]),
+				input.pools.map((pool, idx) => [first(idx === pCur, `pool/${pool.id}`), strategyChip(pool.strategy), pool.name]),
 				wide - 4,
-				{ prefixes: input.pools.map((_pool, idx) => (idx === pCur ? "▸ " : "  ")), head: heading },
+				{ prefixes: input.pools.map((_pool, idx) => marker(idx === pCur)), head: heading },
 			);
 			lines.push(grid[0]!, grid[1]!);
 			input.pools.forEach((pool, idx) => {
 				input.rowLines?.push(lines.length);
-				lines.push(idx === pCur ? heading(grid[idx + 2]!) : grid[idx + 2]!);
-				for (const part of wrap(t("setup.cc.candidates", { list: pool.candidates.join(" → ") }), wide - 4 - 6)) lines.push(`      ${part}`);
+				lines.push(grid[idx + 2]!);
+				for (const part of wrap(chain(pool.candidates, activeProviderOf(pool)), wide - 4 - 6)) lines.push(`      ${part}`);
 				if (idx === pCur && input.poolEditOpen && input.poolCandidateOptions && input.poolCandidateOptions.length > 0) {
 					lines.push(tone("accent", `      ${t("setup.cc.editCandidates", { pool: pool.id })}`));
 					const cCur = Math.max(0, Math.min(input.poolCandidateOptions.length - 1, input.poolCandidateCursor ?? 0));
@@ -382,8 +428,8 @@ export function renderControlCenter(input: ControlCenterRenderInput): string[] {
 				input.providers.map(p => [
 					p.label,
 					p.id,
-					p.detected ? `✓ ${t("setup.provider.detected", { source: p.source })}` : `✗ ${t("setup.provider.notDetected")}`,
-					p.detected && p.availableModels.length > 0 ? p.availableModels.map(m => `${p.id}/${m}`).join(", ") : "–",
+					p.detected ? `${chip("ON", "hp", mode)} ${pixelText("steel", p.source, mode)}` : chip("OFF", "slate", mode),
+					p.detected && p.availableModels.length > 0 ? pixelText("steel", p.availableModels.map(m => `${p.id}/${m}`).join(", "), mode) : pixelText("slate", "–", mode),
 				]),
 				wide - 4,
 				{ head: heading },
@@ -393,9 +439,8 @@ export function renderControlCenter(input: ControlCenterRenderInput): string[] {
 	}
 
 	// Tab 4: Advisor
-	lines.push(heading(t("setup.cc.advisorHeader")), ...note(t("setup.cc.advisorHelp")), "");
 	if (input.advisorLoading) {
-		lines.push(tone("warning", `  ${t("setup.cc.advisorLoading")}`));
+		lines.push(`${pixelText("gold", pixelSpinner(frame), mode)} ${tone("warning", t("setup.cc.advisorLoading"))}`);
 		return framed(t("setup.tab.advisor"));
 	}
 	if (!input.advisor) {
@@ -412,18 +457,18 @@ export function renderControlCenter(input: ControlCenterRenderInput): string[] {
 	const recs = input.advisor.recommendations;
 	const grid = table(
 		[col("role"), col("type"), col("change"), col("thinking")],
-		recs.map(rec => {
+		recs.map((rec, idx) => {
 			const currentModel = input.roles?.[rec.role]?.model ?? UNASSIGNED;
-			const change = currentModel !== rec.recommendedModel ? `${displayModel(currentModel)} → ${rec.recommendedModel}` : `${rec.recommendedModel} (${t("setup.tag.matches")})`;
-			return [rec.role, category(rec.category), change, rec.thinking];
+			const change = currentModel !== rec.recommendedModel ? `${displayModel(currentModel)} → ${rec.recommendedModel}` : pixelText("hp", `${rec.recommendedModel} (${t("setup.tag.matches")})`, mode);
+			return [first(idx === rCur, rec.role), category(rec.category), change, thinkingCell(rec.thinking)];
 		}),
 		wide - 4,
-		{ prefixes: recs.map((_rec, idx) => (idx === rCur ? "▸ " : "  ")), head: heading },
+		{ prefixes: recs.map((_rec, idx) => marker(idx === rCur)), head: heading },
 	);
 	lines.push(grid[0]!, grid[1]!);
 	recs.forEach((rec, idx) => {
 		input.rowLines?.push(lines.length);
-		lines.push(idx === rCur ? heading(grid[idx + 2]!) : grid[idx + 2]!);
+		lines.push(grid[idx + 2]!);
 		if (idx === rCur) lines.push(tone("dim", `      ${t("setup.cc.why", { reason: rec.reason })}`));
 	});
 	return framed(t("setup.tab.advisor"));

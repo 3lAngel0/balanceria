@@ -9,6 +9,7 @@
 import { CONTENT_X, CONTENT_Y, emphasize, sameTarget, wheelOffset, type MouseTarget } from "./control-center-mouse.ts";
 import { HELP_MIN_WIDTH, HELP_WIDTH, helpBox, helpMainWidth, helpVisible, type HelpContext } from "./help-panel.ts";
 import { t } from "./i18n/index.ts";
+import { pixelBar, pixelText, type ColorMode, type PixelColor } from "./pixel.ts";
 import type { RoutingStrategy } from "./router.ts";
 import { ROLE_CATALOG, THINKING_DEFAULT, buildAvailableModelTargets, displayModel, displayThinking } from "./setup-advisor.ts";
 import {
@@ -100,6 +101,11 @@ export interface StepperUi {
 	/** Rows of the scrollable body viewport. */
 	bodyRows: number;
 	paint?: (tone: StepperTone, text: string) => string;
+	/** How much color the terminal gets; plain text when omitted. Colors never change the text or the click areas. */
+	mode?: ColorMode;
+	/** Animation frame and whether it may move. */
+	frame?: number;
+	animate?: boolean;
 }
 
 export interface StepperView {
@@ -133,17 +139,27 @@ export function stepRows(s: SetupStepperState): StepRow[] {
 	}
 }
 
-/** Table cells of a provider or role row. */
-const rowCells = (s: SetupStepperState, row: StepRow): string[] => {
+const THINKING_COLOR: Record<string, PixelColor> = { low: "steel", medium: "gold", high: "xp" };
+
+/** Table cells of a provider or role row; `mode` only adds color to the same text. */
+const rowCells = (s: SetupStepperState, row: StepRow, mode: ColorMode = "none"): string[] => {
 	if (row.kind === "provider") {
 		const p = s.detected.find(d => d.id === row.id)!;
 		const on = s.enabled.includes(p.id);
 		const state = !p.detected ? t("setup.stepper.provider.missing") : on ? t("setup.stepper.provider.found") : t("setup.stepper.provider.off");
-		return [p.label, `${p.detected ? "✓" : "✗"} ${state}`, p.detected ? p.source : "–", on ? "[x]" : "[ ]"];
+		const color: PixelColor = !p.detected ? "bad" : on ? "hp" : "slate";
+		return [p.label, pixelText(color, `${p.detected ? "✓" : "✗"} ${state}`, mode), p.detected ? p.source : "–", on ? "[x]" : "[ ]"];
 	}
 	if (row.kind === "role") {
 		const route = s.roles[row.role];
-		return [row.role, displayModel(route?.model ?? "(unassigned)"), displayThinking(route?.thinking ?? THINKING_DEFAULT)];
+		const model = displayModel(route?.model ?? "(unassigned)");
+		const level = route?.thinking ?? THINKING_DEFAULT;
+		const modelColor: PixelColor | undefined = route?.model === undefined ? "slate" : route.model.startsWith("pool/") ? "sky" : undefined;
+		return [
+			row.role,
+			modelColor ? pixelText(modelColor, model, mode) : model,
+			pixelText(THINKING_COLOR[level] ?? "slate", displayThinking(level), mode),
+		];
 	}
 	return [];
 };
@@ -183,6 +199,7 @@ export function renderStepper(screen: StepperScreen, ui: StepperUi): StepperView
 	const side = helpOn && inner >= HELP_MIN_WIDTH;
 	const left = helpMainWidth(inner, helpOn);
 	const edge = (text: string) => paint("dim", text);
+	const mode: ColorMode = ui.mode ?? "none";
 	const boxInner = left - 4;
 	const hits: StepperHit[] = [];
 	const hot = (target: MouseTarget, text: string) => (sameTarget(target, screen.hover) ? emphasize(text, "hover") : text);
@@ -199,7 +216,9 @@ export function renderStepper(screen: StepperScreen, ui: StepperUi): StepperView
 		column += label.length + 3;
 		return step === s.step ? paint("accent", hot({ kind: "tab", tab: step }, label)) : reachable ? hot({ kind: "tab", tab: step }, label) : paint("dim", label);
 	});
-	lines.push(crumbs.join(" › "));
+	const stepNumber = SETUP_STEPS.indexOf(s.step) + 1;
+	const stepBar = pixelBar(stepNumber / SETUP_STEPS.length, 8, { mode, frame: ui.frame, animate: ui.animate });
+	lines.push(`${crumbs.join(" › ")}  ${stepBar} ${stepNumber}/${SETUP_STEPS.length}`);
 	lines.push(...wrap(t(stepDescription(s.step)), left).map(line => paint("dim", line)), "");
 
 	// Body: scrollable; remember which content line each selectable row occupies.
@@ -208,12 +227,26 @@ export function renderStepper(screen: StepperScreen, ui: StepperUi): StepperView
 	const rows = stepRows(s);
 	const errors = s.step === "confirm" ? validateStep(s, "confirm") : (s.messages[s.step] ?? []);
 	for (const message of errors) body.push(...wrapIndented(`! ${message}`, boxInner).map(line => paint("warn", line)));
-	if (s.step === "confirm") body.push(...buildStepperDiff(s, screen.current).lines.flatMap(line => wrapIndented(line, boxInner)));
+	const diffColor = (line: string): PixelColor | undefined => {
+		const mark = line.trimStart()[0];
+		if (mark === "+") return "hp";
+		if (mark === "~") return "gold";
+		if (mark === "-") return "bad";
+		return /Unchanged/.test(line) ? "steel" : line.endsWith(":") ? "sky" : undefined;
+	};
+	if (s.step === "confirm") {
+		for (const raw of buildStepperDiff(s, screen.current).lines) {
+			for (const line of wrapIndented(raw, boxInner)) {
+				const color = diffColor(raw);
+				body.push(color ? pixelText(color, line, mode) : line);
+			}
+		}
+	}
 	if (s.step === "roles") body.push(...wrap(t("setup.stepper.rolesHint"), boxInner).map(line => paint("dim", line)));
 	const headers = s.step === "providers" ? ["provider", "status", "source", "enabled"] : s.step === "roles" ? ["role", "model", "thinking"] : [];
 	const grid =
 		headers.length > 0
-			? table(headers.map(key => t(`setup.col.${key}`)), rows.map(row => rowCells(s, row)), boxInner, { prefixes: rows.map((_row, i) => (i === screen.cursor ? "› " : "  ")), head: text => paint("accent", text) })
+			? table(headers.map(key => t(`setup.col.${key}`)), rows.map(row => rowCells(s, row, mode)), boxInner, { prefixes: rows.map((_row, i) => (i === screen.cursor ? "› " : "  ")), head: text => paint("accent", text) })
 			: undefined;
 	if (grid) body.push(grid[0]!, grid[1]!);
 	rows.forEach((row, index) => {
@@ -250,7 +283,8 @@ export function renderStepper(screen: StepperScreen, ui: StepperUi): StepperView
 			const text = `[ ${button.label} ]`;
 			if (button.enabled) hit({ kind: "button", id: button.id }, x, text.length);
 			x += text.length + 1;
-			return button.enabled ? hot({ kind: "button", id: button.id }, text) : paint("dim", text);
+			const color: PixelColor | undefined = button.id === "save" ? "hp" : button.id === "discard" ? "bad" : undefined;
+			return button.enabled ? hot({ kind: "button", id: button.id }, color ? pixelText(color, text, mode) : text) : paint("dim", text);
 		});
 		lines.push(cells.join(" "));
 	}
