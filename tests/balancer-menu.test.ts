@@ -15,9 +15,19 @@ test("the menu offers every action with a label and a description, in a stable o
 	}
 });
 
-test("no arguments opens the menu", () => {
-	assert.deepEqual(resolveBalancerArgs(""), { kind: "menu" });
-	assert.deepEqual(resolveBalancerArgs("   "), { kind: "menu" });
+test("no arguments opens the Control Center and `menu` keeps the action list", () => {
+	assert.deepEqual(resolveBalancerArgs(""), { kind: "overlay" });
+	assert.deepEqual(resolveBalancerArgs("   "), { kind: "overlay" });
+	assert.deepEqual(resolveBalancerArgs(" menu "), { kind: "menu" });
+});
+
+test("tab names open the Control Center on that tab", () => {
+	for (const tab of ["overview", "roles", "pools", "advisor"]) {
+		assert.deepEqual(resolveBalancerArgs(tab), { kind: "overlay", tab }, tab);
+	}
+	assert.deepEqual(resolveBalancerArgs("  pools "), { kind: "overlay", tab: "pools" });
+	assert.equal(resolveBalancerArgs("roles extra").kind, "unknown");
+	assert.deepEqual(resolveBalancerArgs("panel"), { kind: "command", command: "panel" });
 });
 
 test("known subcommands still run directly", () => {
@@ -33,7 +43,7 @@ test("an unknown subcommand is reported instead of opening the panel", () => {
 	setLang("en");
 	assert.deepEqual(resolveBalancerArgs("serv"), {
 		kind: "unknown",
-		message: 'ai-balancer: unknown subcommand "serv". Run /balancer for the menu, or one of: panel, usage, refresh, setup, report, simulate [file], switch-cost, loans, permissions [grant | revoke [id|all]], lab [new | diff | simulate | apply | undo | discard], serve [lan] [port] | setup | stop | status | autostart off, open <id>, lang [es|en|auto]',
+		message: 'ai-balancer: unknown subcommand "serv". Run /balancer for the Control Center, /balancer menu for every action, or one of: overview, roles, pools, advisor, panel, usage, refresh, setup, report, simulate [file], switch-cost, loans, permissions [grant | revoke [id|all]], lab [new | diff | simulate | apply | undo | discard], serve [lan] [port] | setup | stop | status | autostart off, open <id>, lang [es|en|auto]',
 	});
 	assert.equal(resolveBalancerArgs("servefoo").kind, "unknown");
 	assert.equal(resolveBalancerArgs("opener").kind, "unknown");

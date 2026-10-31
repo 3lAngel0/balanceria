@@ -4,7 +4,8 @@ import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { Key, matchesKey, SelectList, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { Key, matchesKey, SelectList, truncateToWidth, visibleWidth, type TuiMouseEvent, type TuiMouseEventResult } from "@earendil-works/pi-tui";
+import { CONTENT_X, emphasize, hitTest, layoutButtons, sameTarget, tabHitAreas, wheelOffset, type ButtonCell, type HitLayout, type MouseTarget } from "./control-center-mouse.ts";
 import { BALANCER_MENU, balancerMenu, glossaryText, resolveBalancerArgs } from "./balancer-menu.ts";
 import { initLang, getLang, setLang, saveLangSetting, t } from "./i18n/index.ts";
 import { detectFirewall, privateIPv4Networks, readAutostart, readTls, runLanSetup, writeAutostart, writeTls, type Runner } from "./lan-setup.ts";
@@ -17,7 +18,7 @@ import { topConsumers, withAliases } from "./consumers.ts";
 import { HUD_VIEWS, hudHints, moveCursor, pressRedKey, renderHud, selectedSessionTarget, suggestionEnter, SESSIONS_PER_ROLE, visibleSessions, type HudViewName, type PendingConfirm } from "./hud.ts";
 import { runHudChoice, type HudChoice } from "./hud-actions.ts";
 import { loadIntegrations } from "./integrations.ts";
-import { renderPanel, statusLine, statusWithContext, turnTelemetry, renderControlCenter, controlCenterHints, CONTROL_CENTER_TABS, type ControlCenterTab, type TurnTelemetry } from "./panel.ts";
+import { renderPanel, statusLine, statusWithContext, turnTelemetry, renderControlCenter, controlCenterButtons, controlCenterTabLabels, CONTROL_CENTER_TABS, type ControlCenterTab, type TurnTelemetry } from "./panel.ts";
 import { ROLE_CATALOG, buildAvailableModelTargets, recommendRolesHeuristic, recommendRolesWithAdvisor, createDefaultCliAiRunner, applyRecommendationsToProfile, type AdvisorReport } from "./setup-advisor.ts";
 import { applySuggestionToProfile, DEFAULT_PROFILES_PATH, loadProfilesStore, qualifyModel, readProfiles, saveProfilesStore, type ProfilesStore } from "./profiles.ts";
 import { loadPrices } from "./prices.ts";
@@ -925,8 +926,18 @@ export default function aiBalancer(pi: ExtensionAPI) {
 		);
 	};
 
-	const openControlCenter = (ctx: ExtensionContext): Promise<void> => {
-		let tab: ControlCenterTab = "overview";
+	/**
+	 * The Control Center overlay. With `canPickAction` (the slash command, which can run what is picked) `/` closes it
+	 * and resolves with "menu"; the shortcut has no command context, so there `/` only leaves a hint.
+	 */
+	const showControlCenter = (ctx: ExtensionContext, initialTab: ControlCenterTab, canPickAction: boolean): Promise<string | undefined> => {
+		let tab: ControlCenterTab = initialTab;
+		let pickedAction: string | undefined;
+		let helpOpen = false;
+		let hover: MouseTarget | undefined;
+		let pressed: MouseTarget | undefined;
+		let hitLayout: HitLayout | undefined;
+		let sendKey: (input: string) => void = () => {};
 		let cursor = 0;
 		let poolCursor = 0;
 		let rolePickerOpen = false;
@@ -982,8 +993,29 @@ export default function aiBalancer(pi: ExtensionAPI) {
 				});
 
 				const border = (text: string) => theme.fg("border", text);
-				return {
+				const component = {
 					handleInput(input: string) {
+						if (helpOpen) {
+							helpOpen = false;
+							tui.requestRender();
+							return;
+						}
+						if (input === "?") {
+							helpOpen = true;
+							tui.requestRender();
+							return;
+						}
+						if (input === "/") {
+							// The action list is a separate picker: close the overlay, the caller runs the choice.
+							if (!canPickAction) {
+								note = "Run /balancer menu for the full action list.";
+								tui.requestRender();
+								return;
+							}
+							pickedAction = "menu";
+							done();
+							return;
+						}
 						if (matchesKey(input, Key.escape)) {
 							if (rolePickerOpen) {
 								rolePickerOpen = false;
@@ -1356,7 +1388,11 @@ export default function aiBalancer(pi: ExtensionAPI) {
 							? [...new Set([...activePoolCfg.candidates, ...allCandidateOptions])]
 							: allCandidateOptions;
 
-						const allLines = renderControlCenter({
+						const rowLines: number[] = [];
+						const rendered = renderControlCenter({
+							hover,
+							pressed,
+							rowLines,
 							tab,
 							width: inner,
 							folded: fold(),
@@ -1379,6 +1415,7 @@ export default function aiBalancer(pi: ExtensionAPI) {
 							poolCandidateOptions,
 							poolCandidateCursor,
 						});
+						const allLines = helpOpen ? glossaryText().split("\n") : rendered;
 
 						if (followSelected) {
 							followSelected = false;
@@ -1395,21 +1432,64 @@ export default function aiBalancer(pi: ExtensionAPI) {
 						const top = border("╭─") + theme.bold(theme.fg("accent", title)) + border(`${"─".repeat(Math.max(0, inner + 1 - visibleWidth(title)))}╮`);
 						const row = (styled: string) =>
 							`${border("│")} ${styled}${" ".repeat(Math.max(0, inner - visibleWidth(styled)))} ${border("│")}`;
-						const rows = sliced.lines.map(line => {
+						const rows = sliced.lines.map((line, i) => {
 							const styled =
 								line !== plain(line) ? paint(line, (tone, text) => theme.fg(tone, text)) :
 								/^[A-Z0-9\[]/.test(line) ? theme.fg("accent", line) :
 								line;
-							return row(truncateToWidth(styled, inner));
+							const rowIndex = rowLines.indexOf(sliced.offset + i);
+							const state = rowIndex < 0 ? undefined : pressed?.kind === "row" && pressed.index === rowIndex ? "pressed" : hover?.kind === "row" && hover.index === rowIndex ? "hover" : undefined;
+							return row(truncateToWidth(emphasize(styled, state), inner));
 						});
-						const hints = controlCenterHints(tab);
-						return [
-							top,
-							...rows,
-							row(""),
-							row(theme.fg("dim", truncateToWidth(hints, inner))),
-							border(`╰${"─".repeat(inner + 2)}╯`),
-						];
+						const cells = layoutButtons(controlCenterButtons(tab), inner);
+						const buttonRows = cells.length === 0 ? 0 : cells[cells.length - 1].row + 1;
+						const footer = Array.from({ length: buttonRows }, (_unused, r) => {
+							const inRow = cells.filter(c => c.row === r);
+							const text = inRow
+								.map((c: ButtonCell, i) => {
+									const gap = i === 0 ? "" : " ".repeat(c.start - inRow[i - 1].end);
+									const state = pressed?.kind === "button" && pressed.id === c.button.id ? "pressed" : hover?.kind === "button" && hover.id === c.button.id ? "hover" : undefined;
+									return gap + emphasize(theme.fg(c.button.input ? "accent" : "dim", c.text), state);
+								})
+								.join("");
+							return row(text);
+						});
+						hitLayout = { tabAreas: helpOpen ? [] : tabHitAreas(controlCenterTabLabels()), rowLines: helpOpen ? [] : rowLines, offset: sliced.offset, bodyRows: rows.length, buttonCells: cells };
+						pressed = undefined;
+						return [top, ...rows, row(""), ...footer, border(`╰${"─".repeat(inner + 2)}╯`)];
+					},
+					// Pointer events only reach overlays under TuiAltScreen; in the main screen this is never called and the keys still work.
+					handleMouse(event: TuiMouseEvent): TuiMouseEventResult | undefined {
+						if (!hitLayout) return undefined;
+						if (event.type === "wheel") {
+							if (helpOpen || !event.wheelDelta) return undefined;
+							offset = wheelOffset(offset, event.wheelDelta);
+							return { handled: true, render: true };
+						}
+						const target = hitTest(hitLayout, event.x, event.y);
+						if (event.type === "move") {
+							if (sameTarget(target, hover)) return { handled: true, render: false };
+							hover = target;
+							return { handled: true, render: true };
+						}
+						if (event.type !== "click" || event.button !== "left" || !target) return undefined;
+						pressed = target;
+						if (target.kind === "tab") {
+							sendKey(String(CONTROL_CENTER_TABS.indexOf(target.tab as ControlCenterTab) + 1));
+						} else if (target.kind === "button") {
+							const input = controlCenterButtons(tab).find(b => b.id === target.id)?.input;
+							if (input) sendKey(input);
+						} else if (!rolePickerOpen && !poolEditOpen) {
+							const selected = tab === "pools" ? poolCursor : cursor;
+							if (target.index === selected) {
+								sendKey("\r");
+							} else {
+								if (tab === "pools") poolCursor = target.index;
+								else cursor = target.index;
+								followSelected = true;
+							}
+						}
+						return { handled: true, render: true };
 					},
 					invalidate() {},
 					dispose() {
@@ -1417,9 +1497,15 @@ export default function aiBalancer(pi: ExtensionAPI) {
 						closePanel = undefined;
 					},
 				};
+				sendKey = input => component.handleInput(input);
+				return component;
 			},
 			{ overlay: true, overlayOptions: { width: "86%", minWidth: 72, anchor: "center" } },
-		);
+		).then(() => pickedAction);
+	};
+
+	const openControlCenter = async (ctx: ExtensionContext, initialTab: ControlCenterTab = "overview"): Promise<void> => {
+		await showControlCenter(ctx, initialTab, false);
 	};
 
 	const togglePanel = (ctx: ExtensionContext) => {
@@ -1951,7 +2037,7 @@ export default function aiBalancer(pi: ExtensionAPI) {
 	};
 
 	pi.registerCommand("balancer", {
-		description: "ai-balancer: `/balancer` opens a menu of every action; or run one directly: `/balancer panel|usage|refresh|setup|report|simulate|switch-cost|loans|lab|permissions`, `/balancer serve [lan] [port|stop|status]`, `/balancer open <id>`, `/balancer lang [es|en|auto]`",
+		description: "ai-balancer: `/balancer` opens the Control Center (`/balancer roles|pools|advisor` jumps to a tab, `/balancer menu` lists every action); or run one directly: `/balancer panel|usage|refresh|setup|report|simulate|switch-cost|loans|lab|permissions`, `/balancer serve [lan] [port|stop|status]`, `/balancer open <id>`, `/balancer lang [es|en|auto]`",
 		handler: async (args, ctx) => {
 			const resolved = resolveBalancerArgs(args);
 			if (resolved.kind === "unknown") {
@@ -1963,6 +2049,11 @@ export default function aiBalancer(pi: ExtensionAPI) {
 				return;
 			}
 			if (!ctx.hasUI) return;
+			if (resolved.kind === "overlay") {
+				// `/` inside the overlay asks for the flat action list; it runs after the overlay closes.
+				if (closePanel) closePanel();
+				if ((await showControlCenter(ctx, resolved.tab ?? "overview", true)) !== "menu") return;
+			}
 			const choice = await pickBalancerAction(ctx);
 			if (choice) await runBalancerCommand(choice, ctx);
 		},

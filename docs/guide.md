@@ -518,7 +518,7 @@ Operational overlay showing real-time subscription burn velocity (`+X%/h`), rese
 
 | Command | Arguments | Description |
 |---|---|---|
-| `/balancer` | *(none)* | Opens interactive command menu. |
+| `/balancer` | *(none)* | Opens the Control Center overlay; `roles`, `pools`, `advisor` jump to a tab, `menu` lists every action. Mouse works under the alternate screen only. |
 | `/balancer panel` | *(none)* | Toggles sidebar overlay and Control Center (`Ctrl+Alt+B`). |
 | `/balancer usage` | *(none)* | Opens 5-tab usage and quota console (`Ctrl+Alt+U`). |
 | `/balancer setup` | *(none)* | Launches interactive setup wizard. |

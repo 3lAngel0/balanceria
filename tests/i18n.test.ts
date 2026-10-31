@@ -131,7 +131,7 @@ test("t() placeholder substitution, Spanish fallback, and unknown keys", () => {
 	setLang("en");
 	assert.equal(
 		t("menu.unknownSubcommand", { command: "foo" }),
-		'ai-balancer: unknown subcommand "foo". Run /balancer for the menu, or one of: panel, usage, refresh, setup, report, simulate [file], switch-cost, loans, permissions [grant | revoke [id|all]], lab [new | diff | simulate | apply | undo | discard], serve [lan] [port] | setup | stop | status | autostart off, open <id>, lang [es|en|auto]',
+		'ai-balancer: unknown subcommand "foo". Run /balancer for the Control Center, /balancer menu for every action, or one of: overview, roles, pools, advisor, panel, usage, refresh, setup, report, simulate [file], switch-cost, loans, permissions [grant | revoke [id|all]], lab [new | diff | simulate | apply | undo | discard], serve [lan] [port] | setup | stop | status | autostart off, open <id>, lang [es|en|auto]',
 	);
 
 	// Unknown key returns key itself
@@ -141,7 +141,7 @@ test("t() placeholder substitution, Spanish fallback, and unknown keys", () => {
 	setLang("es");
 	assert.equal(
 		t("menu.unknownSubcommand", { command: "foo" }),
-		'ai-balancer: comando desconocido "foo". Ejecuta /balancer para ver el menú, o uno de: panel, usage, refresh, setup, report, simulate [file], switch-cost, loans, permissions [grant | revoke [id|all]], lab [new | diff | simulate | apply | undo | discard], serve [lan] [port] | setup | stop | status | autostart off, open <id>, lang [es|en|auto]',
+		'ai-balancer: comando desconocido "foo". Ejecuta /balancer para abrir el Centro de control, /balancer menu para ver todas las acciones, o uno de: overview, roles, pools, advisor, panel, usage, refresh, setup, report, simulate [file], switch-cost, loans, permissions [grant | revoke [id|all]], lab [new | diff | simulate | apply | undo | discard], serve [lan] [port] | setup | stop | status | autostart off, open <id>, lang [es|en|auto]',
 	);
 
 	// Reset back to en

@@ -1,8 +1,10 @@
 import type { SelectItem } from "@earendil-works/pi-tui";
 import { t } from "./i18n/index.ts";
+import type { ControlCenterTab } from "./panel.ts";
 
-// `/balancer` with no arguments opens this menu; every entry's value is the
-// subcommand it runs, so the menu and the typed subcommands share one path.
+// `/balancer menu` (and `/` inside the Control Center) opens this list; every
+// entry's value is the subcommand it runs, so the menu and the typed
+// subcommands share one path.
 
 export function balancerMenu(): SelectItem[] {
 	return [
@@ -56,13 +58,23 @@ export function glossaryText(): string {
 	return [t("menu.help.title"), ...["pool", "candidate", "loan", "grant", "breaker", "role", "pace", "resent"].map(term => `  ${t(`menu.help.${term}`)}`)].join("\n");
 }
 
-export type BalancerArgs = { kind: "menu" } | { kind: "command"; command: string } | { kind: "unknown"; message: string };
+/** `overlay` opens the Control Center (on `tab` when given); `menu` is the flat action list. */
+export type BalancerArgs =
+	| { kind: "overlay"; tab?: ControlCenterTab }
+	| { kind: "menu" }
+	| { kind: "command"; command: string }
+	| { kind: "unknown"; message: string };
+
+const TAB_COMMANDS: readonly ControlCenterTab[] = ["overview", "roles", "pools", "advisor"];
 
 const SIMPLE = new Set(["panel", "usage", "refresh", "setup", "report", "simulate", "switch-cost", "loans", "help"]);
 
 export function resolveBalancerArgs(args: string): BalancerArgs {
 	const command = args.trim();
-	if (command === "") return { kind: "menu" };
+	if (command === "") return { kind: "overlay" };
+	if (command === "menu") return { kind: "menu" };
+	const tab = TAB_COMMANDS.find(name => name === command);
+	if (tab) return { kind: "overlay", tab };
 	if (
 		SIMPLE.has(command) ||
 		/^(serve|open|simulate)(\s|$)/.test(command) ||
