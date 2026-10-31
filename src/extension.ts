@@ -314,17 +314,9 @@ export default function aiBalancer(pi: ExtensionAPI) {
 		registerPoolUsage();
 	});
 
-	/** The breaker's status, cleared first when its pool has quota again (it only trips on a quota error). */
-	const circuitStatus = () => {
-		const tripped = circuitBreaker.getStatus();
-		const pool = tripped.tripped ? pools.find(candidate => candidate.id === tripped.poolId) : undefined;
-		if (pool) circuitBreaker.reopenIfAvailable(pool.candidates, fold().state, Date.now());
-		return circuitBreaker.getStatus();
-	};
-
 	const refreshStatus = (ctx: ExtensionContext) => {
 		if (!ctx.hasUI) return;
-		const status = statusLine(fold(), Date.now(), circuitStatus(), lastTurnTelemetry);
+		const status = statusLine(fold(), Date.now(), circuitBreaker.getStatus(), lastTurnTelemetry);
 		const paint = (level: string, text: string) => ctx.ui.theme.fg(level === "alert" ? "error" : "warning", text);
 		ctx.ui.setStatus(STATUS_KEY, statusWithContext(status, currentSession(ctx).contextTokens, paint));
 	};
@@ -663,7 +655,7 @@ export default function aiBalancer(pi: ExtensionAPI) {
 				suggestions,
 				sessionPaths,
 				current,
-				circuit: circuitStatus(),
+				circuit: circuitBreaker.getStatus(),
 				routes,
 			});
 		},
@@ -1402,7 +1394,7 @@ export default function aiBalancer(pi: ExtensionAPI) {
 							width: helpMainWidth(inner, showHelp),
 							folded: fold(),
 							now: Date.now(),
-							circuitStatus: circuitStatus(),
+							circuitStatus: circuitBreaker.getStatus(),
 							activeProfile: activeProfileName,
 							pools: currentPoolConfigs,
 							roles: activeProfileRoles,
