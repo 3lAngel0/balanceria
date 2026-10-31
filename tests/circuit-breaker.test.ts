@@ -108,18 +108,29 @@ test("CircuitBreaker lets go on its own once a candidate of the tripped pool has
 	}
 });
 
-test("CircuitBreaker reopens when a fresh quota reading says the window has margin, before its old reset time", () => {
+test("CircuitBreaker reopens when a fresh quota reading shows margin on a candidate that was only on a guessed cooldown", () => {
 	const dir = mkdtempSync(join(tmpdir(), "cb-test-"));
 	try {
 		const cb = new CircuitBreaker(dir);
 		const state = new QuotaState();
 		state.markExhausted("antigravity/claude", NOW + 3_600_000, "weekly");
-		state.markExhausted("claude-bridge/claude", NOW + 1_800_000, "5h");
+		// No reset time from the provider: the cooldown is our guess, so fresh data can lift it.
+		state.markExhausted("claude-bridge/claude", undefined, "5h", NOW);
 		cb.checkAndTrip({ poolId: "claude-opus-5-5", candidates: CANDIDATES, state, session: "sess-1", project: "proj-1", now: NOW });
 
 		state.setQuotaFraction("claude-bridge/claude", 0.82, NOW + 7 * 86_400_000, NOW + 120_000);
 		assert.equal(cb.reopenIfAvailable(CANDIDATES, state, NOW + 120_000), true);
 		assert.equal(cb.isTripped(), false);
+
+		// Whereas a provider-given reset time is not overridden by a reading with margin.
+		const strict = new QuotaState();
+		strict.markExhausted("antigravity/claude", NOW + 3_600_000, "weekly");
+		strict.markExhausted("claude-bridge/claude", NOW + 1_800_000, "5h");
+		const other = new CircuitBreaker(dir);
+		other.checkAndTrip({ poolId: "claude-opus-5-5", candidates: CANDIDATES, state: strict, session: "s", project: "p", now: NOW });
+		strict.setQuotaFraction("claude-bridge/claude", 0.82, NOW + 7 * 86_400_000, NOW + 120_000);
+		assert.equal(other.reopenIfAvailable(CANDIDATES, strict, NOW + 120_000), false);
+		assert.equal(other.isTripped(), true);
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
 	}

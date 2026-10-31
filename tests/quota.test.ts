@@ -140,3 +140,48 @@ test("QuotaState applies agy usage: an empty group is exhausted until reset, a r
 	state.applyAgyUsage(new Map([["Claude and GPT models", { remainingFraction: 0.8, resetAt: undefined }]]), now);
 	assert.equal(state.isAvailable("antigravity/claude", now), true);
 });
+
+const T0 = Date.parse("2026-10-16T12:00:00Z");
+const HOUR_MS = 3_600_000;
+const POLL = (fraction: number) => new Map([["Gemini Models", { remainingFraction: fraction, resetAt: T0 + 2 * HOUR_MS }]]);
+
+test("a 429 with an explicit reset time keeps blocking while a /usage reading still shows margin", () => {
+	const state = new QuotaState();
+	state.markExhausted("antigravity/gemini", T0 + 5 * HOUR_MS, "Individual quota reached. Resets in 4h53m", T0);
+
+	state.applyAgyUsage(POLL(0.17), T0 + 5 * 60_000);
+	assert.equal(state.isAvailable("antigravity/gemini", T0 + 5 * 60_000), false, "the provider said it is spent until the reset");
+	assert.equal(state.availableAt("antigravity/gemini", T0 + 5 * 60_000), T0 + 5 * HOUR_MS);
+	assert.equal(state.remainingFraction("antigravity/gemini"), 0.17, "the reading itself is still recorded");
+
+	state.setQuotaFraction("antigravity/gemini", 0.5, T0 + 6 * HOUR_MS, T0 + 10 * 60_000);
+	assert.equal(state.isAvailable("antigravity/gemini", T0 + 10 * 60_000), false, "a quota event does not lift it either");
+});
+
+test("once the explicit reset time has passed, the next reading with margin lifts the block", () => {
+	const state = new QuotaState();
+	state.markExhausted("antigravity/gemini", T0 + HOUR_MS, "Individual quota reached", T0);
+	assert.equal(state.isAvailable("antigravity/gemini", T0 + HOUR_MS + 1), true, "the window passing reopens it on its own");
+
+	state.applyAgyUsage(POLL(0.3), T0 + HOUR_MS + 1);
+	assert.equal(state.isAvailable("antigravity/gemini", T0 + HOUR_MS + 1), true);
+	assert.equal(state.snapshot().get("antigravity/gemini")?.exhaustedUntil, undefined, "no stale exhaustion is left behind");
+	state.markExhausted("antigravity/gemini", undefined, "again", T0 + 2 * HOUR_MS);
+	state.applyAgyUsage(POLL(0.3), T0 + 2 * HOUR_MS + 1);
+	assert.equal(state.isAvailable("antigravity/gemini", T0 + 2 * HOUR_MS + 1), true, "an old explicit block does not outlive its own expiry");
+});
+
+test("an exhaustion without a reset time is still lifted early by a reading with margin", () => {
+	const state = new QuotaState({ defaultCooldownMs: 30 * 60_000 });
+	state.markExhausted("antigravity/gemini", undefined, "quota hit, no reset given", T0);
+	assert.equal(state.isAvailable("antigravity/gemini", T0 + 60_000), false);
+	state.applyAgyUsage(POLL(0.4), T0 + 60_000);
+	assert.equal(state.isAvailable("antigravity/gemini", T0 + 60_000), true, "the cooldown was only a guess, so fresh data wins");
+});
+
+test("a reading of 0% never shortens a longer explicit block", () => {
+	const state = new QuotaState();
+	state.markExhausted("antigravity/gemini", T0 + 5 * HOUR_MS, "Individual quota reached", T0);
+	state.applyAgyUsage(POLL(0), T0 + 60_000);
+	assert.equal(state.availableAt("antigravity/gemini", T0 + 60_000), T0 + 5 * HOUR_MS, "the later of the two reset times wins");
+});
