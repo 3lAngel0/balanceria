@@ -486,10 +486,10 @@ Al ejecutar `/balancer setup` se inicia el asistente:
 2. **Selección de estrategia**: Elija `hybrid` (recomendada) o `waterfall`.
 3. **Resolución de perfil**:
    - **Perfil activo detectado**: Consulta `"Tenés un perfil activo: '<nombre>'. ¿Querés armar uno personalizado con el balanceador?"`, permitiendo conservar el perfil actual o crear uno nuevo bajo la convención `balanceador_<identificador>`.
-   - **Sin perfil activo**: Dispara automáticamente `"profiles.json: No active profile found. ¿Creamos un perfil para vos?"` para generar `balanceador_<identificador>`.
+   - **Sin perfil activo**: Dispara automáticamente `"profiles.json: No hay un perfil activo. ¿Creamos un perfil para vos?"` para generar `balanceador_<identificador>`.
 4. **Reordenamiento de candidatos**: Suba o baje la prioridad de candidatos (`u`/`d`), o actívelos/desactívelos.
 5. **Asesor de asignación de roles**: Ejecute el asesor heurístico o con IA ligera (~350 tokens) para optimizar destinos por rol.
-6. **Menú del Hub**: Acceso a la creación o derivación de perfiles (`👤 ¿Creamos un perfil para vos? / Nuevo perfil (balanceador_<id>)…`) en cualquier momento.
+6. **Menú del Hub**: Acceso a la creación o derivación de perfiles (`👤 Nuevo perfil (balanceador_<id>)…`) en cualquier momento.
 7. **Guardado atómico**: Escribe `pools.json`, `integrations.json` y `profiles.json` con copias de respaldo estampadas (`.bak`).
 
 ---
@@ -538,6 +538,7 @@ Superposición operativa en terminal que muestra la velocidad de consumo de susc
 | `/balancer lab discard` | *(ninguno)* | Descarta el borrador sandbox activo. |
 | `/balancer switch-cost` | *(ninguno)* | Genera reporte de retención de caché frente a costo de cambio. |
 | `/balancer loans` | *(ninguno)* | Abre la consola de préstamos temporales de modelos. |
+| `/balancer help` | *(ninguno)* | Muestra un glosario breve de los términos del balanceador. |
 | `/balancer permissions` | *(ninguno)* | Lista permisos autónomos activos para préstamos de modelos. |
 | `/balancer lang` | `[es\|en\|auto]` | Consulta o modifica el idioma de la interfaz. |
 | `/hud` | *(ninguno)* | Abre el Heads-Up Display en terminal. |

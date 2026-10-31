@@ -5,7 +5,7 @@ import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Key, matchesKey, SelectList, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
-import { BALANCER_MENU, balancerMenu, resolveBalancerArgs } from "./balancer-menu.ts";
+import { BALANCER_MENU, balancerMenu, glossaryText, resolveBalancerArgs } from "./balancer-menu.ts";
 import { initLang, getLang, setLang, saveLangSetting, t } from "./i18n/index.ts";
 import { detectFirewall, privateIPv4Networks, readAutostart, readTls, runLanSetup, writeAutostart, writeTls, type Runner } from "./lan-setup.ts";
 import { createCertificate, inspectCertificate, type TlsConfig } from "./tls-setup.ts";
@@ -1475,7 +1475,7 @@ export default function aiBalancer(pi: ExtensionAPI) {
 					return;
 				}
 				const grant = addGrant(DATA_DIR, draft, Date.now());
-				ctx.ui.notify(`ai-balancer: granted ${grant.id} (${grant.level}) until ${new Date(grant.expiresAt).toISOString().slice(0, 16)}Z`, "info");
+				ctx.ui.notify(`ai-balancer: grant ${grant.id} saved (${grant.level}): the balancer may use the covered models for those roles until ${new Date(grant.expiresAt).toISOString().slice(0, 16)}Z`, "info");
 				return;
 			}
 			let id = args.slice(7).trim();
@@ -1709,6 +1709,10 @@ export default function aiBalancer(pi: ExtensionAPI) {
 				// "auto": forget the saved choice and follow the system language again.
 				saveLangSetting(SETTINGS_FILE, undefined);
 				ctx.ui.notify(t("menu.langAuto", describe(initLang(SETTINGS_FILE))), "info");
+				return;
+			}
+			if (command === "help") {
+				ctx.ui.notify(glossaryText(), "info");
 				return;
 			}
 			if (command === "panel") {

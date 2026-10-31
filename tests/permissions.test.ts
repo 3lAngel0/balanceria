@@ -204,7 +204,7 @@ test("pruneExpired leaves an unreadable file and a missing file alone", () => {
 // formatting and suggestions
 
 test("formatGrants lists each grant with id, level, scope and expiry state", () => {
-	assert.equal(formatGrants([], NOW), "ai-balancer: no permissions granted (level off: show only). Grant one with /balancer permissions grant");
+	assert.equal(formatGrants([], NOW), "ai-balancer: no grants yet. A grant is your permission for the balancer to use another model for a role (level off: show only). Create one with /balancer permissions grant");
 	const live = grant({ id: "live" });
 	const old = grant({ id: "old", level: "suggest", expiresAt: NOW - 1 });
 	const text = formatGrants([live, old], NOW);

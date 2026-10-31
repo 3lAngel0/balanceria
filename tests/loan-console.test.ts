@@ -43,9 +43,9 @@ test("loanNotices notifies once per status and ignores closed loans", () => {
 	// Proposed (suggest)
 	const notices1 = loanNotices([loan], seen, now);
 	assert.equal(notices1.length, 1);
-	assert.ok(notices1[0].startsWith("ai-balancer: loan proposed — "));
+	assert.ok(notices1[0].startsWith("ai-balancer: loan proposed (temporary fallback to another model) — "));
 	assert.ok(notices1[0].includes("suggest: waits for you"));
-	assert.ok(notices1[0].endsWith(". Run /balancer loans to choose."));
+	assert.ok(notices1[0].endsWith(". Run /balancer loans to review or keep it."));
 	assert.ok(seen.has(`${loan.id}:proposed`));
 
 	// Proposed (auto)
@@ -62,16 +62,16 @@ test("loanNotices notifies once per status and ignores closed loans", () => {
 	const activeLoan: Loan = { ...loan, status: "active", decidedBy: "user", decidedAt: 1500 };
 	const noticesActive = loanNotices([activeLoan], seen, now);
 	assert.equal(noticesActive.length, 1);
-	assert.ok(noticesActive[0].startsWith("ai-balancer: loan active — "));
-	assert.ok(noticesActive[0].endsWith(". Run /balancer loans to choose."));
+	assert.ok(noticesActive[0].startsWith("ai-balancer: loan active (temporary fallback to another model) — "));
+	assert.ok(noticesActive[0].endsWith(". Run /balancer loans to review or keep it."));
 	assert.ok(seen.has(`${loan.id}:active`));
 
 	// Status transition to ended
 	const endedLoan: Loan = { ...loan, status: "ended", endedAt: 2000 };
 	const noticesEnded = loanNotices([endedLoan], seen, now);
 	assert.equal(noticesEnded.length, 1);
-	assert.ok(noticesEnded[0].startsWith("ai-balancer: loan ended — "));
-	assert.ok(noticesEnded[0].endsWith(". Run /balancer loans to choose."));
+	assert.ok(noticesEnded[0].startsWith("ai-balancer: loan ended (temporary fallback to another model) — "));
+	assert.ok(noticesEnded[0].endsWith(". Run /balancer loans to review or keep it."));
 	assert.ok(seen.has(`${loan.id}:ended`));
 
 	// Closed statuses produce no notice
@@ -124,7 +124,7 @@ test("chooseLoanAction notifies when there are no loans and returns undefined", 
 	assert.equal(res, undefined);
 	assert.equal(
 		notified,
-		"ai-balancer: no loans. A loan is proposed when a pool's preferred model is spent and a permission grant covers the role (/balancer permissions grant).",
+		"ai-balancer: no loans. A loan is a temporary fallback to another model when a role's preferred model has no quota left. One is proposed once a grant (your permission to use another model for that role) covers the role: /balancer permissions grant.",
 	);
 
 	// Also with only closed loans

@@ -192,6 +192,7 @@ Select a pool model directly in chat via `/model pool/claude-sonnet-5-5` or conf
 | `/balancer usage` or `Ctrl+Alt+U` | Open full 5-tab Usage Console (Now, Quotas, Days, Sessions, HUD). |
 | `/balancer setup` | Launch interactive configuration wizard and provider detector. |
 | `/balancer lang [es\|en\|auto]` | Inspect or switch active UI language without restarting. |
+| `/balancer help` | Short glossary: pool, candidate, loan, grant, circuit breaker, role, window pace, context re-sent. |
 | `/balancer serve [lan] [port]` | Start real-time authenticated web dashboard (supports LAN mode & TLS). |
 | `/balancer lab` | Sandbox mode: create, diff, simulate, and safely apply pool rule changes. |
 | `/balancer switch-cost` | Report prompt cache retention benefits vs. provider switching costs. |

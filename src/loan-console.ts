@@ -32,7 +32,7 @@ export function loanNotices(loans: readonly Loan[], seen: Set<string>, now: numb
 		const key = `${loan.id}:${loan.status}`;
 		if (seen.has(key)) continue;
 		seen.add(key);
-		notices.push(`ai-balancer: loan ${loan.status} — ${formatLoan(loan, now)}. Run /balancer loans to choose.`);
+		notices.push(`ai-balancer: loan ${loan.status} (temporary fallback to another model) — ${formatLoan(loan, now)}. Run /balancer loans to review or keep it.`);
 	}
 	return notices;
 }
@@ -90,7 +90,7 @@ export async function chooseLoanAction(
 	const candidates = loans.filter(loan => NOTIFY_STATUSES.has(loan.status));
 	if (candidates.length === 0) {
 		ui.notify(
-			"ai-balancer: no loans. A loan is proposed when a pool's preferred model is spent and a permission grant covers the role (/balancer permissions grant).",
+			"ai-balancer: no loans. A loan is a temporary fallback to another model when a role's preferred model has no quota left. One is proposed once a grant (your permission to use another model for that role) covers the role: /balancer permissions grant.",
 		);
 		return undefined;
 	}
