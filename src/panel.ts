@@ -12,6 +12,7 @@ import {
 	type RoleCategory,
 } from "./setup-advisor.ts";
 import { tone } from "./style.ts";
+import { box, table, wrap } from "./tui-box.ts";
 import { t } from "./i18n/index.ts";
 
 // Plain-text rendering of the side panel, status line, and the interactive
@@ -248,40 +249,53 @@ export function renderControlCenter(input: ControlCenterRenderInput): string[] {
 		lines.push(tone("warning", `  ${t("setup.cc.notice", { note: input.note })}`), "");
 	}
 
+	const head = lines.length;
+	const wide = Math.max(40, input.width);
+	const edge = (text: string) => tone("dim", text);
+	const heading = (text: string) => tone("accent", text);
+	const col = (key: string) => t(`setup.col.${key}`);
+	const bare = (text: string) => text.replace(/:$/, "");
 	const rows = resolveEffectiveRoleRoutes(input.roles, input.pools, input.lastRoutedByPool);
 	const snapshot = input.folded.state.snapshot();
+	const rowStart = input.rowLines?.length ?? 0;
+	// The body gathered since the header goes in one titled box; selectable rows move down by its top border.
+	const framed = (title: string): string[] => {
+		const body = lines.splice(head);
+		if (input.rowLines) for (let i = rowStart; i < input.rowLines.length; i++) input.rowLines[i] += 1;
+		return [...lines, ...box(title, body, wide, edge)];
+	};
+	const note = (text: string) => wrap(text, wide - 4).map(line => tone("dim", line));
+	const category = (cat: RoleCategory) => `[${t(`setup.category.${cat}`)}]`;
 
 	if (input.tab === "overview") {
-		lines.push(tone("accent", t("setup.cc.activeProfile", { name: input.activeProfile ?? t("setup.none") })));
-		if (input.folded.lastRoute) {
-			lines.push(`  ${t("setup.cc.lastRoute", { pool: input.folded.lastRoute.pool, provider: input.folded.lastRoute.provider })}`);
-		} else {
-			lines.push(tone("dim", `  ${t("setup.cc.lastRouteIdle")}`));
-		}
-		lines.push("");
-
-		lines.push(tone("accent", t("setup.cc.poolsTitle")));
-		if (input.pools.length === 0) {
-			lines.push(tone("dim", `  ${t("setup.cc.noPools")}`));
-		} else {
-			for (const pool of input.pools) {
-				const active = input.lastRoutedByPool?.[pool.id] ?? (input.folded.lastRoute?.pool === pool.id ? input.folded.lastRoute.provider : undefined);
-				const activeTag = active ? ` (${t("setup.cc.active", { provider: active })})` : "";
-				lines.push(`  • pool/${pad(pool.id, 18)} [${pool.strategy ?? "hybrid"}]${activeTag}`);
-				lines.push(`      ${pool.candidates.join(" → ")}`);
-			}
-		}
-		lines.push("");
-
-		lines.push(tone("accent", t("setup.cc.rolesTitle")));
-		for (const row of rows) {
-			lines.push(
-				`  ${pad(row.role, 20)} ${categoryBadge(row.category)} → ${pad(displayModel(row.configuredModel), 28)} (${displayThinking(row.thinking)})`,
-			);
-		}
-		lines.push("");
-
-		lines.push(tone("accent", t("setup.cc.windowsTitle")));
+		const profile = box(
+			t("setup.box.profile"),
+			[
+				heading(t("setup.cc.activeProfile", { name: input.activeProfile ?? t("setup.none") })),
+				input.folded.lastRoute
+					? t("setup.cc.lastRoute", { pool: input.folded.lastRoute.pool, provider: input.folded.lastRoute.provider })
+					: tone("dim", t("setup.cc.lastRouteIdle")),
+			],
+			wide,
+			edge,
+		);
+		const poolRows = input.pools.map(pool => {
+			const active = input.lastRoutedByPool?.[pool.id] ?? (input.folded.lastRoute?.pool === pool.id ? input.folded.lastRoute.provider : undefined);
+			return [`pool/${pool.id}`, pool.strategy ?? "hybrid", active ? `✓ ${active}` : "–", pool.candidates.join(" → ")];
+		});
+		const pools = box(
+			bare(t("setup.cc.poolsTitle")),
+			poolRows.length === 0 ? [tone("dim", t("setup.cc.noPools"))] : table([col("pool"), col("strategy"), col("active"), col("candidates")], poolRows, wide - 4, { head: heading }),
+			wide,
+			edge,
+		);
+		const roles = box(
+			bare(t("setup.cc.rolesTitle")),
+			table([col("role"), col("type"), col("model"), col("thinking")], rows.map(row => [row.role, category(row.category), displayModel(row.configuredModel), displayThinking(row.thinking)]), wide - 4, { head: heading }),
+			wide,
+			edge,
+		);
+		const windows: string[] = [];
 		const keys = new Set([...snapshot.keys(), "claude-bridge/claude"]);
 		for (const key of [...keys].sort((a, b) => KEY_ORDER.indexOf(a) - KEY_ORDER.indexOf(b))) {
 			const entry = snapshot.get(key);
@@ -289,26 +303,27 @@ export function renderControlCenter(input: ControlCenterRenderInput): string[] {
 			const fraction = entry?.remainingFraction;
 			if (fraction !== undefined) {
 				const percent = `${Math.round(fraction * 100)}%`.padStart(4);
-				lines.push(`  ${pad(keyLabel(key), 16)} ${bar(fraction)} ${percent}`);
+				windows.push(`${pad(keyLabel(key), 16)} ${bar(fraction)} ${percent}`);
 			} else {
-				lines.push(`  ${pad(keyLabel(key), 16)} ${available ? t("setup.window.ok") : t("setup.window.spent")}`);
+				windows.push(`${pad(keyLabel(key), 16)} ${available ? t("setup.window.ok") : t("setup.window.spent")}`);
 			}
 		}
-		return lines;
+		return [...lines, ...profile, ...pools, ...roles, ...box(bare(t("setup.cc.windowsTitle")), windows, wide, edge)];
 	}
 
 	if (input.tab === "roles") {
-		lines.push(
-			tone("accent", t("setup.cc.rolesHeader", { name: input.activeProfile ?? t("setup.none") })),
-			tone("dim", t("setup.cc.rolesHelp")),
-			"",
-		);
+		lines.push(heading(t("setup.cc.rolesHeader", { name: input.activeProfile ?? t("setup.none") })), ...note(t("setup.cc.rolesHelp")), "");
 		const cur = Math.max(0, Math.min(rows.length - 1, input.cursor ?? 0));
+		const grid = table(
+			[col("role"), col("type"), col("model"), col("thinking")],
+			rows.map(row => [row.role, category(row.category), displayModel(row.configuredModel), displayThinking(row.thinking)]),
+			wide - 4,
+			{ prefixes: rows.map((_row, idx) => (idx === cur ? "▸ " : "  ")), head: heading },
+		);
+		lines.push(grid[0]!, grid[1]!);
 		rows.forEach((row, idx) => {
 			input.rowLines?.push(lines.length);
-			const prefix = idx === cur ? "▸ " : "  ";
-			const line = `${prefix}${pad(row.role, 20)} ${categoryBadge(row.category)}  ${t("setup.cc.model")}: ${pad(displayModel(row.configuredModel), 30)} ${t("setup.cc.thinking")}: ${displayThinking(row.thinking)}`;
-			lines.push(idx === cur ? tone("accent", line) : line);
+			lines.push(idx === cur ? heading(grid[idx + 2]!) : grid[idx + 2]!);
 			if (idx === cur) {
 				lines.push(tone("dim", `      ${t("setup.cc.task", { purpose: row.purpose })}`));
 				lines.push(tone("dim", `      ${t("setup.cc.effective", { target: displayModel(row.effectiveTarget) })}`));
@@ -326,25 +341,26 @@ export function renderControlCenter(input: ControlCenterRenderInput): string[] {
 				}
 			}
 		});
-		return lines;
+		return framed(t("setup.tab.roles"));
 	}
 
 	if (input.tab === "pools") {
-		lines.push(
-			tone("accent", t("setup.cc.poolsHeader")),
-			tone("dim", t("setup.cc.poolsHelp")),
-			"",
-		);
+		lines.push(heading(t("setup.cc.poolsHeader")), ...note(t("setup.cc.poolsHelp")), "");
 		const pCur = Math.max(0, Math.min(Math.max(0, input.pools.length - 1, 0), input.poolCursor ?? 0));
 		if (input.pools.length === 0) {
 			lines.push(tone("dim", `  ${t("setup.cc.noPoolsWizard")}`));
 		} else {
+			const grid = table(
+				[col("pool"), col("strategy"), col("name")],
+				input.pools.map(pool => [`pool/${pool.id}`, pool.strategy ?? "hybrid", pool.name]),
+				wide - 4,
+				{ prefixes: input.pools.map((_pool, idx) => (idx === pCur ? "▸ " : "  ")), head: heading },
+			);
+			lines.push(grid[0]!, grid[1]!);
 			input.pools.forEach((pool, idx) => {
 				input.rowLines?.push(lines.length);
-				const prefix = idx === pCur ? "▸ " : "  ";
-				const head = `${prefix}pool/${pool.id}  [${pool.strategy ?? "hybrid"}] — ${pool.name}`;
-				lines.push(idx === pCur ? tone("accent", head) : head);
-				lines.push(`      ${t("setup.cc.candidates", { list: pool.candidates.join(" → ") })}`);
+				lines.push(idx === pCur ? heading(grid[idx + 2]!) : grid[idx + 2]!);
+				for (const part of wrap(t("setup.cc.candidates", { list: pool.candidates.join(" → ") }), wide - 4 - 6)) lines.push(`      ${part}`);
 				if (idx === pCur && input.poolEditOpen && input.poolCandidateOptions && input.poolCandidateOptions.length > 0) {
 					lines.push(tone("accent", `      ${t("setup.cc.editCandidates", { pool: pool.id })}`));
 					const cCur = Math.max(0, Math.min(input.poolCandidateOptions.length - 1, input.poolCandidateCursor ?? 0));
@@ -359,31 +375,32 @@ export function renderControlCenter(input: ControlCenterRenderInput): string[] {
 				}
 			});
 		}
-		lines.push("");
-		lines.push(tone("accent", t("setup.cc.providersTitle")));
-		for (const p of input.providers) {
-			const status = p.detected ? t("setup.provider.detected", { source: p.source }) : t("setup.provider.notDetected");
-			lines.push(`  • ${pad(p.label, 28)} [${p.id}] : ${status}`);
-			if (p.detected && p.availableModels.length > 0) {
-				lines.push(tone("dim", `      ${t("setup.cc.models", { list: p.availableModels.map(m => `${p.id}/${m}`).join(", ") })}`));
-			}
-		}
-		return lines;
+		lines.push("", heading(t("setup.cc.providersTitle")));
+		lines.push(
+			...table(
+				[col("provider"), col("id"), col("status"), col("models")],
+				input.providers.map(p => [
+					p.label,
+					p.id,
+					p.detected ? `✓ ${t("setup.provider.detected", { source: p.source })}` : `✗ ${t("setup.provider.notDetected")}`,
+					p.detected && p.availableModels.length > 0 ? p.availableModels.map(m => `${p.id}/${m}`).join(", ") : "–",
+				]),
+				wide - 4,
+				{ head: heading },
+			),
+		);
+		return framed(t("setup.tab.pools"));
 	}
 
 	// Tab 4: Advisor
-	lines.push(
-		tone("accent", t("setup.cc.advisorHeader")),
-		tone("dim", t("setup.cc.advisorHelp")),
-		"",
-	);
+	lines.push(heading(t("setup.cc.advisorHeader")), ...note(t("setup.cc.advisorHelp")), "");
 	if (input.advisorLoading) {
 		lines.push(tone("warning", `  ${t("setup.cc.advisorLoading")}`));
-		return lines;
+		return framed(t("setup.tab.advisor"));
 	}
 	if (!input.advisor) {
 		lines.push(tone("dim", `  ${t("setup.cc.advisorEmpty")}`));
-		return lines;
+		return framed(t("setup.tab.advisor"));
 	}
 
 	lines.push(
@@ -392,18 +409,24 @@ export function renderControlCenter(input: ControlCenterRenderInput): string[] {
 		"",
 	);
 	const rCur = Math.max(0, Math.min(input.advisor.recommendations.length - 1, input.cursor ?? 0));
-	input.advisor.recommendations.forEach((rec, idx) => {
+	const recs = input.advisor.recommendations;
+	const grid = table(
+		[col("role"), col("type"), col("change"), col("thinking")],
+		recs.map(rec => {
+			const currentModel = input.roles?.[rec.role]?.model ?? UNASSIGNED;
+			const change = currentModel !== rec.recommendedModel ? `${displayModel(currentModel)} → ${rec.recommendedModel}` : `${rec.recommendedModel} (${t("setup.tag.matches")})`;
+			return [rec.role, category(rec.category), change, rec.thinking];
+		}),
+		wide - 4,
+		{ prefixes: recs.map((_rec, idx) => (idx === rCur ? "▸ " : "  ")), head: heading },
+	);
+	lines.push(grid[0]!, grid[1]!);
+	recs.forEach((rec, idx) => {
 		input.rowLines?.push(lines.length);
-		const prefix = idx === rCur ? "▸ " : "  ";
-		const currentModel = input.roles?.[rec.role]?.model ?? UNASSIGNED;
-		const changed = currentModel !== rec.recommendedModel ? `${displayModel(currentModel)} → ${rec.recommendedModel}` : `${rec.recommendedModel} (${t("setup.tag.matches")})`;
-		const line = `${prefix}${pad(rec.role, 20)} ${categoryBadge(rec.category)}  ${changed} [${rec.thinking}]`;
-		lines.push(idx === rCur ? tone("accent", line) : line);
-		if (idx === rCur) {
-			lines.push(tone("dim", `      ${t("setup.cc.why", { reason: rec.reason })}`));
-		}
+		lines.push(idx === rCur ? heading(grid[idx + 2]!) : grid[idx + 2]!);
+		if (idx === rCur) lines.push(tone("dim", `      ${t("setup.cc.why", { reason: rec.reason })}`));
 	});
-	return lines;
+	return framed(t("setup.tab.advisor"));
 }
 
 export function statusLine(

@@ -32,7 +32,8 @@ import { formatSimulation, poolOfSelection, readPoolSelections, simulate } from 
 import { activeRoutes, applyDraft, createDraft, diffLab, discardDraft, formatApplyConfirm, formatLabDiff, formatRoleMoves, hasDraft, hasUndo, LAB_POOLS, LAB_PROFILES, profilePoolOf, readDraft, roleMoves, undoApply, type LabTexts } from "./lab.ts";
 import { addGrant, formatGrants, loadPermissions, pruneExpired, revokeGrants, runPermissionGrant } from "./permissions.ts";
 import { summarizeQuota } from "./quota-report.ts";
-import { paint, plain } from "./style.ts";
+import { paint, plain, tone } from "./style.ts";
+import { helpMainWidth, helpVisible, withHelp } from "./help-panel.ts";
 import { renderAdvancedUsage, summarizeHistory, USAGE_VIEWS, type CurrentSession, type UsageViewName } from "./usage-panel.ts";
 import { keepRowVisible, scrollStep, sliceViewport } from "./viewport.ts";
 import { ignoredRuleWarnings, parsePools, POOL_PROVIDER, quotaKeyFor, type Pool } from "./pools.ts";
@@ -935,7 +936,8 @@ export default function aiBalancer(pi: ExtensionAPI) {
 	const showControlCenter = (ctx: ExtensionContext, initialTab: ControlCenterTab, canPickAction: boolean): Promise<string | undefined> => {
 		let tab: ControlCenterTab = initialTab;
 		let pickedAction: string | undefined;
-		let helpOpen = false;
+		let helpShown: boolean | undefined;
+		let lastInner = 0;
 		let hover: MouseTarget | undefined;
 		let pressed: MouseTarget | undefined;
 		let hitLayout: HitLayout | undefined;
@@ -997,13 +999,8 @@ export default function aiBalancer(pi: ExtensionAPI) {
 				const border = (text: string) => theme.fg("border", text);
 				const component = {
 					handleInput(input: string) {
-						if (helpOpen) {
-							helpOpen = false;
-							tui.requestRender();
-							return;
-						}
 						if (input === "?") {
-							helpOpen = true;
+							helpShown = !helpVisible(helpShown, lastInner);
 							tui.requestRender();
 							return;
 						}
@@ -1375,6 +1372,8 @@ export default function aiBalancer(pi: ExtensionAPI) {
 					},
 					render(width: number): string[] {
 						const inner = Math.max(40, width - 4);
+						lastInner = inner;
+						const showHelp = helpVisible(helpShown, inner);
 						const height = bodyHeight();
 						const store = loadProfilesStore();
 						const activeProfileName = store?.active;
@@ -1392,7 +1391,7 @@ export default function aiBalancer(pi: ExtensionAPI) {
 							pressed,
 							rowLines,
 							tab,
-							width: inner,
+							width: helpMainWidth(inner, showHelp),
 							folded: fold(),
 							now: Date.now(),
 							circuitStatus: circuitBreaker.getStatus(),
@@ -1413,11 +1412,11 @@ export default function aiBalancer(pi: ExtensionAPI) {
 							poolCandidateOptions,
 							poolCandidateCursor,
 						});
-						const allLines = helpOpen ? glossaryText().split("\n") : rendered;
+						const allLines = withHelp(rendered, { kind: "tab", tab, strategy: tab === "pools" ? currentPoolConfigs[poolCursor]?.strategy : undefined }, inner, showHelp, text => tone("dim", text));
 
 						if (followSelected) {
 							followSelected = false;
-							const selectedRow = allLines.findIndex(line => plain(line).startsWith("▸ "));
+							const selectedRow = allLines.findIndex(line => /^│ ▸ /.test(plain(line)));
 							if (selectedRow >= 0) {
 								offset = keepRowVisible(offset, Math.min(selectedRow + 2, allLines.length - 1), allLines.length, height);
 								offset = keepRowVisible(offset, selectedRow, allLines.length, height);
@@ -1452,15 +1451,15 @@ export default function aiBalancer(pi: ExtensionAPI) {
 								.join("");
 							return row(text);
 						});
-						hitLayout = { tabAreas: helpOpen ? [] : tabHitAreas(controlCenterTabLabels()), rowLines: helpOpen ? [] : rowLines, offset: sliced.offset, bodyRows: rows.length, buttonCells: cells };
+						hitLayout = { tabAreas: tabHitAreas(controlCenterTabLabels()), rowLines, offset: sliced.offset, bodyRows: rows.length, buttonCells: cells };
 						pressed = undefined;
-						return [top, ...rows, row(""), ...footer, border(`╰${"─".repeat(inner + 2)}╯`)];
+						return [top, ...rows, row(border("─".repeat(inner))), ...footer, border(`╰${"─".repeat(inner + 2)}╯`)];
 					},
 					// Pointer events only reach overlays under TuiAltScreen; in the main screen this is never called and the keys still work.
 					handleMouse(event: TuiMouseEvent): TuiMouseEventResult | undefined {
 						if (!hitLayout) return undefined;
 						if (event.type === "wheel") {
-							if (helpOpen || !event.wheelDelta) return undefined;
+							if (!event.wheelDelta) return undefined;
 							offset = wheelOffset(offset, event.wheelDelta);
 							return { handled: true, render: true };
 						}
@@ -1498,7 +1497,7 @@ export default function aiBalancer(pi: ExtensionAPI) {
 				sendKey = input => component.handleInput(input);
 				return component;
 			},
-			{ overlay: true, overlayOptions: { width: "86%", minWidth: 72, anchor: "center" } },
+			{ overlay: true, overlayOptions: { width: "90%", minWidth: 72, anchor: "center" } },
 		).then(() => pickedAction);
 	};
 
@@ -1566,7 +1565,7 @@ export default function aiBalancer(pi: ExtensionAPI) {
 					render(width: number): string[] {
 						const inner = Math.max(20, width - 4);
 						const view = renderStepper(screen, { width, bodyRows: bodyRows(), paint });
-						screen = { ...screen, hits: view.hits, offset: view.offset, follow: false };
+						screen = { ...screen, hits: view.hits, offset: view.offset, helpOn: view.helpOn, follow: false };
 						const border = (text: string) => theme.fg("border", text);
 						const row = (text: string) => `${border("│")} ${truncateToWidth(text, inner, "…", true)} ${border("│")}`;
 						return [border(`╭${"─".repeat(inner + 2)}╮`), ...view.lines.map(row), border(`╰${"─".repeat(inner + 2)}╯`)];
@@ -1585,7 +1584,7 @@ export default function aiBalancer(pi: ExtensionAPI) {
 					invalidate() {},
 				};
 			},
-			{ overlay: true, overlayOptions: { width: "86%", minWidth: 72, anchor: "center" } },
+			{ overlay: true, overlayOptions: { width: "90%", minWidth: 72, anchor: "center" } },
 		);
 
 		if (effect !== "save") {

@@ -7,6 +7,7 @@
 // the Control Center, see control-center-mouse.ts).
 
 import { CONTENT_X, CONTENT_Y, emphasize, sameTarget, wheelOffset, type MouseTarget } from "./control-center-mouse.ts";
+import { HELP_MIN_WIDTH, HELP_WIDTH, helpBox, helpMainWidth, helpVisible, type HelpContext } from "./help-panel.ts";
 import { t } from "./i18n/index.ts";
 import type { RoutingStrategy } from "./router.ts";
 import { ROLE_CATALOG, THINKING_DEFAULT, buildAvailableModelTargets, displayModel, displayThinking } from "./setup-advisor.ts";
@@ -28,6 +29,7 @@ import {
 	type SetupStepperState,
 	type StepperCurrent,
 } from "./setup-stepper.ts";
+import { box, sideBySide, table, wrap, wrapIndented } from "./tui-box.ts";
 
 // Raw terminal sequences (legacy and kitty CSI-u); the view stays free of pi-tui so it runs in plain node tests.
 const KEYS = {
@@ -77,6 +79,10 @@ export interface StepperScreen {
 	follow: boolean;
 	hover?: MouseTarget;
 	confirmDiscard: boolean;
+	/** Explicit help toggle (`?`); undefined follows the width. */
+	help?: boolean;
+	/** Whether the last frame showed the Help box, so `?` knows which way to toggle. */
+	helpOn?: boolean;
 	/** Hit areas of the last rendered frame. */
 	hits: readonly StepperHit[];
 }
@@ -101,6 +107,7 @@ export interface StepperView {
 	hits: StepperHit[];
 	/** The offset actually used, after clamping and following the cursor. */
 	offset: number;
+	helpOn: boolean;
 }
 
 const THINKING_LEVELS = ["low", "medium", "high"] as const;
@@ -126,25 +133,24 @@ export function stepRows(s: SetupStepperState): StepRow[] {
 	}
 }
 
-const wrap = (text: string, width: number): string[] => {
-	const lines: string[] = [];
-	let line = "";
-	for (const word of text.split(" ")) {
-		if (line && line.length + 1 + word.length > width) {
-			lines.push(line);
-			line = word;
-		} else line = line ? `${line} ${word}` : word;
+/** Table cells of a provider or role row. */
+const rowCells = (s: SetupStepperState, row: StepRow): string[] => {
+	if (row.kind === "provider") {
+		const p = s.detected.find(d => d.id === row.id)!;
+		const on = s.enabled.includes(p.id);
+		const state = !p.detected ? t("setup.stepper.provider.missing") : on ? t("setup.stepper.provider.found") : t("setup.stepper.provider.off");
+		return [p.label, `${p.detected ? "✓" : "✗"} ${state}`, p.detected ? p.source : "–", on ? "[x]" : "[ ]"];
 	}
-	return line ? [...lines, line] : lines;
+	if (row.kind === "role") {
+		const route = s.roles[row.role];
+		return [row.role, displayModel(route?.model ?? "(unassigned)"), displayThinking(route?.thinking ?? THINKING_DEFAULT)];
+	}
+	return [];
 };
 
+/** Plain text of a pool or candidate row (the strategy step is a tree, not a table). */
 const rowText = (s: SetupStepperState, row: StepRow): string => {
 	switch (row.kind) {
-		case "provider": {
-			const p = s.detected.find(d => d.id === row.id)!;
-			const state = !p.detected ? t("setup.stepper.provider.missing") : s.enabled.includes(p.id) ? t("setup.stepper.provider.found") : t("setup.stepper.provider.off");
-			return `[${s.enabled.includes(p.id) ? "x" : " "}] ${p.label} — ${state}`;
-		}
 		case "pool": {
 			const pool = s.pools.find(p => p.id === row.poolId)!;
 			return t("setup.stepper.poolLine", { pool: pool.id, strategy: pool.strategy });
@@ -153,10 +159,8 @@ const rowText = (s: SetupStepperState, row: StepRow): string => {
 			const position = s.pools.find(p => p.id === row.poolId)!.candidates.indexOf(row.ref);
 			return `  [${position >= 0 ? "x" : " "}] ${position >= 0 ? `${position + 1}. ` : "   "}${row.ref}`;
 		}
-		case "role": {
-			const route = s.roles[row.role];
-			return `${row.role.padEnd(22)} ${displayModel(route?.model ?? "(unassigned)")} · ${displayThinking(route?.thinking ?? THINKING_DEFAULT)}`;
-		}
+		default:
+			return rowCells(s, row).join("  ");
 	}
 };
 
@@ -175,6 +179,11 @@ export function renderStepper(screen: StepperScreen, ui: StepperUi): StepperView
 	const s = screen.stepper;
 	const paint = ui.paint ?? ((_tone, text) => text);
 	const inner = Math.max(20, ui.width - CONTENT_X * 2);
+	const helpOn = helpVisible(screen.help, inner);
+	const side = helpOn && inner >= HELP_MIN_WIDTH;
+	const left = helpMainWidth(inner, helpOn);
+	const edge = (text: string) => paint("dim", text);
+	const boxInner = left - 4;
 	const hits: StepperHit[] = [];
 	const hot = (target: MouseTarget, text: string) => (sameTarget(target, screen.hover) ? emphasize(text, "hover") : text);
 	const lines: string[] = [];
@@ -191,22 +200,27 @@ export function renderStepper(screen: StepperScreen, ui: StepperUi): StepperView
 		return step === s.step ? paint("accent", hot({ kind: "tab", tab: step }, label)) : reachable ? hot({ kind: "tab", tab: step }, label) : paint("dim", label);
 	});
 	lines.push(crumbs.join(" › "));
-	lines.push(...wrap(t(stepDescription(s.step)), inner).map(line => paint("dim", line)), "");
+	lines.push(...wrap(t(stepDescription(s.step)), left).map(line => paint("dim", line)), "");
 
 	// Body: scrollable; remember which content line each selectable row occupies.
 	const body: string[] = [];
 	const rowLines: number[] = [];
 	const rows = stepRows(s);
 	const errors = s.step === "confirm" ? validateStep(s, "confirm") : (s.messages[s.step] ?? []);
-	for (const message of errors) body.push(paint("warn", `! ${message}`));
-	if (s.step === "confirm") body.push(...buildStepperDiff(s, screen.current).lines);
-	if (s.step === "roles") body.push(paint("dim", t("setup.stepper.rolesHint")));
+	for (const message of errors) body.push(...wrapIndented(`! ${message}`, boxInner).map(line => paint("warn", line)));
+	if (s.step === "confirm") body.push(...buildStepperDiff(s, screen.current).lines.flatMap(line => wrapIndented(line, boxInner)));
+	if (s.step === "roles") body.push(...wrap(t("setup.stepper.rolesHint"), boxInner).map(line => paint("dim", line)));
+	const headers = s.step === "providers" ? ["provider", "status", "source", "enabled"] : s.step === "roles" ? ["role", "model", "thinking"] : [];
+	const grid =
+		headers.length > 0
+			? table(headers.map(key => t(`setup.col.${key}`)), rows.map(row => rowCells(s, row)), boxInner, { prefixes: rows.map((_row, i) => (i === screen.cursor ? "› " : "  ")), head: text => paint("accent", text) })
+			: undefined;
+	if (grid) body.push(grid[0]!, grid[1]!);
 	rows.forEach((row, index) => {
 		rowLines.push(body.length);
-		const text = rowText(s, row);
 		const selected = index === screen.cursor;
 		const target: MouseTarget = { kind: "row", index };
-		const out = `${selected ? "›" : " "} ${text}`;
+		const out = grid ? grid[index + 2]! : `${selected ? "›" : " "} ${rowText(s, row)}`;
 		body.push(selected ? paint("accent", hot(target, out)) : hot(target, out));
 	});
 
@@ -219,13 +233,15 @@ export function renderStepper(screen: StepperScreen, ui: StepperUi): StepperView
 		else if (cursorLine >= offset + viewport) offset = cursorLine - viewport + 1;
 		offset = Math.min(offset, maxOffset);
 	}
+	// The body sits in a titled box: a row's hit starts after the left border, one line below the top edge.
+	const boxStart = lines.length;
+	const shown: string[] = [];
 	for (let i = 0; i < viewport; i++) {
-		const line = offset + i;
-		const rowIndex = rowLines.indexOf(line);
-		if (rowIndex >= 0) hit({ kind: "row", index: rowIndex }, 0, inner);
-		lines.push(body[line] ?? "");
+		const rowIndex = rowLines.indexOf(offset + i);
+		if (rowIndex >= 0) hits.push({ target: { kind: "row", index: rowIndex }, y: CONTENT_Y + boxStart + 1 + i, start: CONTENT_X + 2, end: CONTENT_X + 2 + boxInner });
+		shown.push(body[offset + i] ?? "");
 	}
-	lines.push("");
+	lines.push(...box(s.step === "confirm" ? t("setup.stepper.box.changes") : t(`setup.stepper.step.${s.step}`), shown, left, edge));
 
 	if (screen.confirmDiscard) lines.push(paint("warn", t("setup.stepper.confirmDiscard")));
 	else {
@@ -238,8 +254,13 @@ export function renderStepper(screen: StepperScreen, ui: StepperUi): StepperView
 		});
 		lines.push(cells.join(" "));
 	}
-	lines.push(paint("dim", t("setup.stepper.hint")));
-	return { lines, hits, offset };
+	lines.push(...wrap(t("setup.stepper.hint"), left).map(line => paint("dim", line)));
+
+	if (!helpOn) return { lines, hits, offset, helpOn };
+	const poolId = (rows[screen.cursor] as { poolId?: string } | undefined)?.poolId;
+	const context: HelpContext = { kind: "step", step: s.step, strategy: s.step === "strategy" ? s.pools.find(p => p.id === poolId)?.strategy : undefined };
+	const out = side ? sideBySide(lines, helpBox(context, HELP_WIDTH, edge), left, HELP_WIDTH, 1) : [...lines, "", ...helpBox(context, inner, edge)];
+	return { lines: out, hits, offset, helpOn };
 }
 
 export function hitStepper(hits: readonly StepperHit[], x: number, y: number): MouseTarget | undefined {
@@ -301,6 +322,7 @@ export function stepperInput(screen: StepperScreen, event: StepperEvent): Result
 	if (event.type === "key") {
 		const key = event.data;
 		if (screen.confirmDiscard) return key === "y" ? { state: screen, effect: "cancel" } : none({ ...screen, confirmDiscard: false });
+		if (key === "?") return none({ ...screen, help: !(screen.helpOn ?? false) });
 		if (is(key, "escape")) return s.dirty ? none({ ...screen, confirmDiscard: true }) : { state: screen, effect: "cancel" };
 		if (is(key, "right") || key === "l" || is(key, "tab")) return runButton(screen, "next");
 		if (is(key, "left") || key === "h" || is(key, "shiftTab")) return runButton(screen, "back");

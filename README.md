@@ -89,7 +89,7 @@ flowchart TD
 - 🔄 **Transparent Failover**: Intercepts provider quota exhaustion and stalls, rewriting them into retryable `429` signals that trigger Pi's native retry against the next available candidate.
 - 🛡️ **Failover Cost Containment**: When an expensive candidate (`input + output` > $15/M, such as Opus) fails, retries strictly filter for cheaper candidates first.
 - ⚡ **Circuit Breaker**: When all candidates in a pool are exhausted, the circuit breaker halts retries immediately, saves an emergency checkpoint to `data/circuit-breaker-checkpoint.json`, and alerts the user.
-- 📊 **Interactive TUI & Web Control Center**: Live status bar, side panel overlay (`Ctrl+Alt+B`), comprehensive 5-tab usage console (`Ctrl+Alt+U`), Heads-Up Display (`/hud`), and an authenticated local/LAN web dashboard (`/balancer serve`).
+- 📊 **Interactive TUI & Web Control Center** (boxed tables with a plain-language Help box, `?` toggles it): Live status bar, side panel overlay (`Ctrl+Alt+B`), comprehensive 5-tab usage console (`Ctrl+Alt+U`), Heads-Up Display (`/hud`), and an authenticated local/LAN web dashboard (`/balancer serve`).
 - 🔒 **100% Offline & Private**: All data is stored strictly on your local disk in `data/`. No external telemetry, no remote tracker, and no stored API keys. See [Security and Privacy](docs/SECURITY-AND-PRIVACY.md).
 
 ---

@@ -116,3 +116,25 @@ test("renderControlCenter renders inline model picker in roles tab and candidate
 	assert.match(poolsLines.join("\n"), /\[ \]    antigravity\/gemini-3-8-flash/);
 });
 
+
+import { plain } from "../src/style.ts";
+
+test("renderControlCenter draws boxed tables and its row indexes point at the selected boxed row", () => {
+	const folded = foldEvents(EVENTS, NOW);
+	const pools = [
+		{ id: "sonnet", name: "Sonnet", candidates: ["antigravity/s", "claude-bridge/s"], strategy: "hybrid" as const },
+		{ id: "opus", name: "Opus", candidates: ["claude-bridge/o"], strategy: "waterfall" as const },
+	];
+	const overview = renderControlCenter({ tab: "overview", width: 90, folded, now: NOW, activeProfile: "p", pools, providers: [] }).map(plain);
+	assert.ok(overview.some(line => /^╭─ Profile & last route ─+╮$/.test(line)));
+	assert.ok(overview.some(line => /Pool\s+Strategy\s+Active\s+Candidates in order/.test(line)));
+	assert.ok(overview.some(line => /Role\s+Type\s+Model\s+Thinking/.test(line)));
+	for (const line of overview.slice(2)) assert.equal([...line].length, 90, line);
+
+	for (const [tab, cursorKey] of [["roles", "cursor"], ["pools", "poolCursor"]] as const) {
+		const rowLines: number[] = [];
+		const lines = renderControlCenter({ tab, width: 90, folded, now: NOW, activeProfile: "p", pools, providers: [], [cursorKey]: 1, rowLines }).map(plain);
+		assert.ok(rowLines.length >= 2);
+		rowLines.forEach((at, index) => assert.match(lines[at]!, index === 1 ? /^│ ▸ / : /^│   /, `${tab} row ${index} -> line ${at}: ${lines[at]}`));
+	}
+});

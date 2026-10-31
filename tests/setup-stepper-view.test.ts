@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { setLang } from "../src/i18n/index.ts";
+import { plain } from "../src/style.ts";
 import type { DetectedProvider, PoolConfig } from "../src/setup.ts";
 import { goNext, initStepper } from "../src/setup-stepper.ts";
 import {
@@ -47,12 +48,13 @@ test("unreached steps are painted dim, the current step accented", () => {
 });
 
 test("each step prints its description and its body", () => {
-	assert.match(renderStepper(fresh(), ui).lines.join("\n"), /choose which of the detected providers[\s\S]*\[x\] a — enabled[\s\S]*\[ \] c — not found/);
+	assert.match(renderStepper(fresh(), ui).lines.join("\n"), /choose which of the detected providers[\s\S]*a\s+✓ enabled\s+test\s+\[x\][\s\S]*c\s+✗ not found\s+–\s+\[ \]/);
 	const strategy = renderStepper(onStep("strategy"), ui).lines.join("\n");
 	assert.match(strategy, /sonnet · strategy: hybrid[\s\S]*\[x\] 1\. a\/s[\s\S]*\[x\] 2\. b\/s/);
 	const roles = renderStepper(onStep("roles"), ui).lines.join("\n");
-	assert.match(roles, /orchestrator\s+\(unassigned\) · default/);
-	assert.match(roles, /classic wizard: \/balancer setup classic/);
+	assert.match(roles, /orchestrator\s+\(unassigned\)\s+default/);
+	// The hint wraps inside the box, so compare the text without borders or line breaks.
+	assert.match(roles.replace(/[│\n]/g, " ").replace(/\s+/g, " "), /classic wizard: \/balancer setup classic/);
 	assert.match(renderStepper(onStep("confirm"), ui).lines.join("\n"), /pools\.json/);
 });
 
@@ -78,9 +80,10 @@ test("body rows carry hit areas that follow the viewport offset", () => {
 	const rows = renderStepper(fresh(), ui).hits.filter(h => h.target.kind === "row");
 	assert.equal(rows.length, 3);
 	assert.equal(rows[1].y, rows[0].y + 1);
-	assert.equal(rows[0].start, 2);
-	const scrolled = renderStepper({ ...fresh(), offset: 1 }, { ...ui, bodyRows: 2 });
-	assert.equal(scrolled.offset, 1);
+	assert.equal(rows[0].start, 4, "after the content margin and the box border");
+	// The table header and its rule are the first two body lines, so offset 2 starts on the first row.
+	const scrolled = renderStepper({ ...fresh(), offset: 2 }, { ...ui, bodyRows: 2 });
+	assert.equal(scrolled.offset, 2);
 	assert.equal(scrolled.hits.filter(h => h.target.kind === "row").length, 2);
 });
 
@@ -208,4 +211,54 @@ test("every tone the stepper paints maps to a real Pi theme color, including the
 	for (const tone of tones) assert.ok(PI_THEME_COLORS.has(stepperThemeColor(tone as "accent" | "dim" | "warn" | "ok")), `${tone} -> ${stepperThemeColor(tone as "warn")}`);
 	assert.equal(stepperThemeColor("warn"), "warning");
 	assert.equal(stepperThemeColor("ok"), "success");
+});
+
+const wideUi = { width: 112, bodyRows: 10 };
+const narrowUi = { width: 90, bodyRows: 10 };
+const textOf = (screen: StepperScreen, size = wideUi) => renderStepper(screen, size).lines.join("\n");
+
+test("every step body is a titled box and providers and roles render as tables", () => {
+	assert.match(textOf(fresh()), /╭─ Providers/);
+	assert.match(textOf(fresh()), /Provider\s+Status\s+Source\s+On/);
+	assert.match(textOf(onStep("roles")), /╭─ Roles/);
+	assert.match(textOf(onStep("roles")), /Role\s+Model\s+Thinking/);
+	assert.match(textOf(onStep("strategy")), /╭─ Strategy/);
+	assert.match(textOf(onStep("confirm")), /╭─ Changes to write/);
+});
+
+test("the Help box sits on the right of a wide overlay and stacks below a narrow one", () => {
+	const wide = renderStepper(fresh(), wideUi);
+	assert.equal(wide.helpOn, true);
+	assert.ok(wide.lines.some(line => /╭─ Help ─+╮$/.test(line)), "Help top border on the right edge");
+	const narrow = renderStepper(fresh(), narrowUi);
+	assert.equal(narrow.helpOn, false, "help is off by default on narrow overlays");
+	assert.ok(!narrow.lines.some(line => line.includes("Help")));
+});
+
+test("? toggles the Help box in both directions and shows the text of the current step", () => {
+	const narrow = fresh();
+	const shown = send({ ...narrow, helpOn: renderStepper(narrow, narrowUi).helpOn }, key("?")).state;
+	const stacked = renderStepper(shown, narrowUi);
+	assert.equal(stacked.helpOn, true);
+	assert.match(stacked.lines.join("\n"), /Providers are the subscriptions/);
+	const hidden = send({ ...shown, helpOn: stacked.helpOn }, key("?")).state;
+	assert.equal(renderStepper(hidden, narrowUi).helpOn, false);
+	const wide = fresh();
+	const off = send({ ...wide, helpOn: renderStepper(wide, wideUi).helpOn }, key("?")).state;
+	assert.equal(renderStepper(off, wideUi).helpOn, false);
+});
+
+test("boxing the body keeps every mouse hit aligned with the row it was drawn on", () => {
+	for (const size of [wideUi, narrowUi]) {
+		let screen = onStep("roles");
+		const view = renderStepper(screen, size);
+		screen = { ...screen, hits: view.hits };
+		const lines = view.lines.map(plain);
+		for (const hit of view.hits.filter(h => h.target.kind === "row")) {
+			const line = lines[hit.y - 1]!;
+			assert.match(line, /^│ [› ] /, `row hit at y=${hit.y} lands on a boxed table row: ${line}`);
+			assert.ok(hit.start >= 2 && hit.end <= size.width, "hit stays inside the frame");
+		}
+		assert.ok(view.hits.some(h => h.target.kind === "row"));
+	}
 });
