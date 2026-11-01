@@ -1,5 +1,10 @@
+import { readFileSync, statSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { getProviderAdapter } from "./providers/registry.ts";
 import type { Candidate, RoutingStrategy, RuleBlock } from "./router.ts";
+
+const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 
 // A pool is one virtual model (`pool/<id>`) backed by an ordered list of
 // physical models. The first candidate is spent before the next one is used.
@@ -123,4 +128,23 @@ export function ignoredRuleWarnings(config: unknown): string[] {
 		if (issues.length === 0) return [];
 		return [`pool '${String(pool.id)}' ignores its rules and routes on the default list: ${issues.map(issue => `${issue.path}: ${issue.message}`).join("; ")}`];
 	});
+}
+
+const poolsCache = new Map<string, { mtime: number; data: { pools: Pool[]; warnings: string[] } }>();
+
+export function getLivePools(root = ROOT): { pools: Pool[]; warnings: string[] } {
+	try {
+		const filePath = join(root, "pools.json");
+		const mtime = statSync(filePath).mtimeMs;
+		const hit = poolsCache.get(filePath);
+		if (!hit || hit.mtime !== mtime) {
+			const config = JSON.parse(readFileSync(filePath, "utf8"));
+			const data = { pools: parsePools(config), warnings: ignoredRuleWarnings(config) };
+			poolsCache.set(filePath, { mtime, data });
+			return data;
+		}
+		return hit.data;
+	} catch {
+		return poolsCache.get(join(root, "pools.json"))?.data ?? { pools: [], warnings: [] };
+	}
 }

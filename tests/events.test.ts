@@ -79,6 +79,9 @@ test("pools.json routes the orchestrator through argon, then gemini flash, then 
 	assert.deepEqual(orchestrator?.candidates, [
 		{ provider: "antigravity", model: "gemini-4-argon", quotaKey: "antigravity/gemini-4-argon" },
 		{ provider: "antigravity", model: "gemini-3-8-flash", quotaKey: "antigravity/gemini" },
+		{ provider: "antigravity", model: "claude-sonnet-5-5", quotaKey: "antigravity/claude" },
+		{ provider: "antigravity", model: "claude-opus-5-5", quotaKey: "antigravity/claude" },
+		{ provider: "claude-bridge", model: "claude-opus-5-5", quotaKey: "claude-bridge/claude" },
 		{ provider: "claude-bridge", model: "claude-sonnet-5-5", quotaKey: "claude-bridge/claude" },
 	]);
 });

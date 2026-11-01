@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -37,7 +37,7 @@ import { FRAME_MS, colorMode, fillProgress, frameOf, motionEnabled } from "./pix
 import { helpMainWidth, helpVisible, withHelp } from "./help-panel.ts";
 import { renderAdvancedUsage, summarizeHistory, USAGE_VIEWS, type CurrentSession, type UsageViewName } from "./usage-panel.ts";
 import { keepRowVisible, scrollStep, sliceViewport } from "./viewport.ts";
-import { ignoredRuleWarnings, parsePools, POOL_PROVIDER, quotaKeyFor, type Pool } from "./pools.ts";
+import { getLivePools, ignoredRuleWarnings, parsePools, POOL_PROVIDER, quotaKeyFor, type Pool } from "./pools.ts";
 import { classifyQuotaError, failoverErrorMessage } from "./quota-errors.ts";
 import { routeWithLoans } from "./loan-routing.ts";
 import {
@@ -53,7 +53,7 @@ import {
 	type Loan,
 } from "./loans.ts";
 import { chooseLoanAction, formatKeepLoanConfirm, keepLoanInProfile, loanNotices, loanWidget, reviewEndedLoan } from "./loan-console.ts";
-import { failoverAlternative, routeWithTrace } from "./router.ts";
+import { failoverAlternative, routeWithTrace, type Candidate } from "./router.ts";
 import { fitWindows, formatSwitchCostReport, routeSwitchCost, type WindowFit } from "./switch-cost.ts";
 import { DecisionChanges, routeDecision } from "./route-log.ts";
 import { CircuitBreaker } from "./circuit-breaker.ts";
@@ -106,13 +106,8 @@ const PANEL_REFRESH_MS = 5_000;
 const PANEL_WIDTH = 34;
 const STATUS_KEY = "ai-balancer";
 
-function loadPools(): { pools: Pool[]; warnings: string[] } {
-	try {
-		const config = JSON.parse(readFileSync(join(ROOT, "pools.json"), "utf8"));
-		return { pools: parsePools(config), warnings: ignoredRuleWarnings(config) };
-	} catch {
-		return { pools: [], warnings: [] };
-	}
+function loadPools(root = ROOT): { pools: Pool[]; warnings: string[] } {
+	return getLivePools(root);
 }
 
 function fold(): FoldedEvents {
@@ -197,7 +192,7 @@ function readAgyUsage(onReport: (report: unknown) => void): Promise<boolean> {
 export default function aiBalancer(pi: ExtensionAPI) {
 	initLang(SETTINGS_FILE);
 	const processStartedAt = Date.now() - process.uptime() * 1000;
-	const { pools, warnings: poolWarnings } = loadPools();
+	const { pools: initialPools, warnings: poolWarnings } = getLivePools();
 	const lastRouted = new Map<string, string>();
 	// History rows for decision changes; the role is fixed for the life of the process.
 	const decisionChanges = new DecisionChanges();
@@ -289,6 +284,7 @@ export default function aiBalancer(pi: ExtensionAPI) {
 		},
 		routedKey: () => {
 			const route = fold().lastRoute;
+			const { pools } = getLivePools();
 			const pool = route && pools.find(candidatePool => candidatePool.id === route.pool);
 			return pool?.candidates.find(candidate => candidate.provider === route?.provider)?.quotaKey;
 		},
@@ -318,6 +314,7 @@ export default function aiBalancer(pi: ExtensionAPI) {
 	/** The breaker's status, cleared first when its pool has quota again (it only trips on a quota error). */
 	const circuitStatus = () => {
 		const tripped = circuitBreaker.getStatus();
+		const { pools } = getLivePools();
 		const pool = tripped.tripped ? pools.find(candidate => candidate.id === tripped.poolId) : undefined;
 		if (pool) circuitBreaker.reopenIfAvailable(pool.candidates, fold().state, Date.now());
 		return circuitBreaker.getStatus();
@@ -343,7 +340,11 @@ export default function aiBalancer(pi: ExtensionAPI) {
 		}
 	};
 
-	for (const pool of pools) {
+	const registeredPools = new Set<string>();
+
+	function registerPool(pool: Pool) {
+		if (registeredPools.has(pool.id)) return;
+		registeredPools.add(pool.id);
 		pi.registerVirtualModel({
 			provider: POOL_PROVIDER,
 			id: pool.id,
@@ -352,8 +353,11 @@ export default function aiBalancer(pi: ExtensionAPI) {
 			// Shown before the first response; the smallest limits among the candidates.
 			contextWindow: 1_000_000,
 			maxTokens: 65_536,
-			route(request, ctx) {
+			async route(request, ctx) {
 				const now = Date.now();
+				const { pools: currentPools } = getLivePools();
+				for (const p of currentPools) registerPool(p);
+				const currentPool = currentPools.find(p => p.id === pool.id) ?? pool;
 				// A stale context or an unreadable journal never blocks the request.
 				let current: ReturnType<typeof currentSession> | undefined;
 				try {
@@ -363,9 +367,9 @@ export default function aiBalancer(pi: ExtensionAPI) {
 				}
 				const { loans } = readLoans(DATA_DIR);
 				routePrices ??= loadPrices(join(ROOT, "prices.json"));
-				const { candidate: choice, trace, changes } = routeWithLoans({
-					pool,
-					pools,
+				const { candidate: choiceCandidate, trace, changes } = routeWithLoans({
+					pool: currentPool,
+					pools: currentPools,
 					reason: request.reason,
 					previousProvider: request.previous?.model.provider,
 					previousModel: request.previous?.model.id,
@@ -383,6 +387,61 @@ export default function aiBalancer(pi: ExtensionAPI) {
 						profile: loadProfilesStore()?.active,
 					}),
 				});
+				let choice = choiceCandidate;
+				if (trace.decidedBy === "fallback" && ctx.hasUI) {
+					const state = fold().state;
+					const options: string[] = [];
+					const candidateMap = new Map<string, Candidate>();
+
+					for (const c of currentPool.candidates) {
+						const availAt = state.availableAt(c.quotaKey, now);
+						const timeStr = availAt ? new Date(availAt).toTimeString().slice(0, 8) : "unknown";
+						const label = `${c.provider}/${c.model} - ${t("ops.retryCandidate", { time: timeStr })}`;
+						options.push(label);
+						candidateMap.set(label, c);
+					}
+
+					for (const otherPool of currentPools) {
+						if (otherPool.id === currentPool.id) continue;
+						for (const c of otherPool.candidates) {
+							if (state.isAvailable(c.quotaKey, now)) {
+								const label = `${c.provider}/${c.model} - ${t("ops.otherPoolCandidate", { pool: otherPool.id })}`;
+								if (!candidateMap.has(label)) {
+									options.push(label);
+									candidateMap.set(label, c);
+								}
+							}
+						}
+					}
+
+					const compactOption = `[compact] ${t("ops.compactSession")}`;
+					options.push(compactOption);
+
+					const cancelOption = `[cancel] ${t("ops.cancelRequest")}`;
+					options.push(cancelOption);
+
+					const title = t("ops.fallbackTitle", { pool: currentPool.id });
+					const selected = await ctx.ui.select(title, options);
+
+					if (!selected || selected === cancelOption) {
+						const cancelMsg = t("ops.requestCancelled", { pool: currentPool.id });
+						ctx.ui.notify(cancelMsg, "warning");
+						throw new Error(cancelMsg);
+					}
+
+					if (selected === compactOption) {
+						const tokens = current?.contextTokens ?? 0;
+						const adviceMsg = t("ops.compactAdvice", { tokens });
+						ctx.ui.notify(adviceMsg, "warning");
+						throw new Error(adviceMsg);
+					}
+
+					const manualCandidate = candidateMap.get(selected);
+					if (manualCandidate) {
+						choice = manualCandidate;
+						ctx.ui.notify(t("ops.manuallyRouted", { provider: choice.provider, model: choice.model }), "info");
+					}
+				}
 				if (changes.length > 0) {
 					try {
 						commitLoanChanges(DATA_DIR, now, changes);
@@ -403,7 +462,7 @@ export default function aiBalancer(pi: ExtensionAPI) {
 								reason: request.reason,
 								previousProvider,
 								failedProvider,
-								candidates: pool.candidates,
+								candidates: currentPool.candidates,
 								chosen: choice,
 								contextTokens: current.contextTokens,
 								state: fold().state,
@@ -415,7 +474,7 @@ export default function aiBalancer(pi: ExtensionAPI) {
 							ts: now,
 							session: current.session,
 							project: basename(ctx.sessionManager.getCwd()),
-							pool: pool.id,
+							pool: currentPool.id,
 							reason: request.reason,
 							role: ROUTING_ROLE,
 							contextTokens: current.contextTokens,
@@ -437,6 +496,10 @@ export default function aiBalancer(pi: ExtensionAPI) {
 				return { model, thinkingLevel: request.thinkingLevel };
 			},
 		});
+	}
+
+	for (const pool of initialPools) {
+		registerPool(pool);
 	}
 
 	pi.on("message_end", (event, ctx) => {
@@ -499,6 +562,7 @@ export default function aiBalancer(pi: ExtensionAPI) {
 		// Only sessions on a pool model are rewritten: elsewhere a retry would
 		// hit the same spent subscription again.
 		if (ctx.model?.provider !== POOL_PROVIDER) return;
+		const { pools } = getLivePools();
 		const pool = pools.find(candidatePool => candidatePool.id === ctx.model?.id);
 		if (!pool) return;
 		const state = fold().state;
@@ -621,7 +685,7 @@ export default function aiBalancer(pi: ExtensionAPI) {
 			prices,
 			now,
 			errors: data.errors,
-			pools,
+			pools: getLivePools().pools,
 			resolveAlias: id => {
 				const found = sessionIndex.lookup(id, tasks.get(id)?.sessionPath);
 				return found.firstMessage ? clipAlias(found.firstMessage) : null;
@@ -977,7 +1041,7 @@ export default function aiBalancer(pi: ExtensionAPI) {
 				const config = JSON.parse(readFileSync(join(ROOT, "pools.json"), "utf8"));
 				return parsePools(config);
 			} catch {
-				return pools;
+				return getLivePools().pools;
 			}
 		};
 
@@ -1911,7 +1975,7 @@ export default function aiBalancer(pi: ExtensionAPI) {
 					}
 					// A pool target is one of this balancer's virtual models.
 					const hasModel = (p: string, m: string) =>
-						p === POOL_PROVIDER ? pools.some(pool => pool.id === m) : ctx.modelRegistry.find(p, m) !== undefined;
+						p === POOL_PROVIDER ? getLivePools().pools.some(pool => pool.id === m) : ctx.modelRegistry.find(p, m) !== undefined;
 					keepLoanInProfile(loan, read, { path: DEFAULT_PROFILES_PATH, now, hasModel });
 				}
 				writeLoans(DATA_DIR, nextLoans);
