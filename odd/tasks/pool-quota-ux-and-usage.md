@@ -1,6 +1,6 @@
 # Feature: Pool Quota Balancing, Failover UX, Usage Source & Multi-Session Overview
 Status: done
-Branch: feat/ui-pixel-apply
+Branch: fix/pool-context-failover
 
 ## Specs
 
@@ -9,13 +9,17 @@ Branch: feat/ui-pixel-apply
 - **S3**: Fix `alt+u` vs `ctrl+alt+u` tab 5 and top-right USAGE bar ("por otro lado aprovechando esto el alt U no me muestra todo como si el ctrl-alt-U pestaña 5. por lo que creo que ahi tambien tenemos otro fallo y paralelamente lo que es el USAGE: mOSTRAME EL USAGE (ARRIBA PARTE DERECHA) que del modelo que estoy usando sino no me doy cuenta."). Ensure `routedKey` resolves the exact routed `provider/model` (or active `ctx.model`), `claudeSource` falls back to cached `claude-usage.json` on disk so `alt+u` always includes both Claude and Antigravity windows, and `combinePoolUsage` overlays `QuotaState` exhaustion so spent windows (such as Argon when daily quota is hit) report 100% used (`limitReached: true`) and place the active model's limit first for the top-right USAGE bar.
 - **S4**: Multi-session workspace visibility and model copy/apply in `/balancer` tab 1 ("si estoy trabajando con sesiones de diferentes carpetas de shell deberías decirme en el /balancer hoja 1 en la sesión xxx estas trabajando con este modelo y permitirme copiarlo o modificarlo desde la otra sesión"). Show active sessions across shell folders/projects in Control Center tab 1 (`overview`) with their session ID, workspace folder, and active `provider/model`, and support copying/applying a session's model from the overview tab.
 - **S5**: Auto-sync subagents configuration (`~/.gentle-shell/agent/subagents.json`) when saving profiles in `saveProfilesStore` ("dale sumalo al pr actual y hace una prueba con los workers para que funcione."). When roles or profile selections are saved via `saveProfilesStore`, synchronize the active profile's non-orchestrator subagent routes directly into `subagents.json` so Gentle Pi immediately picks up model and effort assignments without requiring an external command.
+- **S6**: Proactive compaction on pool/antigravity sessions ("tardas mucho en responder por el timeoute de agi", "ai-balancer: pool/orchestrator antigravity → claude-bridge", "Error: Prompt is too long"; threshold: "180k"). Antigravity reports only its server-side conversation, so pi never compacts and the history reaches ~1M tokens; the first switch to claude-bridge fails and the recovery compaction takes ~8.5 minutes. Estimate the real history and compact when it reaches 180k tokens on `pool` or `antigravity` models.
 
 ## Tasks
+
+- Branch moved to `fix/pool-context-failover` (PR #14 from `feat/ui-pixel-apply` was already merged).
 
 - [x] **T1** (`S1`, `S2`) — Fix stall/dead-conversation classification, cooldowns, quota state recovery on live usage/success, and `model` tracking in `route` events (`src/quota-errors.ts`, `src/state.ts`, `src/events.ts`, `tests/*.test.ts`) — route: inline (`gentle-ai-worker` timed out on `pool/claude-sonnet-5-5`) — commit: 18deff0
 - [x] **T2** (`S3`) — Fix `routedKey`, cached Claude fallback, `QuotaState` exhaustion overlay in `usage-source.ts`, and live usage source refresh on model/route change (`src/usage-source.ts`, `src/extension.ts`, `tests/usage-source.test.ts`) — route: inline — commit: 18deff0
 - [x] **T3** (`S2`, `S4`) — Implement clear localized failover message, spaced readable `statusLine`, and multi-session workspace overview with model copy/apply in `/balancer` tab 1 (`src/panel.ts`, `src/extension.ts`, `src/i18n/messages/setup.ts`, `tests/panel.test.ts`) — route: inline — commit: 18deff0
-- [x] **T4** (`S5`) — Implement automatic `subagents.json` synchronization on profile saves and verify with live `gentle-ai-worker` execution (`src/profiles.ts`, `tests/profiles.test.ts`) — route: inline + subagent_run verified — commit: working-tree
+- [x] **T4** (`S5`) — Implement automatic `subagents.json` synchronization on profile saves and verify with live `gentle-ai-worker` execution (`src/profiles.ts`, `tests/profiles.test.ts`) — route: inline + subagent_run verified — commit: fdcc7d9
+- [x] **T5** (`S6`) — Proactive compaction guard at 180k estimated tokens (`src/context-guard.ts`, `src/extension.ts`, `src/i18n/messages/ops.ts`, `tests/context-guard.test.ts`) — route: inline — commit: see branch fix/pool-context-failover
 
 ## Log
 
@@ -85,4 +89,16 @@ GEMINI 4 ARGON
 - **L3**:
 ```
 dale sumalo al pr actual y hace una prueba con los workers para que funcione.
+```
+- **L4**:
+```
+tenemos otro tema me esta pasando que tardas mucho en responder por el timeoute de agi no logramos resolver esto fijate la otra sesion tarda una barbaridad.
+ ai-balancer: pool/orchestrator antigravity → claude-bridge
+ Prompt is too long
+ Error: Prompt is too long
+```
+Evidence: compaction tokensBefore 964379 (ai-balancer session) and 1255669 (mu-web) while antigravity reported ~157k-181k; compaction took 17:54:04 -> 18:02:42.
+- **L5**:
+```
+180k y no me respondiste porque seguimos en la id de muweb con demoras, compartirme el PAHT de draft + url para crear el pr.
 ```

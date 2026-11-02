@@ -11,6 +11,8 @@ export const opsMessages = {
 		"ops.failoverQuota": "{from} is full, switching to {to}",
 		"ops.failoverStall": "{from} stopped responding, switching to {to}",
 		"ops.directQuotaHint": "{from} is full. Switch to {to} or pool/orchestrator (/balancer).",
+		"ops.proactiveCompact": "ai-balancer: history is ~{tokens} tokens (limit {limit}), compacting now so a provider switch stays fast",
+		"ops.proactiveCompactFailed": "ai-balancer: proactive compaction failed: {error}",
 	},
 	es: {
 		"ops.fallbackTitle": "ai-balancer: TODOS LOS CANDIDATOS de pool/{pool} están agotados. Elige una acción:",
@@ -24,5 +26,7 @@ export const opsMessages = {
 		"ops.failoverQuota": "{from} se llenó, se cambia a {to}",
 		"ops.failoverStall": "{from} dejó de responder, se cambia a {to}",
 		"ops.directQuotaHint": "{from} se llenó. Cambiá a {to} o a pool/orchestrator (/balancer).",
+		"ops.proactiveCompact": "ai-balancer: el historial tiene ~{tokens} tokens (límite {limit}), se compacta ahora para que un cambio de proveedor sea rápido",
+		"ops.proactiveCompactFailed": "ai-balancer: falló la compactación preventiva: {error}",
 	},
 };

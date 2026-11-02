@@ -14,6 +14,7 @@ import { detectFirewall, privateIPv4Networks, readAutostart, readTls, runLanSetu
 import { createCertificate, inspectCertificate, type TlsConfig } from "./tls-setup.ts";
 import { parseAgyUsage } from "./agy-usage.ts";
 import { summarizeConsumption } from "./consumption.ts";
+import { DEFAULT_PROACTIVE_COMPACT_TOKENS, entriesToHistoryMessages, estimateHistoryTokens, shouldCompactProactively } from "./context-guard.ts";
 import { appendEvent, foldEvents, readEvents, type FoldedEvents } from "./events.ts";
 import { appendHistory, legacyRecords, pruneHistory, readHistory, type HistoryData, type HistoryEntry } from "./history.ts";
 import { topConsumers, withAliases } from "./consumers.ts";
@@ -206,6 +207,32 @@ export default function aiBalancer(pi: ExtensionAPI) {
 	let loanTimer: ReturnType<typeof setInterval> | undefined;
 	const seenLoanNotices = new Set<string>();
 	const promptedEndedLoans = new Set<string>();
+	let proactiveCompacting = false;
+
+	// Compacts before the real history outgrows what the next provider accepts;
+	// see context-guard.ts for why pi's own threshold never fires on pool models.
+	function compactIfHistoryTooLarge(ctx: ExtensionContext): boolean {
+		let estimatedTokens: number;
+		try {
+			estimatedTokens = estimateHistoryTokens(entriesToHistoryMessages(ctx.sessionManager.buildContextEntries()));
+		} catch {
+			return false;
+		}
+		const threshold = DEFAULT_PROACTIVE_COMPACT_TOKENS;
+		if (!shouldCompactProactively({ provider: ctx.model?.provider, estimatedTokens, threshold, compacting: proactiveCompacting })) return false;
+		proactiveCompacting = true;
+		if (ctx.hasUI) ctx.ui.notify(t("ops.proactiveCompact", { tokens: estimatedTokens.toLocaleString("en-US"), limit: threshold.toLocaleString("en-US") }), "info");
+		ctx.compact({
+			onComplete: () => {
+				proactiveCompacting = false;
+			},
+			onError: error => {
+				proactiveCompacting = false;
+				if (ctx.hasUI) ctx.ui.notify(t("ops.proactiveCompactFailed", { error: error.message }), "warning");
+			},
+		});
+		return true;
+	}
 	let closePanel: (() => void) | undefined;
 	let claudeRawFetch: UsageFetch | undefined;
 	let claudeUsageFetch: UsageFetch | undefined;
@@ -2490,7 +2517,9 @@ export default function aiBalancer(pi: ExtensionAPI) {
 	pi.on("session_compact", (_event, ctx) => refreshStatus(ctx));
 
 	pi.on("agent_settled", async (_event, ctx) => {
-		if (!ctx.hasUI || !ctx.isIdle()) return;
+		if (!ctx.isIdle()) return;
+		if (compactIfHistoryTooLarge(ctx)) return;
+		if (!ctx.hasUI) return;
 		try {
 			const { loans } = readLoans(DATA_DIR);
 			const loan = loans.find(l => l.status === "ended" && !promptedEndedLoans.has(l.id));
