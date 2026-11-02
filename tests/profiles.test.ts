@@ -6,10 +6,14 @@ import test from "node:test";
 import {
   applySuggestionToProfile,
   createProfileBackup,
+  defaultProfilesPath,
+  defaultSubagentsPath,
   loadProfilesStore,
   PROFILE_BACKUPS_KEPT,
   qualifyModel,
   readProfiles,
+  resolveAgentHome,
+  resolveConfigHome,
   saveProfilesStore,
   syncSubagentsJson,
   type ProfilesStore,
@@ -28,6 +32,30 @@ const SAMPLE_STORE: ProfilesStore = {
   },
   active: "balanced",
 };
+
+test("resolveConfigHome respects GENTLE_SHELL_PREFIX, env vars, and fallbacks", () => {
+  const dir = mkdtempSync(join(tmpdir(), "res-cfg-"));
+  try {
+    assert.equal(
+      resolveConfigHome({ GENTLE_SHELL_PREFIX: "/custom/prefix" }, dir),
+      "/custom/prefix/config/gentle-ai",
+    );
+    assert.equal(
+      resolveConfigHome({ GENTLE_PI_CONFIG_HOME: "/custom/config/home" }, dir),
+      "/custom/config/home",
+    );
+    assert.equal(
+      resolveConfigHome({ GENTLE_SHELL_CONFIG_HOME: "/custom/shell/config" }, dir),
+      "/custom/shell/config",
+    );
+    assert.equal(
+      resolveConfigHome({}, dir),
+      join(dir, ".pi", "gentle-ai"),
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
 
 test("loadProfilesStore reads valid store and returns null for missing or invalid JSON", () => {
   const dir = mkdtempSync(join(tmpdir(), "prof-test-"));

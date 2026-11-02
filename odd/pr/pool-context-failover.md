@@ -2,7 +2,7 @@
 
 ## Summary
 
-Fixes the long stalls and `Prompt is too long` errors seen when a `pool/*` session fails over from Antigravity to claude-bridge, and the related failover, status and usage issues.
+Fixes the long stalls and `Prompt is too long` errors seen when a `pool/*` session fails over from Antigravity to claude-bridge, and the related failover, status, usage, and profile path resolution issues.
 
 ### 1. Proactive compaction (root cause of the multi-minute waits)
 - Antigravity resumes its own server-side conversation, so the usage it reports covers only that conversation (~157k-181k), not pi's real history.
@@ -22,16 +22,16 @@ Fixes the long stalls and `Prompt is too long` errors seen when a `pool/*` sessi
 ### 4. Usage accuracy (`alt+u` and the top-right USAGE bar)
 - Shows the routed model's window first, falls back to cached `claude-usage.json`, and overlays known exhaustion.
 
-### 5. Multi-session overview and subagent sync
+### 5. Multi-session overview, subagent sync and dynamic profile path resolution
 - `/balancer` tab 1 lists sessions in other folders with their model, with copy/apply.
-- Saving a profile syncs `~/.gentle-shell/agent/subagents.json`.
+- Dynamic path resolution for `profiles.json` and `subagents.json` honoring `GENTLE_SHELL_PREFIX`, `GENTLE_PI_CONFIG_HOME`, `GENTLE_SHELL_CONFIG_HOME`, and `~/.pi/gentle-ai` fallbacks, so profiles save and read reliably across both bundled and standalone environments.
+- Saving a profile syncs `subagents.json` automatically.
 - `pools.json` is hot-reloaded, and a picker appears when every candidate is exhausted.
 
 ## Verification
 
-- `AI_BALANCER_LANG=en node --test tests/*.test.ts packages/panel/tests/*.test.ts`: 770/770 pass.
-- `npx tsc --noEmit`: 0 errors.
-- Context guard replayed against the real mu-web session that failed (see section 1).
+- `AI_BALANCER_LANG=en node --test tests/*.test.ts packages/panel/tests/*.test.ts`: 771/771 pass.
+- Context guard replayed against the real mu-web session that failed.
 
 ## Risk
 
