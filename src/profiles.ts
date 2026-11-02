@@ -11,6 +11,13 @@ export const DEFAULT_PROFILES_PATH = join(
   "profiles.json",
 );
 
+export const DEFAULT_SUBAGENTS_PATH = join(
+  homedir(),
+  ".gentle-shell",
+  "agent",
+  "subagents.json",
+);
+
 export interface RoleRoute {
   model: string;
   thinking?: string;
@@ -157,9 +164,68 @@ export function replaceFileSafely(
 
 export interface SaveProfilesOptions {
   path?: string;
+  subagentsPath?: string;
+  syncSubagents?: boolean;
   now?: number;
   /** Pi's model registry lookup. */
   hasModel(provider: string, model: string): boolean;
+}
+
+/**
+ * Syncs the active profile's subagent roles into ~/.gentle-shell/agent/subagents.json
+ * so gentle-pi's loadAgentsConfig instantly reflects the configured models.
+ */
+export function syncSubagentsJson(activeConfig: ProfileConfig, subagentsPath = DEFAULT_SUBAGENTS_PATH): void {
+  if (!existsSync(subagentsPath)) return;
+  let raw: string;
+  try {
+    raw = readFileSync(subagentsPath, "utf8");
+  } catch {
+    return;
+  }
+
+  let parsed: Record<string, unknown>;
+  try {
+    const data = JSON.parse(raw);
+    if (!data || typeof data !== "object" || Array.isArray(data)) return;
+    parsed = data as Record<string, unknown>;
+  } catch {
+    return;
+  }
+
+  const existingProfiles = (parsed.model_profiles && typeof parsed.model_profiles === "object" && !Array.isArray(parsed.model_profiles))
+    ? { ...(parsed.model_profiles as Record<string, unknown>) }
+    : {};
+
+  for (const [role, route] of Object.entries(activeConfig)) {
+    if (role === "orchestrator" || !route || typeof route !== "object") continue;
+    const model = (route as RoleRoute).model;
+    const thinking = (route as RoleRoute).thinking;
+    if (typeof model !== "string" || !model) continue;
+
+    const currentEntry = (existingProfiles[role] && typeof existingProfiles[role] === "object")
+      ? (existingProfiles[role] as Record<string, unknown>)
+      : {};
+
+    existingProfiles[role] = {
+      ...currentEntry,
+      model,
+      ...(thinking ? { effort: thinking } : {}),
+    };
+  }
+
+  parsed.model_profiles = existingProfiles;
+  const temp = `${subagentsPath}.${process.pid}.tmp`;
+  try {
+    writeFileSync(temp, JSON.stringify(parsed, null, 2) + "\n", { encoding: "utf8", mode: 0o600 });
+    renameSync(temp, subagentsPath);
+  } catch {
+    try {
+      unlinkSync(temp);
+    } catch {
+      // Ignored
+    }
+  }
 }
 
 /**
@@ -180,7 +246,21 @@ export function saveProfilesStore(next: ProfilesStore, read: ProfilesRead, optio
     return options.hasModel(text.slice(0, slash), text.slice(slash + 1)) ? [] : [`${where}: ${text} is not in Pi's model registry`];
   });
   if (unknown.length) throw new Error(`ai-balancer: refusing to write profiles.json: ${unknown.join("; ")}`);
-  return replaceFileSafely(path, JSON.stringify(next, null, 1) + "\n", read.raw, now);
+  const result = replaceFileSafely(path, JSON.stringify(next, null, 1) + "\n", read.raw, now);
+
+  if (options.syncSubagents !== false) {
+    const activeName = next.active;
+    const activeConfig = activeName ? next.profiles[activeName] : undefined;
+    if (activeConfig) {
+      try {
+        syncSubagentsJson(activeConfig, options.subagentsPath);
+      } catch {
+        // Non-fatal if subagents.json sync fails.
+      }
+    }
+  }
+
+  return result;
 }
 
 export interface ProfileApplyResult {
