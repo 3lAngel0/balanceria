@@ -23,6 +23,7 @@ profiles.json.bak-*
 .atl/
 .gentle-shell/
 .pi/
+odd/
 dist/
 coverage/
 .DS_Store
