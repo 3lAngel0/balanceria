@@ -3,13 +3,55 @@ import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import type { Suggestion } from "./suggestions.ts";
 
-export const DEFAULT_PROFILES_PATH = join(
-  homedir(),
-  ".gentle-shell",
-  "config",
-  "gentle-ai",
-  "profiles.json",
-);
+/**
+ * Resolves the configuration directory for gentle-pi / gentle-shell.
+ * Checks in order of precedence:
+ * 1. GENTLE_SHELL_PREFIX/config/gentle-ai (bundled installation)
+ * 2. GENTLE_PI_CONFIG_HOME
+ * 3. GENTLE_SHELL_CONFIG_HOME
+ * 4. ~/.gentle-shell/config/gentle-ai (if exists)
+ * 5. ~/.pi/gentle-ai
+ */
+export function resolveConfigHome(env: NodeJS.ProcessEnv = process.env, home = homedir()): string {
+  if (env.GENTLE_SHELL_PREFIX) {
+    return join(env.GENTLE_SHELL_PREFIX, "config", "gentle-ai");
+  }
+  if (env.GENTLE_PI_CONFIG_HOME) {
+    return env.GENTLE_PI_CONFIG_HOME;
+  }
+  if (env.GENTLE_SHELL_CONFIG_HOME) {
+    return env.GENTLE_SHELL_CONFIG_HOME;
+  }
+  const gentleShellConfig = join(home, ".gentle-shell", "config", "gentle-ai");
+  if (existsSync(gentleShellConfig)) {
+    return gentleShellConfig;
+  }
+  return join(home, ".pi", "gentle-ai");
+}
+
+/**
+ * Resolves the agent home directory for subagents.json.
+ * Checks GENTLE_PI_AGENT_HOME, PI_CODING_AGENT_DIR, GENTLE_SHELL_PREFIX/agent, or ~/.pi/agent.
+ */
+export function resolveAgentHome(env: NodeJS.ProcessEnv = process.env, home = homedir()): string {
+  if (env.GENTLE_PI_AGENT_HOME) return env.GENTLE_PI_AGENT_HOME;
+  if (env.PI_CODING_AGENT_DIR) return env.PI_CODING_AGENT_DIR;
+  if (env.GENTLE_SHELL_PREFIX) return join(env.GENTLE_SHELL_PREFIX, "agent");
+  const gentleShellAgent = join(home, ".gentle-shell", "agent");
+  if (existsSync(gentleShellAgent)) return gentleShellAgent;
+  return join(home, ".pi", "agent");
+}
+
+export function defaultProfilesPath(env: NodeJS.ProcessEnv = process.env, home = homedir()): string {
+  return join(resolveConfigHome(env, home), "profiles.json");
+}
+
+export function defaultSubagentsPath(env: NodeJS.ProcessEnv = process.env, home = homedir()): string {
+  return join(resolveAgentHome(env, home), "subagents.json");
+}
+
+export const DEFAULT_PROFILES_PATH = defaultProfilesPath();
+export const DEFAULT_SUBAGENTS_PATH = defaultSubagentsPath();
 
 export interface RoleRoute {
   model: string;
@@ -61,19 +103,20 @@ export function parseProfilesText(raw: string, label: string): { store: Profiles
   return { store: parsed as ProfilesStore };
 }
 
-export function readProfiles(path = DEFAULT_PROFILES_PATH): ProfilesRead | { error: string } {
-  if (!existsSync(path)) return { error: `${path} not found` };
+export function readProfiles(path?: string): ProfilesRead | { error: string } {
+  const filePath = path ?? defaultProfilesPath();
+  if (!existsSync(filePath)) return { error: `${filePath} not found` };
   let raw: string;
   try {
-    raw = readFileSync(path, "utf8");
+    raw = readFileSync(filePath, "utf8");
   } catch (error) {
-    return { error: `${path} is not readable JSON: ${error instanceof Error ? error.message : String(error)}` };
+    return { error: `${filePath} is not readable JSON: ${error instanceof Error ? error.message : String(error)}` };
   }
-  const parsed = parseProfilesText(raw, path);
+  const parsed = parseProfilesText(raw, filePath);
   return "store" in parsed ? { store: parsed.store, raw } : parsed;
 }
 
-export function loadProfilesStore(path = DEFAULT_PROFILES_PATH): ProfilesStore | null {
+export function loadProfilesStore(path?: string): ProfilesStore | null {
   const read = readProfiles(path);
   return "store" in read ? read.store : null;
 }
@@ -157,9 +200,69 @@ export function replaceFileSafely(
 
 export interface SaveProfilesOptions {
   path?: string;
+  subagentsPath?: string;
+  syncSubagents?: boolean;
   now?: number;
   /** Pi's model registry lookup. */
   hasModel(provider: string, model: string): boolean;
+}
+
+/**
+ * Syncs the active profile's subagent roles into subagents.json
+ * so gentle-pi's loadAgentsConfig instantly reflects the configured models.
+ */
+export function syncSubagentsJson(activeConfig: ProfileConfig, subagentsPath?: string): void {
+  const targetPath = subagentsPath ?? defaultSubagentsPath();
+  if (!existsSync(targetPath)) return;
+  let raw: string;
+  try {
+    raw = readFileSync(targetPath, "utf8");
+  } catch {
+    return;
+  }
+
+  let parsed: Record<string, unknown>;
+  try {
+    const data = JSON.parse(raw);
+    if (!data || typeof data !== "object" || Array.isArray(data)) return;
+    parsed = data as Record<string, unknown>;
+  } catch {
+    return;
+  }
+
+  const existingProfiles = (parsed.model_profiles && typeof parsed.model_profiles === "object" && !Array.isArray(parsed.model_profiles))
+    ? { ...(parsed.model_profiles as Record<string, unknown>) }
+    : {};
+
+  for (const [role, route] of Object.entries(activeConfig)) {
+    if (role === "orchestrator" || !route || typeof route !== "object") continue;
+    const model = (route as RoleRoute).model;
+    const thinking = (route as RoleRoute).thinking;
+    if (typeof model !== "string" || !model) continue;
+
+    const currentEntry = (existingProfiles[role] && typeof existingProfiles[role] === "object")
+      ? (existingProfiles[role] as Record<string, unknown>)
+      : {};
+
+    existingProfiles[role] = {
+      ...currentEntry,
+      model,
+      ...(thinking ? { effort: thinking } : {}),
+    };
+  }
+
+  parsed.model_profiles = existingProfiles;
+  const temp = `${targetPath}.${process.pid}.tmp`;
+  try {
+    writeFileSync(temp, JSON.stringify(parsed, null, 2) + "\n", { encoding: "utf8", mode: 0o600 });
+    renameSync(temp, targetPath);
+  } catch {
+    try {
+      unlinkSync(temp);
+    } catch {
+      // Ignored
+    }
+  }
 }
 
 /**
@@ -169,7 +272,7 @@ export interface SaveProfilesOptions {
  * Pi does not know.
  */
 export function saveProfilesStore(next: ProfilesStore, read: ProfilesRead, options: SaveProfilesOptions): { backup: string; removed: string[] } {
-  const path = options.path ?? DEFAULT_PROFILES_PATH;
+  const path = options.path ?? defaultProfilesPath();
   const now = options.now ?? Date.now();
   const issue = kindIssue(next);
   if (issue) throw new Error(`ai-balancer: refusing to write: ${issue}`);
@@ -180,7 +283,21 @@ export function saveProfilesStore(next: ProfilesStore, read: ProfilesRead, optio
     return options.hasModel(text.slice(0, slash), text.slice(slash + 1)) ? [] : [`${where}: ${text} is not in Pi's model registry`];
   });
   if (unknown.length) throw new Error(`ai-balancer: refusing to write profiles.json: ${unknown.join("; ")}`);
-  return replaceFileSafely(path, JSON.stringify(next, null, 1) + "\n", read.raw, now);
+  const result = replaceFileSafely(path, JSON.stringify(next, null, 1) + "\n", read.raw, now);
+
+  if (options.syncSubagents !== false) {
+    const activeName = next.active;
+    const activeConfig = activeName ? next.profiles[activeName] : undefined;
+    if (activeConfig) {
+      try {
+        syncSubagentsJson(activeConfig, options.subagentsPath);
+      } catch {
+        // Non-fatal if subagents.json sync fails.
+      }
+    }
+  }
+
+  return result;
 }
 
 export interface ProfileApplyResult {

@@ -79,6 +79,9 @@ test("pools.json routes the orchestrator through argon, then gemini flash, then 
 	assert.deepEqual(orchestrator?.candidates, [
 		{ provider: "antigravity", model: "gemini-4-argon", quotaKey: "antigravity/gemini-4-argon" },
 		{ provider: "antigravity", model: "gemini-3-8-flash", quotaKey: "antigravity/gemini" },
+		{ provider: "antigravity", model: "claude-sonnet-5-5", quotaKey: "antigravity/claude" },
+		{ provider: "antigravity", model: "claude-opus-5-5", quotaKey: "antigravity/claude" },
+		{ provider: "claude-bridge", model: "claude-opus-5-5", quotaKey: "claude-bridge/claude" },
 		{ provider: "claude-bridge", model: "claude-sonnet-5-5", quotaKey: "claude-bridge/claude" },
 	]);
 });
@@ -111,4 +114,15 @@ test("a malformed quota event changes nothing", () => {
 		{ type: "quota", ts: NOW, key: "claude-bridge/claude", remainingFraction: 1.5 },
 	] as unknown as BalancerEvent[];
 	assert.equal(foldEvents(events, NOW).state.remainingFraction("claude-bridge/claude"), undefined);
+});
+
+test("foldEvents clears a false exhaustion when a later usage event produces output and preserves route model", () => {
+	const events: BalancerEvent[] = [
+		{ type: "exhausted", ts: NOW - 2 * HOUR, key: "antigravity/gemini", until: NOW + 20 * HOUR, reason: "Individual quota reached" },
+		{ type: "usage", ts: NOW - HOUR, provider: "antigravity", model: "gemini-3-8-flash", input: 500, output: 120, cacheRead: 0, cacheWrite: 0 },
+		{ type: "route", ts: NOW - 10_000, pool: "orchestrator", provider: "antigravity", model: "gemini-3-8-flash", reason: "user" },
+	];
+	const folded = foldEvents(events, NOW);
+	assert.equal(folded.state.isAvailable("antigravity/gemini", NOW), true);
+	assert.equal(folded.lastRoute?.model, "gemini-3-8-flash");
 });

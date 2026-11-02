@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -14,13 +14,14 @@ import { detectFirewall, privateIPv4Networks, readAutostart, readTls, runLanSetu
 import { createCertificate, inspectCertificate, type TlsConfig } from "./tls-setup.ts";
 import { parseAgyUsage } from "./agy-usage.ts";
 import { summarizeConsumption } from "./consumption.ts";
+import { DEFAULT_PROACTIVE_COMPACT_TOKENS, entriesToHistoryMessages, estimateHistoryTokens, shouldCompactProactively } from "./context-guard.ts";
 import { appendEvent, foldEvents, readEvents, type FoldedEvents } from "./events.ts";
 import { appendHistory, legacyRecords, pruneHistory, readHistory, type HistoryData, type HistoryEntry } from "./history.ts";
 import { topConsumers, withAliases } from "./consumers.ts";
 import { HUD_VIEWS, hudHints, moveCursor, pressRedKey, renderHud, selectedSessionTarget, suggestionEnter, SESSIONS_PER_ROLE, visibleSessions, type HudViewName, type PendingConfirm } from "./hud.ts";
 import { runHudChoice, type HudChoice } from "./hud-actions.ts";
 import { loadIntegrations } from "./integrations.ts";
-import { renderPanel, statusLine, statusWithContext, turnTelemetry, renderControlCenter, controlCenterButtons, controlCenterTabLabels, CONTROL_CENTER_TABS, type ControlCenterTab, type TurnTelemetry } from "./panel.ts";
+import { renderPanel, statusLine, statusWithContext, turnTelemetry, renderControlCenter, controlCenterButtons, controlCenterTabLabels, CONTROL_CENTER_TABS, type ControlCenterTab, type OverviewSessionRow, type TurnTelemetry } from "./panel.ts";
 import { ROLE_CATALOG, buildAvailableModelTargets, recommendRolesHeuristic, recommendRolesWithAdvisor, createDefaultCliAiRunner, applyRecommendationsToProfile, type AdvisorReport } from "./setup-advisor.ts";
 import { applySuggestionToProfile, DEFAULT_PROFILES_PATH, loadProfilesStore, qualifyModel, readProfiles, saveProfilesStore, type ProfilesStore } from "./profiles.ts";
 import { loadPrices } from "./prices.ts";
@@ -37,7 +38,7 @@ import { FRAME_MS, colorMode, fillProgress, frameOf, motionEnabled } from "./pix
 import { helpMainWidth, helpVisible, withHelp } from "./help-panel.ts";
 import { renderAdvancedUsage, summarizeHistory, USAGE_VIEWS, type CurrentSession, type UsageViewName } from "./usage-panel.ts";
 import { keepRowVisible, scrollStep, sliceViewport } from "./viewport.ts";
-import { ignoredRuleWarnings, parsePools, POOL_PROVIDER, quotaKeyFor, type Pool } from "./pools.ts";
+import { getLivePools, ignoredRuleWarnings, parsePools, POOL_PROVIDER, quotaKeyFor, type Pool } from "./pools.ts";
 import { classifyQuotaError, failoverErrorMessage } from "./quota-errors.ts";
 import { routeWithLoans } from "./loan-routing.ts";
 import {
@@ -53,7 +54,7 @@ import {
 	type Loan,
 } from "./loans.ts";
 import { chooseLoanAction, formatKeepLoanConfirm, keepLoanInProfile, loanNotices, loanWidget, reviewEndedLoan } from "./loan-console.ts";
-import { failoverAlternative, routeWithTrace } from "./router.ts";
+import { failoverAlternative, routeWithTrace, type Candidate } from "./router.ts";
 import { fitWindows, formatSwitchCostReport, routeSwitchCost, type WindowFit } from "./switch-cost.ts";
 import { DecisionChanges, routeDecision } from "./route-log.ts";
 import { CircuitBreaker } from "./circuit-breaker.ts";
@@ -106,13 +107,8 @@ const PANEL_REFRESH_MS = 5_000;
 const PANEL_WIDTH = 34;
 const STATUS_KEY = "ai-balancer";
 
-function loadPools(): { pools: Pool[]; warnings: string[] } {
-	try {
-		const config = JSON.parse(readFileSync(join(ROOT, "pools.json"), "utf8"));
-		return { pools: parsePools(config), warnings: ignoredRuleWarnings(config) };
-	} catch {
-		return { pools: [], warnings: [] };
-	}
+function loadPools(root = ROOT): { pools: Pool[]; warnings: string[] } {
+	return getLivePools(root);
 }
 
 function fold(): FoldedEvents {
@@ -197,7 +193,7 @@ function readAgyUsage(onReport: (report: unknown) => void): Promise<boolean> {
 export default function aiBalancer(pi: ExtensionAPI) {
 	initLang(SETTINGS_FILE);
 	const processStartedAt = Date.now() - process.uptime() * 1000;
-	const { pools, warnings: poolWarnings } = loadPools();
+	const { pools: initialPools, warnings: poolWarnings } = getLivePools();
 	const lastRouted = new Map<string, string>();
 	// History rows for decision changes; the role is fixed for the life of the process.
 	const decisionChanges = new DecisionChanges();
@@ -211,6 +207,32 @@ export default function aiBalancer(pi: ExtensionAPI) {
 	let loanTimer: ReturnType<typeof setInterval> | undefined;
 	const seenLoanNotices = new Set<string>();
 	const promptedEndedLoans = new Set<string>();
+	let proactiveCompacting = false;
+
+	// Compacts before the real history outgrows what the next provider accepts;
+	// see context-guard.ts for why pi's own threshold never fires on pool models.
+	function compactIfHistoryTooLarge(ctx: ExtensionContext): boolean {
+		let estimatedTokens: number;
+		try {
+			estimatedTokens = estimateHistoryTokens(entriesToHistoryMessages(ctx.sessionManager.buildContextEntries()));
+		} catch {
+			return false;
+		}
+		const threshold = DEFAULT_PROACTIVE_COMPACT_TOKENS;
+		if (!shouldCompactProactively({ provider: ctx.model?.provider, estimatedTokens, threshold, compacting: proactiveCompacting })) return false;
+		proactiveCompacting = true;
+		if (ctx.hasUI) ctx.ui.notify(t("ops.proactiveCompact", { tokens: estimatedTokens.toLocaleString("en-US"), limit: threshold.toLocaleString("en-US") }), "info");
+		ctx.compact({
+			onComplete: () => {
+				proactiveCompacting = false;
+			},
+			onError: error => {
+				proactiveCompacting = false;
+				if (ctx.hasUI) ctx.ui.notify(t("ops.proactiveCompactFailed", { error: error.message }), "warning");
+			},
+		});
+		return true;
+	}
 	let closePanel: (() => void) | undefined;
 	let claudeRawFetch: UsageFetch | undefined;
 	let claudeUsageFetch: UsageFetch | undefined;
@@ -219,6 +241,12 @@ export default function aiBalancer(pi: ExtensionAPI) {
 	let lastTurnTelemetry: TurnTelemetry | undefined;
 	// Context after the previous response, so the badge can say how much a turn grew it.
 	let lastContextTokens: number | null | undefined;
+	let lastFailoverNote: { text: string; at: number } | undefined;
+
+	const friendlyModelLabel = (provider: string, model?: string): string => {
+		if (model && /argon/i.test(model)) return "Argon";
+		return model ? `${provider}/${model}` : provider;
+	};
 
 	// Samples and quota errors carry the session that was open when they were seen.
 	const sessionIdentity = (): { session: string; project: string } => {
@@ -281,20 +309,39 @@ export default function aiBalancer(pi: ExtensionAPI) {
 	// agy takes longer than the shell's 10-second fetch window, so the source
 	// answers with the cached report and refreshes it in the background.
 	const poolUsageSource = createPoolUsageSource({
-		claudeSource: () => (claudeUsageFetch ? { fetch: claudeUsageFetch } : undefined),
+		claudeSource: () =>
+			claudeUsageFetch
+				? { fetch: claudeUsageFetch }
+				: { fetch: async () => claudeUsageStore.load()?.usage },
 		readAgyReport: async () => {
 			const cached = loadAgyReport();
 			if (!cached || Date.now() - cached.fetchedAt > AGY_USAGE_SOURCE_MAX_AGE_MS) void pollAgy();
 			return cached?.report;
 		},
 		routedKey: () => {
+			const activeModel = sessionContext?.model;
+			if (activeModel && activeModel.provider !== POOL_PROVIDER) {
+				return quotaKeyFor(activeModel.provider, activeModel.id);
+			}
 			const route = fold().lastRoute;
+			if (route?.model) return quotaKeyFor(route.provider, route.model);
+			const { pools } = getLivePools();
 			const pool = route && pools.find(candidatePool => candidatePool.id === route.pool);
 			return pool?.candidates.find(candidate => candidate.provider === route?.provider)?.quotaKey;
 		},
+		state: () => fold().state,
 	});
+	const agyCombinedUsageSource = {
+		...poolUsageSource,
+		provider: "antigravity",
+		async fetch(apiKey: string | undefined, fetchFn: typeof fetch, now: number) {
+			const result = await poolUsageSource.fetch(apiKey, fetchFn, now);
+			return result ? { ...result, provider: "antigravity" } : undefined;
+		},
+	};
 	function registerPoolUsage(): void {
 		pi.events.emit(USAGE_SOURCE_EVENT, poolUsageSource);
+		pi.events.emit(USAGE_SOURCE_EVENT, agyCombinedUsageSource);
 	}
 	pi.events.on(USAGE_SOURCE_EVENT, payload => {
 		const fetchClaude = usageSourceFetch(payload, CLAUDE_BRIDGE_PROVIDER);
@@ -318,6 +365,7 @@ export default function aiBalancer(pi: ExtensionAPI) {
 	/** The breaker's status, cleared first when its pool has quota again (it only trips on a quota error). */
 	const circuitStatus = () => {
 		const tripped = circuitBreaker.getStatus();
+		const { pools } = getLivePools();
 		const pool = tripped.tripped ? pools.find(candidate => candidate.id === tripped.poolId) : undefined;
 		if (pool) circuitBreaker.reopenIfAvailable(pool.candidates, fold().state, Date.now());
 		return circuitBreaker.getStatus();
@@ -325,9 +373,16 @@ export default function aiBalancer(pi: ExtensionAPI) {
 
 	const refreshStatus = (ctx: ExtensionContext) => {
 		if (!ctx.hasUI) return;
-		const status = statusLine(fold(), Date.now(), circuitStatus(), lastTurnTelemetry);
+		const now = Date.now();
+		const activeModel = ctx.model && ctx.model.provider !== POOL_PROVIDER ? `${ctx.model.provider}/${ctx.model.id}` : undefined;
+		const lastFailover = lastFailoverNote && now - lastFailoverNote.at < 10 * 60_000 ? lastFailoverNote.text : undefined;
+		const status = statusLine(fold(), now, circuitStatus(), lastTurnTelemetry, {
+			spaced: true,
+			activeModel,
+			lastFailover,
+		});
 		const paint = (level: string, text: string) => ctx.ui.theme.fg(level === "alert" ? "error" : "warning", text);
-		ctx.ui.setStatus(STATUS_KEY, statusWithContext(status, currentSession(ctx).contextTokens, paint));
+		ctx.ui.setStatus(STATUS_KEY, statusWithContext(status, currentSession(ctx).contextTokens, paint, "   │   "));
 	};
 
 	const refreshLoans = (ctx: ExtensionContext) => {
@@ -343,7 +398,11 @@ export default function aiBalancer(pi: ExtensionAPI) {
 		}
 	};
 
-	for (const pool of pools) {
+	const registeredPools = new Set<string>();
+
+	function registerPool(pool: Pool) {
+		if (registeredPools.has(pool.id)) return;
+		registeredPools.add(pool.id);
 		pi.registerVirtualModel({
 			provider: POOL_PROVIDER,
 			id: pool.id,
@@ -352,8 +411,11 @@ export default function aiBalancer(pi: ExtensionAPI) {
 			// Shown before the first response; the smallest limits among the candidates.
 			contextWindow: 1_000_000,
 			maxTokens: 65_536,
-			route(request, ctx) {
+			async route(request, ctx) {
 				const now = Date.now();
+				const { pools: currentPools } = getLivePools();
+				for (const p of currentPools) registerPool(p);
+				const currentPool = currentPools.find(p => p.id === pool.id) ?? pool;
 				// A stale context or an unreadable journal never blocks the request.
 				let current: ReturnType<typeof currentSession> | undefined;
 				try {
@@ -363,9 +425,9 @@ export default function aiBalancer(pi: ExtensionAPI) {
 				}
 				const { loans } = readLoans(DATA_DIR);
 				routePrices ??= loadPrices(join(ROOT, "prices.json"));
-				const { candidate: choice, trace, changes } = routeWithLoans({
-					pool,
-					pools,
+				const { candidate: choiceCandidate, trace, changes } = routeWithLoans({
+					pool: currentPool,
+					pools: currentPools,
 					reason: request.reason,
 					previousProvider: request.previous?.model.provider,
 					previousModel: request.previous?.model.id,
@@ -383,6 +445,61 @@ export default function aiBalancer(pi: ExtensionAPI) {
 						profile: loadProfilesStore()?.active,
 					}),
 				});
+				let choice = choiceCandidate;
+				if (trace.decidedBy === "fallback" && ctx.hasUI) {
+					const state = fold().state;
+					const options: string[] = [];
+					const candidateMap = new Map<string, Candidate>();
+
+					for (const c of currentPool.candidates) {
+						const availAt = state.availableAt(c.quotaKey, now);
+						const timeStr = availAt ? new Date(availAt).toTimeString().slice(0, 8) : "unknown";
+						const label = `${c.provider}/${c.model} - ${t("ops.retryCandidate", { time: timeStr })}`;
+						options.push(label);
+						candidateMap.set(label, c);
+					}
+
+					for (const otherPool of currentPools) {
+						if (otherPool.id === currentPool.id) continue;
+						for (const c of otherPool.candidates) {
+							if (state.isAvailable(c.quotaKey, now)) {
+								const label = `${c.provider}/${c.model} - ${t("ops.otherPoolCandidate", { pool: otherPool.id })}`;
+								if (!candidateMap.has(label)) {
+									options.push(label);
+									candidateMap.set(label, c);
+								}
+							}
+						}
+					}
+
+					const compactOption = `[compact] ${t("ops.compactSession")}`;
+					options.push(compactOption);
+
+					const cancelOption = `[cancel] ${t("ops.cancelRequest")}`;
+					options.push(cancelOption);
+
+					const title = t("ops.fallbackTitle", { pool: currentPool.id });
+					const selected = await ctx.ui.select(title, options);
+
+					if (!selected || selected === cancelOption) {
+						const cancelMsg = t("ops.requestCancelled", { pool: currentPool.id });
+						ctx.ui.notify(cancelMsg, "warning");
+						throw new Error(cancelMsg);
+					}
+
+					if (selected === compactOption) {
+						const tokens = current?.contextTokens ?? 0;
+						const adviceMsg = t("ops.compactAdvice", { tokens });
+						ctx.ui.notify(adviceMsg, "warning");
+						throw new Error(adviceMsg);
+					}
+
+					const manualCandidate = candidateMap.get(selected);
+					if (manualCandidate) {
+						choice = manualCandidate;
+						ctx.ui.notify(t("ops.manuallyRouted", { provider: choice.provider, model: choice.model }), "info");
+					}
+				}
 				if (changes.length > 0) {
 					try {
 						commitLoanChanges(DATA_DIR, now, changes);
@@ -403,7 +520,7 @@ export default function aiBalancer(pi: ExtensionAPI) {
 								reason: request.reason,
 								previousProvider,
 								failedProvider,
-								candidates: pool.candidates,
+								candidates: currentPool.candidates,
 								chosen: choice,
 								contextTokens: current.contextTokens,
 								state: fold().state,
@@ -415,7 +532,7 @@ export default function aiBalancer(pi: ExtensionAPI) {
 							ts: now,
 							session: current.session,
 							project: basename(ctx.sessionManager.getCwd()),
-							pool: pool.id,
+							pool: currentPool.id,
 							reason: request.reason,
 							role: ROUTING_ROLE,
 							contextTokens: current.contextTokens,
@@ -427,16 +544,22 @@ export default function aiBalancer(pi: ExtensionAPI) {
 						// The trace explains a decision; losing it never blocks the request.
 					}
 				}
-				if (lastRouted.get(pool.id) !== choice.provider) {
+				const targetRef = `${choice.provider}/${choice.model}`;
+				if (lastRouted.get(pool.id) !== targetRef) {
 					const previous = lastRouted.get(pool.id);
-					lastRouted.set(pool.id, choice.provider);
-					record({ type: "route", ts: Date.now(), pool: pool.id, provider: choice.provider, reason: request.reason });
-					if (previous && ctx.hasUI) ctx.ui.notify(`ai-balancer: pool/${pool.id} ${previous} → ${choice.provider}`, "info");
+					lastRouted.set(pool.id, targetRef);
+					record({ type: "route", ts: Date.now(), pool: pool.id, provider: choice.provider, model: choice.model, reason: request.reason });
+					if (previous && ctx.hasUI) ctx.ui.notify(`ai-balancer: pool/${pool.id} ${previous} → ${targetRef}`, "info");
+					registerPoolUsage();
 					refreshStatus(ctx);
 				}
 				return { model, thinkingLevel: request.thinkingLevel };
 			},
 		});
+	}
+
+	for (const pool of initialPools) {
+		registerPool(pool);
 	}
 
 	pi.on("message_end", (event, ctx) => {
@@ -494,14 +617,27 @@ export default function aiBalancer(pi: ExtensionAPI) {
 			// The event log above already has it.
 		}
 		if (message.provider === "antigravity" && !quota.isStall) pollAgyIfStale();
-		refreshStatus(ctx);
+		const state = fold().state;
+		const { pools } = getLivePools();
+		const fromLabel = friendlyModelLabel(message.provider, message.model);
 
 		// Only sessions on a pool model are rewritten: elsewhere a retry would
-		// hit the same spent subscription again.
-		if (ctx.model?.provider !== POOL_PROVIDER) return;
+		// hit the same spent subscription again, so surface a clear status hint.
+		if (ctx.model?.provider !== POOL_PROVIDER) {
+			const fallbackCand = pools.flatMap(p => p.candidates).find(c => c.quotaKey !== key && state.isAvailable(c.quotaKey));
+			const toLabel = fallbackCand ? `${fallbackCand.provider}/${fallbackCand.model}` : "antigravity/gemini-3-8-flash";
+			const directNotice = t("ops.directQuotaHint", { from: fromLabel, to: toLabel });
+			lastFailoverNote = { text: directNotice, at: Date.now() };
+			registerPoolUsage();
+			refreshStatus(ctx);
+			if (ctx.hasUI) ctx.ui.notify(`ai-balancer: ${directNotice}`, "warning");
+			return;
+		}
 		const pool = pools.find(candidatePool => candidatePool.id === ctx.model?.id);
-		if (!pool) return;
-		const state = fold().state;
+		if (!pool) {
+			refreshStatus(ctx);
+			return;
+		}
 		const alternative = failoverAlternative(pool.candidates, key, state);
 		if (!alternative) {
 			circuitBreaker.checkAndTrip({
@@ -515,12 +651,20 @@ export default function aiBalancer(pi: ExtensionAPI) {
 			if (ctx.hasUI) {
 				ctx.ui.notify(`ai-balancer: ALL CANDIDATES in pool/${pool.id} are exhausted! Circuit breaker tripped, session checkpointed.`, "error");
 			}
+			registerPoolUsage();
 			refreshStatus(ctx);
 			return;
 		}
+		const toLabel = `${alternative.provider}/${alternative.model}`;
+		const failoverNotice = t(quota.isStall ? "ops.failoverStall" : "ops.failoverQuota", {
+			from: fromLabel,
+			to: toLabel,
+		});
+		lastFailoverNote = { text: failoverNotice, at: Date.now() };
+		registerPoolUsage();
+		refreshStatus(ctx);
 		if (ctx.hasUI) {
-			const reason = quota.isStall ? "stalled with no output" : "is spent";
-			ctx.ui.notify(`ai-balancer: ${message.provider} ${reason}, retrying on ${alternative.provider}`, "warning");
+			ctx.ui.notify(`ai-balancer: ${failoverNotice}`, "warning");
 		}
 		return { message: { ...event.message, errorMessage: failoverErrorMessage(message.provider, quota.isStall) } as typeof event.message };
 	});
@@ -621,7 +765,7 @@ export default function aiBalancer(pi: ExtensionAPI) {
 			prices,
 			now,
 			errors: data.errors,
-			pools,
+			pools: getLivePools().pools,
 			resolveAlias: id => {
 				const found = sessionIndex.lookup(id, tasks.get(id)?.sessionPath);
 				return found.firstMessage ? clipAlias(found.firstMessage) : null;
@@ -953,6 +1097,7 @@ export default function aiBalancer(pi: ExtensionAPI) {
 		let sendKey: (input: string) => void = () => {};
 		let cursor = 0;
 		let poolCursor = 0;
+		let sessionCursor = 0;
 		let rolePickerOpen = false;
 		let rolePickerCursor = 0;
 		let poolEditOpen = false;
@@ -977,7 +1122,7 @@ export default function aiBalancer(pi: ExtensionAPI) {
 				const config = JSON.parse(readFileSync(join(ROOT, "pools.json"), "utf8"));
 				return parsePools(config);
 			} catch {
-				return pools;
+				return getLivePools().pools;
 			}
 		};
 
@@ -1015,6 +1160,44 @@ export default function aiBalancer(pi: ExtensionAPI) {
 				};
 				const foldedMemo = memo(1_000, fold);
 				const storeMemo = memo(1_000, () => loadProfilesStore());
+				const sessionsMemo = memo(2_000, (): OverviewSessionRow[] => {
+					const now = Date.now();
+					const currentId = sessionIdentity().session;
+					const currentProject = sessionIdentity().project;
+					const bySession = new Map<string, OverviewSessionRow>();
+					if (currentId !== "unknown") {
+						const route = fold().lastRoute;
+						const activeProvider =
+							ctx.model && ctx.model.provider !== POOL_PROVIDER
+								? ctx.model.provider
+								: route?.provider ?? ctx.model?.provider ?? POOL_PROVIDER;
+						const activeModel =
+							ctx.model && ctx.model.provider !== POOL_PROVIDER
+								? ctx.model.id
+								: route?.model ?? ctx.model?.id ?? "orchestrator";
+						bySession.set(currentId, {
+							session: currentId,
+							project: currentProject,
+							provider: activeProvider,
+							model: activeModel,
+							isCurrent: true,
+						});
+					}
+					const requests = loadRequests(now).requests;
+					for (let i = requests.length - 1; i >= 0 && bySession.size < 6; i--) {
+						const req = requests[i]!;
+						if (now - req.ts > 24 * 3_600_000) break;
+						if (!req.session || req.session === "legacy" || req.child || bySession.has(req.session)) continue;
+						bySession.set(req.session, {
+							session: req.session,
+							project: req.project || "unknown",
+							provider: req.provider,
+							model: req.model,
+							isCurrent: req.session === currentId,
+						});
+					}
+					return [...bySession.values()];
+				});
 
 				const currentPoolConfigs: PoolConfig[] = getPools().map(p => ({
 					id: p.id,
@@ -1115,6 +1298,59 @@ export default function aiBalancer(pi: ExtensionAPI) {
 								void runSetup(ctx);
 							}, 50);
 							return;
+						}
+
+						if (tab === "overview") {
+							const activeSessions = sessionsMemo.get(Date.now());
+							if (activeSessions.length > 0) {
+								if (matchesKey(input, Key.down)) {
+									sessionCursor = (sessionCursor + 1) % activeSessions.length;
+									followSelected = true;
+									tui.requestRender();
+									return;
+								}
+								if (matchesKey(input, Key.up)) {
+									sessionCursor = (sessionCursor - 1 + activeSessions.length) % activeSessions.length;
+									followSelected = true;
+									tui.requestRender();
+									return;
+								}
+								if (input === "c" || matchesKey(input, Key.enter)) {
+									const picked = activeSessions[Math.max(0, Math.min(activeSessions.length - 1, sessionCursor))];
+									if (picked) {
+										const modelTarget = `${picked.provider}/${picked.model}`;
+										const store = loadProfilesStore();
+										const activeProfileName = store?.active;
+										if (activeProfileName && store) {
+											const currentProfile = store.profiles[activeProfileName] ?? {};
+											currentProfile.orchestrator = {
+												...(currentProfile.orchestrator ?? {}),
+												model: modelTarget,
+												thinking: currentProfile.orchestrator?.thinking ?? "high",
+											};
+											store.profiles[activeProfileName] = currentProfile;
+											try {
+												const read = readProfiles();
+												saveProfilesStore(store, read, { hasModel: (p, m) => Boolean(ctx.modelRegistry.find(p, m)) });
+											} catch {
+												// Non-fatal if model is not in local registry.
+											}
+										}
+										lastRouted.set("orchestrator", modelTarget);
+										record({ type: "route", ts: Date.now(), pool: "orchestrator", provider: picked.provider, model: picked.model, reason: "user" });
+										registerPoolUsage();
+										refreshStatus(ctx);
+										sessionsMemo.reset();
+										note = t("setup.cc.sessionModelCopied", {
+											session: picked.session.slice(0, 8),
+											project: picked.project,
+											model: modelTarget,
+										});
+										tui.requestRender();
+										return;
+									}
+								}
+							}
 						}
 
 						if (tab === "roles") {
@@ -1449,6 +1685,8 @@ export default function aiBalancer(pi: ExtensionAPI) {
 							advisorLoading,
 							cursor,
 							poolCursor,
+							sessionCursor,
+							activeSessions: sessionsMemo.get(now),
 							note,
 							lastRoutedByPool: Object.fromEntries(lastRouted),
 							rolePickerOpen,
@@ -1911,7 +2149,7 @@ export default function aiBalancer(pi: ExtensionAPI) {
 					}
 					// A pool target is one of this balancer's virtual models.
 					const hasModel = (p: string, m: string) =>
-						p === POOL_PROVIDER ? pools.some(pool => pool.id === m) : ctx.modelRegistry.find(p, m) !== undefined;
+						p === POOL_PROVIDER ? getLivePools().pools.some(pool => pool.id === m) : ctx.modelRegistry.find(p, m) !== undefined;
 					keepLoanInProfile(loan, read, { path: DEFAULT_PROFILES_PATH, now, hasModel });
 				}
 				writeLoans(DATA_DIR, nextLoans);
@@ -2279,7 +2517,9 @@ export default function aiBalancer(pi: ExtensionAPI) {
 	pi.on("session_compact", (_event, ctx) => refreshStatus(ctx));
 
 	pi.on("agent_settled", async (_event, ctx) => {
-		if (!ctx.hasUI || !ctx.isIdle()) return;
+		if (!ctx.isIdle()) return;
+		if (compactIfHistoryTooLarge(ctx)) return;
+		if (!ctx.hasUI) return;
 		try {
 			const { loans } = readLoans(DATA_DIR);
 			const loan = loans.find(l => l.status === "ended" && !promptedEndedLoans.has(l.id));

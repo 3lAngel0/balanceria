@@ -22,10 +22,12 @@ const QUOTA_EXHAUSTED_PATTERN = new RegExp(
 
 const RESET_DELAY_PATTERN = /resets in\s+(?:(\d+)h)?\s*(?:(\d+)m)?\s*(?:(\d+)s)?/i;
 
-const STALL_OR_TIMEOUT_PATTERN = new RegExp(
+export const STALL_OR_TIMEOUT_PATTERN = new RegExp(
 	[
 		"stalled (?:for \\d+[msh]? )?with no output",
 		"antigravity stalled",
+		"stopped responding on the resumed conversation",
+		"no response frame before the deadline",
 		"bridge (?:tool )?call timed out",
 		"escalated bridge call timed out",
 		"timed out after \\d+",
@@ -33,7 +35,7 @@ const STALL_OR_TIMEOUT_PATTERN = new RegExp(
 	"i",
 );
 
-export const DEFAULT_STALL_COOLDOWN_MS = 3 * 60_000;
+export const DEFAULT_STALL_COOLDOWN_MS = 6 * 60_000;
 
 export interface QuotaErrorClassification {
 	exhausted: true;

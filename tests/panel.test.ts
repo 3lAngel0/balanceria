@@ -50,9 +50,22 @@ test("renderPanel says when no data has been collected yet", () => {
 	assert.match(renderPanel(foldEvents([], NOW), NOW, 40).join("\n"), /no usage yet/);
 });
 
-test("statusLine names the active route and spent windows", () => {
+test("statusLine names the active route and spent windows, and supports spaced layout with exact model and failover notice", () => {
 	assert.equal(statusLine(foldEvents(EVENTS, NOW), NOW), "⚖ opus→claude-bridge · spent: agy claude");
 	assert.equal(statusLine(foldEvents([], NOW), NOW), "⚖ ai-balancer idle");
+
+	const withModel = foldEvents([
+		...EVENTS,
+		{ type: "route", ts: NOW - 10_000, pool: "orchestrator", provider: "antigravity", model: "gemini-3-8-flash", reason: "retry" },
+	], NOW);
+	const spaced = statusLine(withModel, NOW, undefined, undefined, {
+		spaced: true,
+		lastFailover: "Argon se llenó, se cambia a antigravity/gemini-3-8-flash",
+	});
+	assert.equal(
+		spaced,
+		"⚖ orchestrator → antigravity/gemini-3-8-flash   │   ⚠ Argon se llenó, se cambia a antigravity/gemini-3-8-flash   │   spent: agy claude",
+	);
 });
 
 test("contextNotice stays quiet below 120k and warns from 120k, alerting from 200k", () => {
@@ -238,4 +251,21 @@ test("role types, strategies and thinking levels are chips and pips in color, an
 	const pools = screen({ mode: "none", tab: "pools" }).map(plain).join("\n");
 	assert.match(pools, /\[hybrid\]/);
 	assert.match(pools, /\[waterfall\]/);
+});
+
+test("renderControlCenter overview displays active workspace sessions and keeps exact box width", () => {
+	const lines = screen({
+		mode: "none",
+		tab: "overview",
+		sessionCursor: 1,
+		activeSessions: [
+			{ session: "sess-11112222", project: "ai-balancer-public", provider: "antigravity", model: "gemini-3-8-flash", isCurrent: true },
+			{ session: "sess-33334444", project: "other-workspace", provider: "claude-bridge", model: "claude-sonnet-5-5", isCurrent: false },
+		],
+	}).map(plain);
+	const joined = lines.join("\n");
+	assert.match(joined, /Active Sessions Across Workspaces/);
+	assert.match(joined, /sess-111.*ai-balancer-public.*antigravity\/gemini-3-8-flash.*\[current\]/);
+	assert.match(joined, /▸ sess-333.*other-workspace.*claude-bridge\/claude-sonnet-5-5.*c\/Enter apply/);
+	for (const line of lines.slice(2)) assert.equal([...line].length, 90, line);
 });

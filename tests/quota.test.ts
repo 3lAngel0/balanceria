@@ -54,15 +54,20 @@ test("classifyQuotaError recognizes the claude-bridge quota message", () => {
 	assert.deepEqual(result, { exhausted: true });
 });
 
-test("classifyQuotaError recognizes bridge and agy stalls and timeouts", () => {
+test("classifyQuotaError recognizes bridge and agy stalls, dead resumed conversations, and timeouts", () => {
 	const stall1 = classifyQuotaError("Error: agy stalled for 5m with no output");
-	assert.deepEqual(stall1, { exhausted: true, resetInMs: 180000, isStall: true });
+	assert.deepEqual(stall1, { exhausted: true, resetInMs: 360000, isStall: true });
 
 	const stall2 = classifyQuotaError("Warning: Antigravity stalled with no output; the turn was stopped");
-	assert.deepEqual(stall2, { exhausted: true, resetInMs: 180000, isStall: true });
+	assert.deepEqual(stall2, { exhausted: true, resetInMs: 360000, isStall: true });
+
+	const deadConv = classifyQuotaError(
+		"Error: agy stopped responding on the resumed conversation (no response frame before the deadline; the conversation is dead). The binding was cleared, so the next antigravity turn starts a fresh conversation.",
+	);
+	assert.deepEqual(deadConv, { exhausted: true, resetInMs: 360000, isStall: true });
 
 	const timeout = classifyQuotaError("Warning: Bridge tool call failed: read (escalated bridge call timed out after 30 minutes)");
-	assert.deepEqual(timeout, { exhausted: true, resetInMs: 180000, isStall: true });
+	assert.deepEqual(timeout, { exhausted: true, resetInMs: 360000, isStall: true });
 });
 
 test("classifyQuotaError ignores transient and unrelated errors", () => {
@@ -184,4 +189,20 @@ test("a reading of 0% never shortens a longer explicit block", () => {
 	state.markExhausted("antigravity/gemini", T0 + 5 * HOUR_MS, "Individual quota reached", T0);
 	state.applyAgyUsage(POLL(0), T0 + 60_000);
 	assert.equal(state.availableAt("antigravity/gemini", T0 + 60_000), T0 + 5 * HOUR_MS, "the later of the two reset times wins");
+});
+
+test("recordSuccess clears a false exhaustion or stall block and consecutive stalls escalate until success", () => {
+	const state = new QuotaState();
+	state.markExhausted("antigravity/gemini-4-argon", T0 + 360_000, "agy stalled for 5m with no output", T0);
+	assert.equal(state.availableAt("antigravity/gemini-4-argon", T0), T0 + 360_000);
+
+	// Second consecutive stall escalates cooldown to 30m so the router does not ping-pong every 6m.
+	state.markExhausted("antigravity/gemini-4-argon", T0 + 400_000 + 360_000, "agy stalled for 5m with no output", T0 + 400_000);
+	assert.equal(state.availableAt("antigravity/gemini-4-argon", T0 + 400_000), T0 + 400_000 + 30 * 60_000);
+
+	// A real response on a key clears its exhaustion and resets consecutive stalls.
+	state.markExhausted("antigravity/gemini", T0 + 22 * HOUR_MS, "Individual quota reached", T0);
+	assert.equal(state.isAvailable("antigravity/gemini", T0 + 1000), false);
+	state.recordSuccess("antigravity/gemini", T0 + 2000);
+	assert.equal(state.isAvailable("antigravity/gemini", T0 + 2000), true);
 });

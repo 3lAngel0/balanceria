@@ -6,11 +6,16 @@ import test from "node:test";
 import {
   applySuggestionToProfile,
   createProfileBackup,
+  defaultProfilesPath,
+  defaultSubagentsPath,
   loadProfilesStore,
   PROFILE_BACKUPS_KEPT,
   qualifyModel,
   readProfiles,
+  resolveAgentHome,
+  resolveConfigHome,
   saveProfilesStore,
+  syncSubagentsJson,
   type ProfilesStore,
 } from "../src/profiles.ts";
 import type { Suggestion } from "../src/suggestions.ts";
@@ -27,6 +32,30 @@ const SAMPLE_STORE: ProfilesStore = {
   },
   active: "balanced",
 };
+
+test("resolveConfigHome respects GENTLE_SHELL_PREFIX, env vars, and fallbacks", () => {
+  const dir = mkdtempSync(join(tmpdir(), "res-cfg-"));
+  try {
+    assert.equal(
+      resolveConfigHome({ GENTLE_SHELL_PREFIX: "/custom/prefix" }, dir),
+      "/custom/prefix/config/gentle-ai",
+    );
+    assert.equal(
+      resolveConfigHome({ GENTLE_PI_CONFIG_HOME: "/custom/config/home" }, dir),
+      "/custom/config/home",
+    );
+    assert.equal(
+      resolveConfigHome({ GENTLE_SHELL_CONFIG_HOME: "/custom/shell/config" }, dir),
+      "/custom/shell/config",
+    );
+    assert.equal(
+      resolveConfigHome({}, dir),
+      join(dir, ".pi", "gentle-ai"),
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
 
 test("loadProfilesStore reads valid store and returns null for missing or invalid JSON", () => {
   const dir = mkdtempSync(join(tmpdir(), "prof-test-"));
@@ -195,6 +224,73 @@ test("saveProfilesStore keeps the newest backups in its own format and never tou
     for (const name of foreign) assert.ok(left.includes(name), name);
     assert.ok(left.includes(backup.split("/").pop()!));
     assert.equal(left.filter(name => /\.bak-\d{14}$/.test(name)).length, PROFILE_BACKUPS_KEPT);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("syncSubagentsJson updates model_profiles without touching orchestrator or unrelated fields", () => {
+  const dir = mkdtempSync(join(tmpdir(), "subagents-test-"));
+  const subagentsPath = join(dir, "subagents.json");
+  try {
+    const initial = {
+      default_model: "claude-bridge/claude-sonnet-5-5",
+      model_profiles: {
+        "gentle-ai-worker": { model: "claude-bridge/claude-sonnet-5-5", effort: "medium" },
+        "gentle-ai-explore": { model: "antigravity/gemini-3-8-flash", effort: "low" },
+      },
+    };
+    writeFileSync(subagentsPath, JSON.stringify(initial, null, 2));
+
+    syncSubagentsJson(
+      {
+        orchestrator: { model: "pool/orchestrator", thinking: "medium" },
+        "gentle-ai-worker": { model: "antigravity/gemini-3-8-flash", thinking: "high" },
+        "review-reliability": { model: "antigravity/gemini-4-argon", thinking: "medium" },
+      },
+      subagentsPath,
+    );
+
+    const updated = JSON.parse(readFileSync(subagentsPath, "utf8"));
+    assert.equal(updated.default_model, "claude-bridge/claude-sonnet-5-5");
+    assert.deepEqual(updated.model_profiles["gentle-ai-worker"], {
+      model: "antigravity/gemini-3-8-flash",
+      effort: "high",
+    });
+    assert.deepEqual(updated.model_profiles["gentle-ai-explore"], {
+      model: "antigravity/gemini-3-8-flash",
+      effort: "low",
+    });
+    assert.deepEqual(updated.model_profiles["review-reliability"], {
+      model: "antigravity/gemini-4-argon",
+      effort: "medium",
+    });
+    assert.equal(updated.model_profiles.orchestrator, undefined);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("saveProfilesStore synchronizes subagents.json when syncSubagents is enabled", () => {
+  const dir = mkdtempSync(join(tmpdir(), "prof-sub-sync-"));
+  const file = join(dir, "profiles.json");
+  const subagentsPath = join(dir, "subagents.json");
+  try {
+    writeFileSync(file, JSON.stringify(SAMPLE_STORE, null, 2));
+    writeFileSync(
+      subagentsPath,
+      JSON.stringify({
+        model_profiles: {
+          "gentle-ai-worker": { model: "claude-bridge/claude-sonnet-5-5", effort: "medium" },
+        },
+      }),
+    );
+
+    const updated = withRole(SAMPLE_STORE, "balanced", "gentle-ai-worker", "antigravity/gemini-3-8-flash");
+    saveProfilesStore(updated, readOk(file), { path: file, subagentsPath, now: NOW, hasModel });
+
+    const synced = JSON.parse(readFileSync(subagentsPath, "utf8"));
+    assert.equal(synced.model_profiles["gentle-ai-worker"].model, "antigravity/gemini-3-8-flash");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
