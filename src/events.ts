@@ -1,6 +1,7 @@
 import { appendFileSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { AgyGroupUsage } from "./agy-usage.ts";
+import { quotaKeyFor } from "./pools.ts";
 import { QuotaState } from "./state.ts";
 
 // Every Pi process (the main session and each subagent child) appends to one
@@ -24,7 +25,7 @@ export type BalancerEvent =
 		cacheRead: number;
 		cacheWrite: number;
 	}
-	| { type: "route"; ts: number; pool: string; provider: string; reason: string };
+	| { type: "route"; ts: number; pool: string; provider: string; model?: string; reason: string };
 
 export interface ProviderTokens {
 	last5h: number;
@@ -80,6 +81,9 @@ export function foldEvents(events: readonly BalancerEvent[], now: number): Folde
 			case "usage": {
 				if (typeof event.provider !== "string" || !isFiniteNumber(event.input) || !isFiniteNumber(event.output)) break;
 				if (now - event.ts > 7 * 24 * HOUR) break;
+				if (event.output > 0 && typeof event.model === "string") {
+					state.recordSuccess(quotaKeyFor(event.provider, event.model), event.ts);
+				}
 				const total = event.input + event.output;
 				const entry = tokens.get(event.provider) ?? { last5h: 0, today: 0, last7d: 0, requests: 0, lastModel: undefined };
 				entry.last7d += total;

@@ -11,6 +11,7 @@ import {
 	usageSourceFetch,
 	type ProviderUsage,
 } from "../src/usage-source.ts";
+import { QuotaState } from "../src/state.ts";
 
 const NOW = Date.parse("2026-10-18T06:00:00Z");
 
@@ -93,6 +94,23 @@ test("combinePoolUsage merges both subscriptions under the pool provider, routed
 
 	const viaAgy = combinePoolUsage(CLAUDE_USAGE, agy, "antigravity/claude", NOW);
 	assert.deepEqual(viaAgy?.limits.map(limit => limit.name), ["agy claude", "claude", "claude opus", "agy gemini", "agy argon"]);
+
+	const viaGemini = combinePoolUsage(CLAUDE_USAGE, agy, "antigravity/gemini", NOW);
+	assert.deepEqual(viaGemini?.limits.map(limit => limit.name), ["agy gemini", "claude", "claude opus", "agy claude", "agy argon"]);
+});
+
+test("combinePoolUsage overlays QuotaState exhaustion so spent Argon/Gemini windows report 100% used and limitReached", () => {
+	const agy = agyUsageLimits(AGY_REPORT);
+	const state = new QuotaState();
+	const resetAt = NOW + 2 * 3_600_000;
+	state.markExhausted("antigravity/gemini-4-argon", resetAt, "Individual quota reached", NOW);
+
+	const combined = combinePoolUsage(CLAUDE_USAGE, agy, "antigravity/gemini-4-argon", NOW, state);
+	const argon = combined?.limits[0];
+	assert.equal(argon?.name, "agy argon");
+	assert.equal(argon?.limitReached, true);
+	assert.equal(argon?.windows[0]?.usedPercent, 100);
+	assert.equal(argon?.windows[0]?.resetAt, resetAt);
 });
 
 test("combinePoolUsage keeps whichever side answered and gives up only when both are empty", () => {

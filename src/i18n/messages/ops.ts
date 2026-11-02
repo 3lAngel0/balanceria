@@ -8,6 +8,9 @@ export const opsMessages = {
 		"ops.manuallyRouted": "ai-balancer: Manually routed to {provider}/{model}",
 		"ops.compactAdvice": "ai-balancer: Session context is {tokens} tokens. Please run /compact before retrying.",
 		"ops.requestCancelled": "ai-balancer: Request cancelled by user because pool/{pool} candidates are exhausted.",
+		"ops.failoverQuota": "{from} is full, switching to {to}",
+		"ops.failoverStall": "{from} stopped responding, switching to {to}",
+		"ops.directQuotaHint": "{from} is full. Switch to {to} or pool/orchestrator (/balancer).",
 	},
 	es: {
 		"ops.fallbackTitle": "ai-balancer: TODOS LOS CANDIDATOS de pool/{pool} están agotados. Elige una acción:",
@@ -18,5 +21,8 @@ export const opsMessages = {
 		"ops.manuallyRouted": "ai-balancer: Ruteado manualmente a {provider}/{model}",
 		"ops.compactAdvice": "ai-balancer: El contexto tiene {tokens} tokens. Por favor ejecuta /compact antes de reintentar.",
 		"ops.requestCancelled": "ai-balancer: Petición cancelada por el usuario porque los candidatos de pool/{pool} están agotados.",
+		"ops.failoverQuota": "{from} se llenó, se cambia a {to}",
+		"ops.failoverStall": "{from} dejó de responder, se cambia a {to}",
+		"ops.directQuotaHint": "{from} se llenó. Cambiá a {to} o a pool/orchestrator (/balancer).",
 	},
 };

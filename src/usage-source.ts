@@ -1,5 +1,6 @@
 import { AGY_GROUP_ARGON, AGY_GROUP_CLAUDE, AGY_GROUP_GEMINI, agyQuotaKeyForGroup } from "./agy-usage.ts";
 import { POOL_PROVIDER } from "./pools.ts";
+import type { QuotaState } from "./state.ts";
 
 // Feeds Gentle Shell's native usage bar and `/gentle:usage` panel (alt+u).
 // The shell meters the session's provider, which is `pool` on a pool model, so
@@ -125,6 +126,26 @@ export function claudeLimitName(name: string): string {
 	return name === "claude" ? "claude" : `claude ${name}`;
 }
 
+export type UsageQuotaView = Pick<QuotaState, "isAvailable" | "availableAt">;
+
+function applyQuotaStateToLimit(limit: UsageLimit, state: UsageQuotaView | undefined, now: number): UsageLimit {
+	if (!state) return limit;
+	const key = quotaKeyForLimit(limit.name);
+	if (!key || state.isAvailable(key, now)) return limit;
+	const resetAt = state.availableAt(key, now) ?? null;
+	const hasFullWindow = limit.windows.some(window => window.usedPercent >= 100);
+	const windows = hasFullWindow
+		? limit.windows
+		: limit.windows.map((window, index) =>
+			index === 0 ? { ...window, usedPercent: 100, resetAt: resetAt ?? window.resetAt } : window,
+		);
+	return {
+		...limit,
+		windows,
+		limitReached: true,
+	};
+}
+
 /**
  * Both subscriptions as one `pool` usage. The limit of the quota key the pool
  * currently routes to goes first, because the shell's bar shows the first one.
@@ -134,12 +155,13 @@ export function combinePoolUsage(
 	agy: readonly UsageLimit[],
 	routedKey: string | undefined,
 	now: number,
+	state?: UsageQuotaView,
 ): ProviderUsage | undefined {
 	const claudeLimits = (claude?.limits ?? []).map(limit => ({
 		...limit,
 		name: claudeLimitName(limit.name),
 	}));
-	const limits = [...claudeLimits, ...agy];
+	const limits = [...claudeLimits, ...agy].map(limit => applyQuotaStateToLimit(limit, state, now));
 	if (limits.length === 0) return undefined;
 	const routed = limits.findIndex(limit => routedKey !== undefined && quotaKeyForLimit(limit.name) === routedKey);
 	if (routed > 0) limits.unshift(...limits.splice(routed, 1));
@@ -190,6 +212,8 @@ export interface PoolUsageSourceDeps {
 	readAgyReport: () => Promise<unknown>;
 	/** Quota key the pool routes to right now, e.g. "antigravity/claude". */
 	routedKey: () => string | undefined;
+	/** Optional live quota state so runtime exhaustion/stall blocks are reflected in `alt+u` and the top bar. */
+	state?: () => UsageQuotaView | undefined;
 }
 
 export function createPoolUsageSource(deps: PoolUsageSourceDeps): UsageSource {
@@ -204,7 +228,7 @@ export function createPoolUsageSource(deps: PoolUsageSourceDeps): UsageSource {
 					.catch(() => undefined),
 				deps.readAgyReport().catch(() => undefined),
 			]);
-			return combinePoolUsage(claude, agyUsageLimits(report), deps.routedKey(), now);
+			return combinePoolUsage(claude, agyUsageLimits(report), deps.routedKey(), now, deps.state?.());
 		},
 	};
 }

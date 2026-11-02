@@ -140,8 +140,9 @@ export function renderPanel(
 	}
 
 	if (folded.lastRoute) {
+		const target = folded.lastRoute.model ? `${folded.lastRoute.provider}/${folded.lastRoute.model}` : folded.lastRoute.provider;
 		lines.push(` ${t("setup.panel.route")}`);
-		lines.push(`  ${pad(poolLabel(folded.lastRoute.pool), 7)} → ${folded.lastRoute.provider}`);
+		lines.push(`  ${pad(poolLabel(folded.lastRoute.pool), 7)} → ${target}`);
 	}
 
 	if (profileCtx?.roles && Object.keys(profileCtx.roles).length > 0) {
@@ -180,6 +181,14 @@ export function renderPanel(
 export type ControlCenterTab = "overview" | "roles" | "pools" | "advisor";
 export const CONTROL_CENTER_TABS: readonly ControlCenterTab[] = ["overview", "roles", "pools", "advisor"];
 
+export interface OverviewSessionRow {
+	session: string;
+	project: string;
+	provider: string;
+	model: string;
+	isCurrent?: boolean;
+}
+
 export interface ControlCenterRenderInput {
 	tab: ControlCenterTab;
 	width: number;
@@ -194,6 +203,8 @@ export interface ControlCenterRenderInput {
 	advisorLoading?: boolean;
 	cursor?: number;
 	poolCursor?: number;
+	sessionCursor?: number;
+	activeSessions?: readonly OverviewSessionRow[];
 	note?: string;
 	lastRoutedByPool?: Readonly<Record<string, string>>;
 	rolePickerOpen?: boolean;
@@ -293,19 +304,29 @@ export function renderControlCenter(input: ControlCenterRenderInput): string[] {
 		return `${pixelText(color, "▰".repeat(pips) + "▱".repeat(3 - pips), mode)} ${pixelText("steel", displayThinking(level), mode)}`;
 	};
 	const activeProviderOf = (pool: PoolConfig) =>
-		input.lastRoutedByPool?.[pool.id] ?? (input.folded.lastRoute?.pool === pool.id ? input.folded.lastRoute.provider : undefined);
+		input.lastRoutedByPool?.[pool.id] ??
+		(input.folded.lastRoute?.pool === pool.id
+			? input.folded.lastRoute.model
+				? `${input.folded.lastRoute.provider}/${input.folded.lastRoute.model}`
+				: input.folded.lastRoute.provider
+			: undefined);
 	const chain = (candidates: readonly string[], active?: string) =>
-		candidates.map(ref => (active && ref.startsWith(`${active}/`) ? pixelText("gold", ref, mode) : ref)).join(` ${pixelText("slate", "→", mode)} `);
+		candidates.map(ref => (active && (ref === active || ref.startsWith(`${active}/`)) ? pixelText("gold", ref, mode) : ref)).join(` ${pixelText("slate", "→", mode)} `);
 	const marker = (selected: boolean) => (selected ? heading("▸ ") : "  ");
 	const first = (selected: boolean, text: string) => (selected ? heading(text) : text);
 
 	if (input.tab === "overview") {
 		const sprite = renderSprite(scaleSprite(frame, animate), mode);
 		const spriteWidth = Math.max(0, ...sprite.map(cellWidth));
+		const routeTarget = input.folded.lastRoute
+			? input.folded.lastRoute.model
+				? `${input.folded.lastRoute.provider}/${input.folded.lastRoute.model}`
+				: input.folded.lastRoute.provider
+			: undefined;
 		const info = [
 			heading(t("setup.cc.activeProfile", { name: input.activeProfile ?? t("setup.none") })),
-			input.folded.lastRoute
-				? `${marchingArrows(frame, 3, mode, animate)} ${t("setup.cc.lastRoute", { pool: input.folded.lastRoute.pool, provider: input.folded.lastRoute.provider })}`
+			input.folded.lastRoute && routeTarget
+				? `${marchingArrows(frame, 3, mode, animate)} ${t("setup.cc.lastRoute", { pool: input.folded.lastRoute.pool, provider: routeTarget })}`
 				: tone("dim", t("setup.cc.lastRouteIdle")),
 		];
 		const profile = box(
@@ -355,7 +376,29 @@ export function renderControlCenter(input: ControlCenterRenderInput): string[] {
 				windows.push(`${label} ${available ? chip(t("setup.window.ok").toUpperCase(), "hp", mode) : spent}`);
 			}
 		}
-		return [...lines, ...profile, ...pools, ...roles, ...box(bare(t("setup.cc.windowsTitle")), windows, wide, edge)];
+		const sessionsBox =
+			input.activeSessions && input.activeSessions.length > 0
+				? (() => {
+					const sCur = Math.max(0, Math.min(input.activeSessions.length - 1, input.sessionCursor ?? 0));
+					return box(
+						bare(t("setup.cc.sessionsTitle")),
+						table(
+							[col("session"), col("project"), col("model"), col("status")],
+							input.activeSessions.map((s, idx) => [
+								first(idx === sCur, s.session.slice(0, 8)),
+								s.project,
+								modelCell(`${s.provider}/${s.model}`),
+								s.isCurrent ? chip(t("setup.tag.current"), "hp", mode) : pixelText("steel", t("setup.cc.copyHint"), mode),
+							]),
+							wide - 4,
+							{ prefixes: input.activeSessions.map((_s, idx) => marker(idx === sCur)), head: heading },
+						),
+						wide,
+						edge,
+					);
+				})()
+				: [];
+		return [...lines, ...profile, ...sessionsBox, ...pools, ...roles, ...box(bare(t("setup.cc.windowsTitle")), windows, wide, edge)];
 	}
 
 	if (input.tab === "roles") {
@@ -474,26 +517,45 @@ export function renderControlCenter(input: ControlCenterRenderInput): string[] {
 	return framed(t("setup.tab.advisor"));
 }
 
+export interface StatusLineOptions {
+	activeModel?: string;
+	lastFailover?: string;
+	spaced?: boolean;
+}
+
 export function statusLine(
 	folded: FoldedEvents,
 	now: number,
 	circuitStatus?: CircuitBreakerStatus,
 	telemetry?: TurnTelemetry,
+	options?: StatusLineOptions,
 ): string {
+	const sep = options?.spaced ? "   │   " : " · ";
 	if (circuitStatus?.tripped) {
-		const resetInfo = circuitStatus.soonestResetAt ? ` · ${t("setup.status.reset", { at: formatReset(circuitStatus.soonestResetAt) })}` : "";
+		const resetInfo = circuitStatus.soonestResetAt ? `${sep}${t("setup.status.reset", { at: formatReset(circuitStatus.soonestResetAt) })}` : "";
 		return `🚨 ${t("setup.status.circuit")}${resetInfo}`;
 	}
 
 	const parts: string[] = [];
-	if (folded.lastRoute) parts.push(`${poolLabel(folded.lastRoute.pool)}→${folded.lastRoute.provider}`);
+	if (folded.lastRoute) {
+		const routeTarget = folded.lastRoute.model
+			? `${folded.lastRoute.provider}/${folded.lastRoute.model}`
+			: folded.lastRoute.provider;
+		const arrow = options?.spaced || folded.lastRoute.model ? " → " : "→";
+		parts.push(`${poolLabel(folded.lastRoute.pool)}${arrow}${routeTarget}`);
+	} else if (options?.activeModel) {
+		parts.push(options.activeModel);
+	}
+	if (options?.lastFailover) {
+		parts.push(`⚠ ${options.lastFailover}`);
+	}
 	const spent = spentKeys(folded, now).map(keyLabel);
 	if (spent.length > 0) parts.push(`${t("setup.status.spent")}: ${spent.join(", ")}`);
 
 	const badge = turnBadge(telemetry);
 	if (badge) parts.push(badge);
 
-	return parts.length > 0 ? `⚖ ${parts.join(" · ")}` : `⚖ ${t("setup.status.idle")}`;
+	return parts.length > 0 ? `⚖ ${parts.join(sep)}` : `⚖ ${t("setup.status.idle")}`;
 }
 
 // Every request resends the whole context, so a long session spends the
@@ -513,7 +575,8 @@ export function statusWithContext(
 	status: string,
 	tokens: number | null | undefined,
 	paint: (level: ContextLevel, text: string) => string,
+	separator = " · ",
 ): string {
 	const notice = contextNotice(tokens);
-	return notice ? `${status} · ${paint(notice.level, notice.text)}` : status;
+	return notice ? `${status}${separator}${paint(notice.level, notice.text)}` : status;
 }

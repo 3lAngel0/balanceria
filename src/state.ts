@@ -1,4 +1,5 @@
 import { type AgyGroupUsage, agyQuotaKeyForGroup } from "./agy-usage.ts";
+import { STALL_OR_TIMEOUT_PATTERN } from "./quota-errors.ts";
 
 // In-memory availability per quota key ("antigravity/claude",
 // "claude-bridge/claude", ...). A key is unavailable while an exhaustion
@@ -16,6 +17,8 @@ export interface QuotaEntry {
 	 * Undefined when the cooldown was only our default guess.
 	 */
 	providerUntil: number | undefined;
+	/** Number of consecutive stall/timeout failures without a successful response in between. */
+	consecutiveStalls?: number;
 }
 
 export interface QuotaStateOptions {
@@ -24,6 +27,8 @@ export interface QuotaStateOptions {
 }
 
 const DEFAULT_COOLDOWN_MS = 30 * 60_000;
+const SECOND_STALL_COOLDOWN_MS = 30 * 60_000;
+const REPEATED_STALL_COOLDOWN_MS = 2 * 3_600_000;
 
 export class QuotaState {
 	readonly #entries = new Map<string, QuotaEntry>();
@@ -36,7 +41,7 @@ export class QuotaState {
 	#entry(key: string): QuotaEntry {
 		let entry = this.#entries.get(key);
 		if (!entry) {
-			entry = { exhaustedUntil: undefined, reason: undefined, remainingFraction: undefined, resetAt: undefined, providerUntil: undefined };
+			entry = { exhaustedUntil: undefined, reason: undefined, remainingFraction: undefined, resetAt: undefined, providerUntil: undefined, consecutiveStalls: 0 };
 			this.#entries.set(key, entry);
 		}
 		return entry;
@@ -44,10 +49,32 @@ export class QuotaState {
 
 	markExhausted(key: string, until: number | undefined, reason: string, now: number = Date.now()): void {
 		const entry = this.#entry(key);
-		entry.exhaustedUntil = until ?? now + this.#defaultCooldownMs;
-		entry.providerUntil = until;
+		const isStall = STALL_OR_TIMEOUT_PATTERN.test(reason);
+		const stalls = isStall ? (entry.consecutiveStalls ?? 0) + 1 : 0;
+		entry.consecutiveStalls = stalls;
+		let effectiveUntil = until;
+		if (stalls === 2) {
+			effectiveUntil = Math.max(until ?? 0, now + SECOND_STALL_COOLDOWN_MS);
+		} else if (stalls >= 3) {
+			effectiveUntil = Math.max(until ?? 0, now + REPEATED_STALL_COOLDOWN_MS);
+		}
+		entry.exhaustedUntil = effectiveUntil ?? now + this.#defaultCooldownMs;
+		entry.providerUntil = effectiveUntil;
 		entry.reason = reason;
 		entry.remainingFraction = 0;
+	}
+
+	/** Clears stale exhaustion or stall lockouts when a model on `key` produces a real response. */
+	recordSuccess(key: string, _now: number = Date.now()): void {
+		const entry = this.#entries.get(key);
+		if (!entry) return;
+		entry.exhaustedUntil = undefined;
+		entry.providerUntil = undefined;
+		entry.reason = undefined;
+		entry.consecutiveStalls = 0;
+		if (entry.remainingFraction === 0) {
+			entry.remainingFraction = undefined;
+		}
 	}
 
 	/** Records a reading for `entry`: spent until `resetAt`, or free, unless the provider's own block is still open. */
