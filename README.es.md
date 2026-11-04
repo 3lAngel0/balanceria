@@ -80,6 +80,14 @@ flowchart TD
 1. **Nivel 1 (Profile de Gentle)**: `~/.gentle-shell/config/gentle-ai/profiles.json` asigna cada rol de agente a un modelo directo o a un pool virtual (`pool/<id>`). Los procesos secundarios reciben su asignación mediante el argumento `--model <target>:thinking`.
 2. **Nivel 2 (Pools virtuales)**: `pools.json` define los modelos candidatos y las reglas de enrutamiento. **Únicamente los roles que apuntan a un `pool/<id>` son balanceados.** Los roles que apuntan a un modelo directo físico omiten el balanceador y nunca son balanceados.
 
+### Diferencia clave: Perfiles vs. Pools vs. Bridges
+
+| Concepto | Pregunta | Responsabilidad | Configuración |
+|---|---|---|---|
+| **Perfil** | *¿Quién consume?* | Mapea el rol del agente (`orchestrator`, `worker`, etc.) a un destino. | `profiles.json` |
+| **Pool** | *¿Bajo qué política y alternativas?* | Virtualiza un conjunto de modelos candidatos con failover, stickiness y control de costos. | `pools.json` |
+| **Bridge** | *¿Por dónde se conecta físicamente?* | Adaptador hacia el proveedor o suscripción concreta (`claude-bridge`, `antigravity`, APIs). | `integrations.json` / CLI |
+
 ---
 
 ## ✨ Características principales

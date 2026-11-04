@@ -121,6 +121,22 @@ flowchart TD
 > **Únicamente los roles asignados a un pool virtual (`pool/<id>`) son balanceados.**
 > Si un rol está configurado con un modelo directo (ej. `anthropic/claude-3-5-sonnet` o `antigravity/gemini-3-8-flash`), Gentle Shell invoca directamente a ese proveedor. `ai-balancer` queda fuera del flujo y no habrá failover automático ante agotamiento de cuota.
 
+### Perfiles vs. Pools vs. Bridges: La diferencia conceptual
+
+Para comprender la arquitectura con total claridad, es fundamental distinguir tres piezas que resuelven responsabilidades distintas en el sistema:
+
+| Concepto | Pregunta que responde | Responsabilidad | Dónde se configura | Ejemplo concreto |
+|---|---|---|---|---|
+| **Perfil** (*Profiles*) | *¿Quién consume?* | Asocia la función o rol de un agente (`orchestrator`, `worker`, `explore`, `verify`) con un destino. | `~/.gentle-shell/config/gentle-ai/profiles.json` | El rol `gentle-ai-worker` tiene asignado `pool/claude-sonnet-5-5`. |
+| **Pool** (*Virtual Pool*) | *¿Qué alternativas y qué resiliencia aplican?* | Define un modelo virtual que agrupa múltiples candidatos físicos y aplica reglas deterministas (failover, stickiness de caché, límites de costo). | `pools.json` | `pool/claude-sonnet-5-5` agrupa `antigravity/claude-sonnet-5-5`, `claude-bridge/claude-sonnet-5-5` y fallback a `flash`. |
+| **Bridge / Integración** | *¿Cómo y por dónde se conecta físicamente el cable?* | Proporciona el adaptador o canal de transporte hacia el proveedor o suscripción concreta (CLI local, socket o API). | `integrations.json` / Extensiones de Pi / Variables de entorno | `claude-bridge` expone Claude Pro/Max; `antigravity` conecta con `agy`; `anthropic` conecta con la API directa. |
+
+El flujo completo de una llamada ilustra la interacción:
+$$\text{Agente (Perfil)} \longrightarrow \text{Pool Virtual} \xrightarrow[\text{cuotas / stickiness}]{\text{Enrutador}} \text{Candidato físico} \longrightarrow \text{Bridge / Proveedor}$$
+
+- Si en el **Perfil** asignás un modelo directo (ej. `anthropic/claude-3-5-sonnet`), el **Pool** se omite por completo y la petición viaja directo al **Bridge/Proveedor** sin balanceo ni failover.
+- Si en el **Perfil** apuntás a un `pool/*`, el enrutador inspecciona las cuotas de los candidatos provistos por cada **Bridge** y despacha la petición al mejor candidato disponible.
+
 ---
 
 ## 3. Enrutamiento determinista de peticiones
