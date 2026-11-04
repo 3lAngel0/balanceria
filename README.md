@@ -80,6 +80,14 @@ flowchart TD
 1. **Layer 1 (Gentle Profile)**: `~/.gentle-shell/config/gentle-ai/profiles.json` maps each agent role to either a direct model or a virtual pool (`pool/<id>`). Child processes receive their assignment via `--model <target>:thinking`.
 2. **Layer 2 (Virtual Pools)**: `pools.json` defines candidate models and routing rules. **Only roles pointing at a `pool/<id>` are balanced.** Roles pointing at a direct physical model bypass the balancer completely.
 
+### Key Difference: Profiles vs. Pools vs. Bridges
+
+| Concept | Question | Responsibility | Configuration File |
+|---|---|---|---|
+| **Profile** | *Who consumes?* | Maps an agent role (`orchestrator`, `worker`, etc.) to a destination target. | `profiles.json` |
+| **Pool** | *Under what policy & alternatives?* | Virtualizes a set of model candidates with failover, stickiness, and cost ceilings. | `pools.json` |
+| **Bridge** | *How does it connect physically?* | Transport adapter to the concrete provider or subscription (`claude-bridge`, `antigravity`, APIs). | `integrations.json` / CLI |
+
 ---
 
 ## ✨ Key Features

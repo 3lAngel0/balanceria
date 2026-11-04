@@ -121,6 +121,22 @@ flowchart TD
 > **Only roles assigned to a virtual pool (`pool/<id>`) are balanced.**
 > If a role is configured with a direct model (e.g. `anthropic/claude-3-5-sonnet` or `antigravity/gemini-3-8-flash`), Gentle Shell calls that provider directly. `ai-balancer` is bypassed completely, and automatic quota failover will not occur.
 
+### Profiles vs. Pools vs. Bridges: The Key Difference
+
+To understand the architecture without ambiguity, it is essential to distinguish the three separate concerns:
+
+| Concept | Question Answered | Responsibility | Configuration File | Concrete Example |
+|---|---|---|---|---|
+| **Profile** (*Profiles*) | *Who consumes?* | Maps an agent's functional role (`orchestrator`, `worker`, `explore`, `verify`) to a destination target. | `~/.gentle-shell/config/gentle-ai/profiles.json` | The `gentle-ai-worker` role is assigned `pool/claude-sonnet-5-5`. |
+| **Pool** (*Virtual Pool*) | *What resilience policies & alternatives apply?* | Defines a virtual model grouping multiple physical candidates and applies deterministic rules (failover, cache stickiness, cost ceilings). | `pools.json` | `pool/claude-sonnet-5-5` groups `antigravity/claude-sonnet-5-5`, `claude-bridge/claude-sonnet-5-5`, and a fallback to `flash`. |
+| **Bridge / Integration** | *How and where does the wire connect physically?* | Provides the transport adapter or bridge to the concrete provider or subscription (local CLI, socket, or API). | `integrations.json` / Pi Extensions / Environment variables | `claude-bridge` exposes Claude Pro/Max; `antigravity` connects to `agy`; `anthropic` connects to the direct API. |
+
+The end-to-end request lifecycle illustrates how they interact:
+$$\text{Agent (Profile)} \longrightarrow \text{Virtual Pool} \xrightarrow[\text{quotas / stickiness}]{\text{Router}} \text{Physical Candidate} \longrightarrow \text{Bridge / Provider}$$
+
+- If an agent's **Profile** assigns a direct model (e.g., `anthropic/claude-3-5-sonnet`), the **Pool** layer is bypassed entirely and the request travels straight to the **Bridge / Provider** with no balancing or failover.
+- If the **Profile** points to a `pool/*`, the deterministic router inspects quotas across candidates provided by each **Bridge** and dispatches to the healthiest candidate.
+
 ---
 
 ## 3. Deterministic Request Routing
