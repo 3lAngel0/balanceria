@@ -72,18 +72,25 @@ test("parsePools reads ordered candidates and rejects invalid entries", () => {
 	assert.equal(pools[0].name, "Opus 5.5 (pool)");
 });
 
-test("pools.json routes the orchestrator through argon, then gemini flash, then claude-bridge sonnet, each on its own quota window", () => {
+test("pools.json routes the orchestrator through argon, then agy claude, then gemini flash, then claude-bridge, each on its own quota window", () => {
 	const pools = parsePools(JSON.parse(readFileSync(new URL("../pools.json", import.meta.url), "utf8")));
-	assert.deepEqual(pools.map(pool => pool.id), ["claude-sonnet-5-5", "orchestrator"]);
+	assert.deepEqual(pools.map(pool => pool.id), ["gemini-3-8-flash", "claude-opus-5-5", "claude-sonnet-5-5", "orchestrator"]);
 	const orchestrator = pools.find(pool => pool.id === "orchestrator");
 	assert.deepEqual(orchestrator?.candidates, [
 		{ provider: "antigravity", model: "gemini-4-argon", quotaKey: "antigravity/gemini-4-argon" },
-		{ provider: "antigravity", model: "gemini-3-8-flash", quotaKey: "antigravity/gemini" },
 		{ provider: "antigravity", model: "claude-sonnet-5-5", quotaKey: "antigravity/claude" },
 		{ provider: "antigravity", model: "claude-opus-5-5", quotaKey: "antigravity/claude" },
+		{ provider: "antigravity", model: "gemini-3-8-flash", quotaKey: "antigravity/gemini" },
 		{ provider: "claude-bridge", model: "claude-opus-5-5", quotaKey: "claude-bridge/claude" },
 		{ provider: "claude-bridge", model: "claude-sonnet-5-5", quotaKey: "claude-bridge/claude" },
 	]);
+});
+
+test("pools.json tries agy flash before claude-bridge sonnet in the flash pool, in order", () => {
+	const pools = parsePools(JSON.parse(readFileSync(new URL("../pools.json", import.meta.url), "utf8")));
+	const flash = pools.find(pool => pool.id === "gemini-3-8-flash");
+	assert.equal(flash?.strategy, "waterfall");
+	assert.deepEqual(flash?.candidates.map(c => `${c.provider}/${c.model}`), ["antigravity/gemini-3-8-flash", "claude-bridge/claude-sonnet-5-5"]);
 });
 
 test("a quota event sets the remaining fraction and lifts an expired exhaustion, so highest-quota sees it", () => {
