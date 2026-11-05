@@ -99,6 +99,21 @@ test("combinePoolUsage merges both subscriptions under the pool provider, routed
 	assert.deepEqual(viaGemini?.limits.map(limit => limit.name), ["agy gemini", "claude", "claude opus", "agy claude", "agy argon"]);
 });
 
+test("combinePoolUsage formats plan with active pool and route info when provided", () => {
+	const agy = agyUsageLimits(AGY_REPORT);
+	const usage = combinePoolUsage(CLAUDE_USAGE, agy, "antigravity/claude", NOW, undefined, {
+		poolName: "default",
+		activeRoute: "antigravity/claude",
+	});
+	assert.equal(usage?.plan, "default → antigravity/claude · claude max");
+
+	const noClaudePlan = combinePoolUsage(undefined, agy, "antigravity/claude", NOW, undefined, {
+		poolName: "default",
+		activeRoute: "antigravity/claude",
+	});
+	assert.equal(noClaudePlan?.plan, "default → antigravity/claude");
+});
+
 test("combinePoolUsage overlays QuotaState exhaustion so spent Argon/Gemini windows report 100% used and limitReached", () => {
 	const agy = agyUsageLimits(AGY_REPORT);
 	const state = new QuotaState();
@@ -139,12 +154,14 @@ test("createPoolUsageSource registers the pool provider and fetches both sides i
 			return AGY_REPORT;
 		},
 		routedKey: () => "antigravity/claude",
+		poolInfo: () => ({ poolName: "default", activeRoute: "antigravity/claude" }),
 	});
 	assert.equal(source.schema, USAGE_SOURCE_SCHEMA);
 	assert.equal(source.provider, "pool");
 
 	const usage = await source.fetch(undefined, fakeFetch, NOW);
 	assert.deepEqual(calls.sort(), ["agy", `claude:true:${NOW}`]);
+	assert.equal(usage?.plan, "default → antigravity/claude · claude max");
 	assert.equal(usage?.limits[0].name, "agy claude");
 	assert.equal(usage?.limits.length, 5);
 });

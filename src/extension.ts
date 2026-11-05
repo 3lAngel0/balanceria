@@ -3,7 +3,7 @@ import { mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "no
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { copyToClipboard, type ExtensionAPI, type ExtensionCommandContext, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Key, matchesKey, SelectList, truncateToWidth, visibleWidth, type TuiMouseEvent, type TuiMouseEventResult } from "@earendil-works/pi-tui";
 import { CONTENT_X, emphasize, hitTest, layoutButtons, sameTarget, tabHitAreas, wheelOffset, type ButtonCell, type HitLayout, type MouseTarget } from "./control-center-mouse.ts";
 import { applyStepper, initStepper, type StepperCurrent } from "./setup-stepper.ts";
@@ -329,19 +329,16 @@ export default function aiBalancer(pi: ExtensionAPI) {
 			const pool = route && pools.find(candidatePool => candidatePool.id === route.pool);
 			return pool?.candidates.find(candidate => candidate.provider === route?.provider)?.quotaKey;
 		},
+		poolInfo: () => {
+			const route = fold().lastRoute;
+			const poolName = route?.pool ?? (sessionContext?.model?.provider === POOL_PROVIDER ? sessionContext?.model?.id : "default");
+			const activeRoute = route?.model ? `${route.provider}/${route.model}` : undefined;
+			return { poolName, activeRoute };
+		},
 		state: () => fold().state,
 	});
-	const agyCombinedUsageSource = {
-		...poolUsageSource,
-		provider: "antigravity",
-		async fetch(apiKey: string | undefined, fetchFn: typeof fetch, now: number) {
-			const result = await poolUsageSource.fetch(apiKey, fetchFn, now);
-			return result ? { ...result, provider: "antigravity" } : undefined;
-		},
-	};
 	function registerPoolUsage(): void {
 		pi.events.emit(USAGE_SOURCE_EVENT, poolUsageSource);
-		pi.events.emit(USAGE_SOURCE_EVENT, agyCombinedUsageSource);
 	}
 	pi.events.on(USAGE_SOURCE_EVENT, payload => {
 		const fetchClaude = usageSourceFetch(payload, CLAUDE_BRIDGE_PROVIDER);
@@ -2201,6 +2198,43 @@ export default function aiBalancer(pi: ExtensionAPI) {
 				openUsagePanel(ctx);
 				return;
 			}
+			if (command === "quota" || command.startsWith("quota ")) {
+				const isCopy = command.includes("--copy") || command.includes("-c") || command.trim() === "quota copy";
+				const isRaw = command.includes("--raw") || command.includes("-r");
+				const usage = await poolUsageSource.fetch(undefined, fetch, Date.now());
+				if (!usage) {
+					ctx.ui.notify("ai-balancer: usage data unavailable", "warning");
+					return;
+				}
+				const lines: string[] = [];
+				lines.push(`✿ ${usage.provider}${usage.plan ? " · " + usage.plan : ""} (updated ${new Date(usage.fetchedAt).toLocaleTimeString()})`);
+				for (const limit of usage.limits) {
+					for (const window of limit.windows) {
+						const resetText = window.resetAt ? ` · resets ${new Date(window.resetAt).toLocaleTimeString()}` : "";
+						lines.push(`  ${limit.name} ${window.label.padEnd(5)} ${Math.round(window.usedPercent)}%${resetText}`);
+					}
+				}
+				const outputText = lines.join("\n");
+				if (isCopy) {
+					try {
+						await copyToClipboard(outputText);
+						ctx.ui.notify("ai-balancer: quota copied to clipboard", "info");
+					} catch (err) {
+						ctx.ui.notify(`ai-balancer: failed to copy quota: ${err instanceof Error ? err.message : String(err)}`, "warning");
+					}
+					return;
+				}
+				if (isRaw) {
+					ctx.ui.notify(outputText, "info");
+				} else {
+					if (ctx.hasUI) {
+						await ctx.ui.select("ai-balancer · quota summary (esc to close)", lines);
+					} else {
+						ctx.ui.notify(outputText, "info");
+					}
+				}
+				return;
+			}
 			if (command === "refresh") {
 				const fresh = await pollAgy();
 				refreshStatus(ctx);
@@ -2429,7 +2463,7 @@ export default function aiBalancer(pi: ExtensionAPI) {
 	};
 
 	pi.registerCommand("balancer", {
-		description: "ai-balancer: `/balancer` opens the Control Center (`/balancer roles|pools|advisor` jumps to a tab, `/balancer menu` lists every action); or run one directly: `/balancer panel|usage|refresh|setup [classic]|report|simulate|switch-cost|loans|lab|permissions`, `/balancer serve [lan] [port|stop|status]`, `/balancer open <id>`, `/balancer lang [es|en|auto]`",
+		description: "ai-balancer: `/balancer` opens the Control Center (`/balancer roles|pools|advisor` jumps to a tab, `/balancer menu` lists every action); or run one directly: `/balancer panel|usage|refresh|quota [--copy|--raw]|setup [classic]|report|simulate|switch-cost|loans|lab|permissions`, `/balancer serve [lan] [port|stop|status]`, `/balancer open <id>`, `/balancer lang [es|en|auto]`",
 		handler: async (args, ctx) => {
 			const resolved = resolveBalancerArgs(args);
 			if (resolved.kind === "unknown") {

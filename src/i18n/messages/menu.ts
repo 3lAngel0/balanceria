@@ -2,6 +2,8 @@ export const menuMessages = {
 	en: {
 		"menu.panel.label": "Control center (GUI modal)",
 		"menu.panel.desc": "Open the interactive Control Center modal (Overview, Roles, Pools, AI Advisor)",
+		"menu.quota.label": "Quota summary",
+		"menu.quota.desc": "View live quota or copy with /balancer quota --copy",
 		"menu.usage.label": "Usage details",
 		"menu.usage.desc": "Open the full usage panel: quota, history and consumers",
 		"menu.refresh.label": "Refresh agy quota",
@@ -76,6 +78,8 @@ export const menuMessages = {
 	es: {
 		"menu.panel.label": "Centro de control (modal GUI)",
 		"menu.panel.desc": "Abrir el modal interactivo del Centro de control (visión general, roles, pools, asesor de IA)",
+		"menu.quota.label": "Resumen de cuota",
+		"menu.quota.desc": "Ver cuota en vivo o copiar con /balancer quota --copy",
 		"menu.usage.label": "Detalles de uso",
 		"menu.usage.desc": "Abrir el panel completo de uso: cuota, historial y consumidores",
 		"menu.refresh.label": "Actualizar cuota de agy",

@@ -9,6 +9,7 @@ import type { ControlCenterTab } from "./panel.ts";
 export function balancerMenu(): SelectItem[] {
 	return [
 		{ value: "panel", label: t("menu.panel.label"), description: t("menu.panel.desc") },
+		{ value: "quota", label: t("menu.quota.label"), description: t("menu.quota.desc") },
 		{ value: "usage", label: t("menu.usage.label"), description: t("menu.usage.desc") },
 		{ value: "refresh", label: t("menu.refresh.label"), description: t("menu.refresh.desc") },
 		{ value: "setup", label: t("menu.setup.label"), description: t("menu.setup.desc") },
@@ -68,7 +69,7 @@ export type BalancerArgs =
 
 const TAB_COMMANDS: readonly ControlCenterTab[] = ["overview", "roles", "pools", "advisor"];
 
-const SIMPLE = new Set(["panel", "usage", "refresh", "setup", "setup classic", "report", "simulate", "switch-cost", "loans", "help"]);
+const SIMPLE = new Set(["panel", "usage", "refresh", "setup", "setup classic", "report", "simulate", "switch-cost", "loans", "quota", "help"]);
 
 export function resolveBalancerArgs(args: string): BalancerArgs {
 	const command = args.trim();
@@ -78,7 +79,7 @@ export function resolveBalancerArgs(args: string): BalancerArgs {
 	if (tab) return { kind: "overlay", tab };
 	if (
 		SIMPLE.has(command) ||
-		/^(serve|open|simulate)(\s|$)/.test(command) ||
+		/^(serve|open|simulate|quota)(\s|$)/.test(command) ||
 		/^permissions( grant| revoke( \S+)?)?$/.test(command) ||
 		/^lab( new| diff| simulate| apply| undo| discard)?$/.test(command) ||
 		/^lang(\s+(es|en|auto))?$/.test(command)
