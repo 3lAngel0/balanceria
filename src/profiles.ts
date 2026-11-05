@@ -50,8 +50,13 @@ export function defaultSubagentsPath(env: NodeJS.ProcessEnv = process.env, home 
   return join(resolveAgentHome(env, home), "subagents.json");
 }
 
+export function defaultModelsPath(env: NodeJS.ProcessEnv = process.env, home = homedir()): string {
+  return join(resolveConfigHome(env, home), "models.json");
+}
+
 export const DEFAULT_PROFILES_PATH = defaultProfilesPath();
 export const DEFAULT_SUBAGENTS_PATH = defaultSubagentsPath();
+export const DEFAULT_MODELS_PATH = defaultModelsPath();
 
 export interface RoleRoute {
   model: string;
@@ -201,7 +206,9 @@ export function replaceFileSafely(
 export interface SaveProfilesOptions {
   path?: string;
   subagentsPath?: string;
+  modelsPath?: string;
   syncSubagents?: boolean;
+  syncModels?: boolean;
   now?: number;
   /** Pi's model registry lookup. */
   hasModel(provider: string, model: string): boolean;
@@ -266,6 +273,51 @@ export function syncSubagentsJson(activeConfig: ProfileConfig, subagentsPath?: s
 }
 
 /**
+ * Syncs the active profile's subagent roles into models.json
+ * so gentle-pi's applySavedModelConfig (Gentle Shell 4.6.0+) treats the
+ * balancer's profile choices as authoritative instead of overwriting subagents.json.
+ */
+export function syncModelsJson(activeConfig: ProfileConfig, modelsPath?: string): void {
+  const targetPath = modelsPath ?? defaultModelsPath();
+  let existing: Record<string, { model: string; thinking?: string }> = {};
+  if (existsSync(targetPath)) {
+    try {
+      const raw = readFileSync(targetPath, "utf8");
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        existing = parsed as Record<string, { model: string; thinking?: string }>;
+      }
+    } catch {
+      // Ignore parse failure; overwrite with valid config
+    }
+  }
+
+  for (const [role, route] of Object.entries(activeConfig)) {
+    if (role === "orchestrator" || !route || typeof route !== "object") continue;
+    const model = (route as RoleRoute).model;
+    const thinking = (route as RoleRoute).thinking;
+    if (typeof model !== "string" || !model) continue;
+
+    existing[role] = {
+      model,
+      ...(thinking ? { thinking } : {}),
+    };
+  }
+
+  const temp = `${targetPath}.${process.pid}.tmp`;
+  try {
+    writeFileSync(temp, JSON.stringify(existing, null, 2) + "\n", { encoding: "utf8", mode: 0o600 });
+    renameSync(temp, targetPath);
+  } catch {
+    try {
+      unlinkSync(temp);
+    } catch {
+      // Ignored
+    }
+  }
+}
+
+/**
  * Writes `next` over the file `read` came from, with a backup. Throws, writing
  * nothing, when the file changed or vanished since it was read, when `next`
  * has an unknown kind or version, or when a new or changed role names a model
@@ -293,6 +345,13 @@ export function saveProfilesStore(next: ProfilesStore, read: ProfilesRead, optio
         syncSubagentsJson(activeConfig, options.subagentsPath);
       } catch {
         // Non-fatal if subagents.json sync fails.
+      }
+      if (options.syncModels !== false) {
+        try {
+          syncModelsJson(activeConfig, options.modelsPath);
+        } catch {
+          // Non-fatal if models.json sync fails.
+        }
       }
     }
   }
