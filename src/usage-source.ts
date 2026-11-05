@@ -96,7 +96,7 @@ export function agyUsageLimits(report: unknown): UsageLimit[] {
 
 /** Quota key of a limit name, when the name is one of the known subscription limits. */
 export function quotaKeyForLimit(name: string): string | undefined {
-	if (name === "claude") return CLAUDE_KEY;
+	if (name === "claude" || name === "claude-bridge") return CLAUDE_KEY;
 	const group = Object.entries(AGY_LIMIT_NAMES).find(([, groupName]) => groupName === name)?.[0];
 	return group ? agyQuotaKeyForGroup(group) : undefined;
 }
@@ -107,7 +107,7 @@ export function quotaKeyForLimit(name: string): string | undefined {
  * claude-bridge with live numbers instead of a stale exhaustion.
  */
 export function claudeQuotaEvents(usage: ProviderUsage): { type: "quota"; ts: number; key: string; remainingFraction: number; resetAt: number | undefined }[] {
-	const limit = usage.limits.find(candidate => candidate.name === "claude");
+	const limit = usage.limits.find(candidate => candidate.name === "claude" || candidate.name === "claude-bridge");
 	if (!limit || limit.windows.length === 0) return [];
 	const fullest = limit.windows.reduce((a, b) => (b.usedPercent > a.usedPercent ? b : a));
 	const remainingFraction = limit.limitReached ? 0 : Math.min(1, Math.max(0, Math.round(100 - fullest.usedPercent) / 100));
@@ -146,6 +146,11 @@ function applyQuotaStateToLimit(limit: UsageLimit, state: UsageQuotaView | undef
 	};
 }
 
+export interface PoolUsageInfo {
+	poolName?: string;
+	activeRoute?: string;
+}
+
 /**
  * Both subscriptions as one `pool` usage. The limit of the quota key the pool
  * currently routes to goes first, because the shell's bar shows the first one.
@@ -156,6 +161,7 @@ export function combinePoolUsage(
 	routedKey: string | undefined,
 	now: number,
 	state?: UsageQuotaView,
+	poolInfo?: PoolUsageInfo,
 ): ProviderUsage | undefined {
 	const claudeLimits = (claude?.limits ?? []).map(limit => ({
 		...limit,
@@ -165,9 +171,19 @@ export function combinePoolUsage(
 	if (limits.length === 0) return undefined;
 	const routed = limits.findIndex(limit => routedKey !== undefined && quotaKeyForLimit(limit.name) === routedKey);
 	if (routed > 0) limits.unshift(...limits.splice(routed, 1));
+
+	let plan: string | undefined;
+	if (poolInfo?.poolName || poolInfo?.activeRoute) {
+		const target = poolInfo.activeRoute ? ` → ${poolInfo.activeRoute}` : "";
+		const basePool = poolInfo.poolName ?? "pool";
+		plan = claude?.plan ? `${basePool}${target} · claude ${claude.plan}` : `${basePool}${target}`;
+	} else if (claude?.plan) {
+		plan = `claude ${claude.plan}`;
+	}
+
 	return {
 		provider: POOL_PROVIDER,
-		plan: claude?.plan ? `claude ${claude.plan}` : undefined,
+		plan,
 		limits,
 		// A cached Claude snapshot keeps its own age, so "updated" never overstates it.
 		fetchedAt: Math.min(claude?.fetchedAt ?? now, now),
@@ -212,6 +228,8 @@ export interface PoolUsageSourceDeps {
 	readAgyReport: () => Promise<unknown>;
 	/** Quota key the pool routes to right now, e.g. "antigravity/claude". */
 	routedKey: () => string | undefined;
+	/** Optional active pool details (pool name and currently routed candidate/model). */
+	poolInfo?: () => PoolUsageInfo | undefined;
 	/** Optional live quota state so runtime exhaustion/stall blocks are reflected in `alt+u` and the top bar. */
 	state?: () => UsageQuotaView | undefined;
 }
@@ -228,7 +246,7 @@ export function createPoolUsageSource(deps: PoolUsageSourceDeps): UsageSource {
 					.catch(() => undefined),
 				deps.readAgyReport().catch(() => undefined),
 			]);
-			return combinePoolUsage(claude, agyUsageLimits(report), deps.routedKey(), now, deps.state?.());
+			return combinePoolUsage(claude, agyUsageLimits(report), deps.routedKey(), now, deps.state?.(), deps.poolInfo?.());
 		},
 	};
 }

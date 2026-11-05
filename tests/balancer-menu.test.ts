@@ -7,7 +7,7 @@ test("the menu offers every action with a label and a description, in a stable o
 	setLang("en");
 	assert.deepEqual(
 		BALANCER_MENU.map(item => item.value),
-		["panel", "usage", "refresh", "setup", "setup classic", "report", "simulate", "switch-cost", "loans", "permissions", "permissions grant", "permissions revoke", "lab", "lab new", "lab diff", "lab simulate", "lab apply", "lab undo", "lab discard", "serve", "serve lan", "serve setup", "serve status", "serve stop", "serve autostart off", "lang", "help"],
+		["panel", "quota", "usage", "refresh", "setup", "setup classic", "report", "simulate", "switch-cost", "loans", "permissions", "permissions grant", "permissions revoke", "lab", "lab new", "lab diff", "lab simulate", "lab apply", "lab undo", "lab discard", "serve", "serve lan", "serve setup", "serve status", "serve stop", "serve autostart off", "lang", "help"],
 	);
 	for (const item of BALANCER_MENU) {
 		assert.ok(item.label.length > 0, item.value);

@@ -6,6 +6,7 @@ import test from "node:test";
 import {
   applySuggestionToProfile,
   createProfileBackup,
+  defaultModelsPath,
   defaultProfilesPath,
   defaultSubagentsPath,
   loadProfilesStore,
@@ -15,6 +16,7 @@ import {
   resolveAgentHome,
   resolveConfigHome,
   saveProfilesStore,
+  syncModelsJson,
   syncSubagentsJson,
   type ProfilesStore,
 } from "../src/profiles.ts";
@@ -291,6 +293,67 @@ test("saveProfilesStore synchronizes subagents.json when syncSubagents is enable
 
     const synced = JSON.parse(readFileSync(subagentsPath, "utf8"));
     assert.equal(synced.model_profiles["gentle-ai-worker"].model, "antigravity/gemini-3-8-flash");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("syncModelsJson updates models.json without touching orchestrator or unrelated roles", () => {
+  const dir = mkdtempSync(join(tmpdir(), "models-test-"));
+  const modelsPath = join(dir, "models.json");
+  try {
+    const initial = {
+      "gentle-ai-worker": { model: "claude-bridge/claude-sonnet-5-5", thinking: "medium" },
+      "gentle-ai-explore": { model: "antigravity/gemini-3-8-flash", thinking: "low" },
+    };
+    writeFileSync(modelsPath, JSON.stringify(initial, null, 2));
+
+    syncModelsJson(
+      {
+        orchestrator: { model: "pool/orchestrator", thinking: "medium" },
+        "gentle-ai-worker": { model: "pool/gemini-3-8-flash", thinking: "high" },
+        "review-reliability": { model: "antigravity/gemini-4-argon", thinking: "medium" },
+      },
+      modelsPath,
+    );
+
+    const updated = JSON.parse(readFileSync(modelsPath, "utf8"));
+    assert.deepEqual(updated["gentle-ai-worker"], {
+      model: "pool/gemini-3-8-flash",
+      thinking: "high",
+    });
+    assert.deepEqual(updated["gentle-ai-explore"], {
+      model: "antigravity/gemini-3-8-flash",
+      thinking: "low",
+    });
+    assert.deepEqual(updated["review-reliability"], {
+      model: "antigravity/gemini-4-argon",
+      thinking: "medium",
+    });
+    assert.equal(updated.orchestrator, undefined);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("saveProfilesStore synchronizes models.json when syncModels is enabled", () => {
+  const dir = mkdtempSync(join(tmpdir(), "prof-mod-sync-"));
+  const file = join(dir, "profiles.json");
+  const modelsPath = join(dir, "models.json");
+  try {
+    writeFileSync(file, JSON.stringify(SAMPLE_STORE, null, 2));
+    writeFileSync(
+      modelsPath,
+      JSON.stringify({
+        "gentle-ai-worker": { model: "claude-bridge/claude-sonnet-5-5", thinking: "medium" },
+      }),
+    );
+
+    const updated = withRole(SAMPLE_STORE, "balanced", "gentle-ai-worker", "antigravity/gemini-3-8-flash");
+    saveProfilesStore(updated, readOk(file), { path: file, modelsPath, now: NOW, hasModel });
+
+    const synced = JSON.parse(readFileSync(modelsPath, "utf8"));
+    assert.equal(synced["gentle-ai-worker"].model, "antigravity/gemini-3-8-flash");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

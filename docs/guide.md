@@ -264,7 +264,8 @@ Recognized patterns:
 - **Claude Bridge**: `"Claude quota exceeded — rate limit... resets..."`.
 - **Claude Code CLI**: `"You're out of extra usage · resets 6:30pm"`.
 - **Generic Rate Limits**: `"resource_exhausted"`, `"usage limit reached"`.
-- **Process Stalls & Timeouts**: CLI or bridge processes that hang without output trigger a stall classification with a 3-minute cooldown (`DEFAULT_STALL_COOLDOWN_MS = 180_000`).
+- **Process Stalls & Timeouts**: CLI or bridge processes that hang without output trigger a stall classification with a 6-minute cooldown (`DEFAULT_STALL_COOLDOWN_MS = 360_000`).
+- **How fast a stall is detected**: the Antigravity bridge decides that, not `ai-balancer`. It fails a turn with `agy stalled for <N>m with no output` after `inactivityTimeoutMin` minutes without output (default 5; set it in `~/.pi/agent/antigravity-bridge/config.json` or with `AGY_INACTIVITY_TIMEOUT_MIN`, whole minutes, minimum 1). A pool then fails over through Pi's normal retry. Gentle AI subagents give up after about 4 minutes without a first event, so a value of 2 lets a pool switch models before that.
 
 ### The 429 Rewrite Trick
 When a quota failure is recognized, `ai-balancer` rewrites the error message into:

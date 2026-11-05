@@ -264,7 +264,8 @@ Patrones reconocidos:
 - **Claude Bridge**: `"Claude quota exceeded — rate limit... resets..."`.
 - **Claude Code CLI**: `"You're out of extra usage · resets 6:30pm"`.
 - **Límites de ritmo genéricos**: `"resource_exhausted"`, `"usage limit reached"`.
-- **Bloqueos de proceso y tiempos de espera (stalls)**: Procesos de CLI o bridges que se cuelgan sin emitir salida activan una clasificación de stall con un enfriamiento de 3 minutos (`DEFAULT_STALL_COOLDOWN_MS = 180_000`).
+- **Bloqueos de proceso y tiempos de espera (stalls)**: Procesos de CLI o bridges que se cuelgan sin emitir salida activan una clasificación de stall con un enfriamiento de 6 minutos (`DEFAULT_STALL_COOLDOWN_MS = 360_000`).
+- **Qué tan rápido se detecta un stall**: lo decide el bridge de Antigravity, no `ai-balancer`. El bridge falla el turno con `agy stalled for <N>m with no output` después de `inactivityTimeoutMin` minutos sin salida (5 por defecto; se configura en `~/.pi/agent/antigravity-bridge/config.json` o con `AGY_INACTIVITY_TIMEOUT_MIN`, en minutos enteros, mínimo 1). Después, el pool cambia de modelo con el reintento normal de Pi. Los subagentes de Gentle AI se rinden a los 4 minutos aproximadamente si no reciben un primer evento, así que con 2 el pool alcanza a cambiar de modelo antes.
 
 ### La reescritura a 429
 Al reconocerse una falla de cuota, `ai-balancer` reescribe el mensaje de error como:
