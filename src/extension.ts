@@ -8,6 +8,7 @@ import { Key, matchesKey, SelectList, truncateToWidth, visibleWidth, type TuiMou
 import { CONTENT_X, emphasize, hitTest, layoutButtons, sameTarget, tabHitAreas, wheelOffset, type ButtonCell, type HitLayout, type MouseTarget } from "./control-center-mouse.ts";
 import { applyStepper, initStepper, type StepperCurrent } from "./setup-stepper.ts";
 import { initScreen, renderStepper, stepperInput, type StepperEffect, type StepperEvent, type StepperTone, stepperThemeColor } from "./setup-stepper-view.ts";
+import { initLangPrompt, langPromptInput, renderLangPrompt } from "./setup-lang-prompt.ts";
 import { BALANCER_MENU, balancerMenu, glossaryText, resolveBalancerArgs } from "./balancer-menu.ts";
 import { initLang, getLang, setLang, saveLangSetting, t } from "./i18n/index.ts";
 import { detectFirewall, privateIPv4Networks, readAutostart, readTls, runLanSetup, writeAutostart, writeTls, type Runner } from "./lan-setup.ts";
@@ -1796,11 +1797,62 @@ export default function aiBalancer(pi: ExtensionAPI) {
 
 	/** `/balancer setup`: the stepper overlay, or the classic prompts when there is no UI or no custom overlay. */
 	const runSetup = async (ctx: ExtensionContext): Promise<void> => {
+		if (ctx.hasUI && typeof ctx.ui?.custom === "function") {
+			await promptSetupLanguage(ctx);
+		}
 		if (!ctx.hasUI || typeof ctx.ui?.custom !== "function") {
 			await runClassicSetup(ctx);
 			return;
 		}
 		await openSetupStepper(ctx);
+	};
+
+	const promptSetupLanguage = async (ctx: ExtensionContext): Promise<void> => {
+		let state = initLangPrompt(getLang());
+		const mode = colorMode();
+
+		const result = await ctx.ui.custom<{ selected: "es" | "en"; persist: boolean } | undefined>(
+			(tui, theme, _keybindings, done) => {
+				return {
+					render(width: number): string[] {
+						const border = (text: string) => theme.fg("border", text);
+						const inner = Math.max(20, width - 4);
+						const row = (text: string) => `${border("│")} ${truncateToWidth(text, inner, "…", true)} ${border("│")}`;
+						const lines = renderLangPrompt(state, inner, mode);
+						return [border(`╭${"─".repeat(inner + 2)}╮`), ...lines.map(row), border(`╰${"─".repeat(inner + 2)}╯`)];
+					},
+					handleInput(data: string) {
+						state = langPromptInput(state, { type: "key", data: canonicalKey(data) });
+						if (state.cancelled) {
+							done(undefined);
+						} else if (state.done) {
+							done({ selected: state.selected, persist: state.persist });
+						} else {
+							tui.requestRender();
+						}
+					},
+					handleMouse(event: TuiMouseEvent): TuiMouseEventResult | undefined {
+						if (event.type === "click" && event.button === "left") {
+							state = langPromptInput(state, { type: "mouse", kind: "click", x: event.x, y: event.y });
+							tui.requestRender();
+							return { handled: true, render: true };
+						}
+						return undefined;
+					},
+					invalidate() {},
+					dispose() {},
+				};
+			},
+			{ overlay: true, overlayOptions: { width: "70%", minWidth: 44, anchor: "center" } },
+		);
+
+		if (result) {
+			setLang(result.selected);
+			if (result.persist) {
+				saveLangSetting(SETTINGS_FILE, result.selected);
+				ctx.ui.notify(t("menu.langChanged", { lang: t(`menu.langName.${result.selected}`) }), "info");
+			}
+		}
 	};
 
 	/** Pi hands overlays raw input in either terminal protocol; the view works on the legacy sequences. */
@@ -1830,7 +1882,7 @@ export default function aiBalancer(pi: ExtensionAPI) {
 		const store = loadProfilesStore();
 		const current: StepperCurrent = { pools: readJson("pools.json"), integrations: readJson("integrations.json"), profiles: store };
 		const recommended = generateRecommendedConfig(detected.filter(p => p.detected), { hasModel: (provider, model) => Boolean(ctx.modelRegistry.find(provider, model)) }).pools;
-		let screen = initScreen(initStepper(detected, recommended, store?.profiles?.[store.active ?? ""] ?? {}), current);
+		let screen = initScreen(initStepper(detected, recommended, store?.profiles?.[store.active ?? ""] ?? {}, store?.workflow?.[store.active ?? ""]), current);
 
 		const effect = await ctx.ui.custom<StepperEffect>(
 			(tui, theme, _keybindings, done) => {
@@ -1886,7 +1938,7 @@ export default function aiBalancer(pi: ExtensionAPI) {
 			current,
 			profilesPath: DEFAULT_PROFILES_PATH,
 			writeConfig: writeConfigSafely,
-			writeProfiles: (name, roles) => saveProfileRoles(DEFAULT_PROFILES_PATH, name, roles, (provider, model) => Boolean(ctx.modelRegistry.find(provider, model))),
+			writeProfiles: (name, roles, workflow) => saveProfileRoles(DEFAULT_PROFILES_PATH, name, roles, (provider, model) => Boolean(ctx.modelRegistry.find(provider, model)), workflow),
 		});
 		if (!result.ok) {
 			ctx.ui.notify(`ai-balancer: ${t("setup.stepper.saveFailed", { error: result.error ?? "" })}`, "error");

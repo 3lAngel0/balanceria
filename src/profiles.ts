@@ -66,12 +66,41 @@ export interface RoleRoute {
 
 export type ProfileConfig = Record<string, RoleRoute>;
 
+export const ORCHESTRATOR_MODES = ["organic", "full-delegation"] as const;
+export type OrchestratorMode = (typeof ORCHESTRATOR_MODES)[number];
+export const DEFAULT_ORCHESTRATOR_MODE: OrchestratorMode = "organic";
+
+export interface ProfileWorkflow {
+  orchestratorMode: OrchestratorMode;
+}
+
+export function isOrchestratorMode(value: unknown): value is OrchestratorMode {
+  return typeof value === "string" && (ORCHESTRATOR_MODES as readonly string[]).includes(value);
+}
+
 export interface ProfilesStore {
   kind: string;
   version: number;
   profiles: Record<string, ProfileConfig>;
   active?: string;
+  workflow?: Record<string, ProfileWorkflow>;
   [key: string]: unknown;
+}
+
+export function getProfileWorkflow(store: ProfilesStore | null | undefined, profileName: string): ProfileWorkflow {
+  const raw = store?.workflow?.[profileName];
+  const mode = raw && isOrchestratorMode(raw.orchestratorMode) ? raw.orchestratorMode : DEFAULT_ORCHESTRATOR_MODE;
+  return { orchestratorMode: mode };
+}
+
+export function setProfileWorkflow(store: ProfilesStore, profileName: string, workflow: ProfileWorkflow): ProfilesStore {
+  return {
+    ...store,
+    workflow: {
+      ...(store.workflow ?? {}),
+      [profileName]: workflow,
+    },
+  };
 }
 
 // profiles.json belongs to gentle-pi: the balancer reads and writes only the

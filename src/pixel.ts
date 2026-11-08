@@ -104,7 +104,12 @@ export function renderSprite(sprite: Sprite, mode: ColorMode): string[] {
 }
 
 const SCALE_COLORS = { g: "gold", s: "steel", k: "slate" } as const satisfies Record<string, PixelColor>;
-const SCALE_FALLBACK = ["  ⚖  "];
+const SCALE_FALLBACK_FRAMES = [
+	["  ⚖   ", " ___▲___ ", "(●) === (●)", " [BALANCER]"],
+	["  ⚖/  ", "/___▲\\_  ", "(●)  ===   ", "       (●) "],
+	["  ⚖   ", " ___▲___ ", "(●) === (●)", " [BALANCER]"],
+	[" \\⚖   ", " _/▲___\\ ", "   ===  (●)", "(●)        "],
+] as const;
 const SCALE_LEVEL = [
 	".....gg.....",
 	".....gg.....",
@@ -131,7 +136,7 @@ const SCALE_FRAMES = [SCALE_LEVEL, SCALE_LEFT, SCALE_LEVEL, mirror(SCALE_LEFT)] 
 /** The balance mascot: it rocks every few frames, or stays level when motion is off. */
 export function scaleSprite(frame: number, animate: boolean): Sprite {
 	const step = animate ? Math.floor(Math.max(0, frame) / 3) % SCALE_FRAMES.length : 0;
-	return { rows: SCALE_FRAMES[step]!, colors: SCALE_COLORS, fallback: SCALE_FALLBACK };
+	return { rows: SCALE_FRAMES[step]!, colors: SCALE_COLORS, fallback: SCALE_FALLBACK_FRAMES[step]! };
 }
 
 /** Quota left: green from half, gold from a fifth, red below, slate when nothing is left. */

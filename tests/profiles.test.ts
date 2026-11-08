@@ -10,6 +10,10 @@ import {
   defaultProfilesPath,
   defaultSubagentsPath,
   loadProfilesStore,
+  ORCHESTRATOR_MODES,
+  isOrchestratorMode,
+  getProfileWorkflow,
+  setProfileWorkflow,
   PROFILE_BACKUPS_KEPT,
   qualifyModel,
   readProfiles,
@@ -475,4 +479,20 @@ test("applySuggestionToProfile creates a new profile with the cheaper model for 
   });
   // Original untouched
   assert.equal(result.store.profiles["balanced"]["gentle-ai-verify"].model, "claude-bridge/claude-opus-5-5");
+});
+
+test("isOrchestratorMode and get/setProfileWorkflow support Gentle Shell 4.7.0 workflow mode", () => {
+  assert.equal(isOrchestratorMode("organic"), true);
+  assert.equal(isOrchestratorMode("full-delegation"), true);
+  assert.equal(isOrchestratorMode("unknown"), false);
+  assert.equal(isOrchestratorMode(null), false);
+
+  assert.deepEqual([...ORCHESTRATOR_MODES], ["organic", "full-delegation"]);
+
+  const storeWithoutWorkflow = SAMPLE_STORE;
+  assert.deepEqual(getProfileWorkflow(storeWithoutWorkflow, "balanced"), { orchestratorMode: "organic" });
+
+  const updated = setProfileWorkflow(storeWithoutWorkflow, "balanced", { orchestratorMode: "full-delegation" });
+  assert.deepEqual(getProfileWorkflow(updated, "balanced"), { orchestratorMode: "full-delegation" });
+  assert.equal(updated.workflow?.["balanced"]?.orchestratorMode, "full-delegation");
 });

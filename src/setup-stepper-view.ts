@@ -20,6 +20,7 @@ import {
 	goNext,
 	goTo,
 	moveCandidate,
+	setOrchestratorMode,
 	setPoolStrategy,
 	setRole,
 	stepDescription,
@@ -59,7 +60,8 @@ export type StepRow =
 	| { kind: "provider"; id: string }
 	| { kind: "pool"; poolId: string }
 	| { kind: "candidate"; poolId: string; ref: string }
-	| { kind: "role"; role: string };
+	| { kind: "role"; role: string }
+	| { kind: "workflow-mode" };
 
 export interface StepperHit {
 	target: MouseTarget;
@@ -133,7 +135,7 @@ export function stepRows(s: SetupStepperState): StepRow[] {
 				return [{ kind: "pool", poolId: pool.id }, ...refs.map((ref): StepRow => ({ kind: "candidate", poolId: pool.id, ref }))];
 			});
 		case "roles":
-			return ROLE_CATALOG.map(entry => ({ kind: "role", role: entry.role }));
+			return [...ROLE_CATALOG.map(entry => ({ kind: "role", role: entry.role })), { kind: "workflow-mode" }];
 		case "confirm":
 			return [];
 	}
@@ -149,6 +151,11 @@ const rowCells = (s: SetupStepperState, row: StepRow, mode: ColorMode = "none"):
 		const state = !p.detected ? t("setup.stepper.provider.missing") : on ? t("setup.stepper.provider.found") : t("setup.stepper.provider.off");
 		const color: PixelColor = !p.detected ? "bad" : on ? "hp" : "slate";
 		return [p.label, pixelText(color, `${p.detected ? "✓" : "✗"} ${state}`, mode), p.detected ? p.source : "–", on ? "[x]" : "[ ]"];
+	}
+	if (row.kind === "workflow-mode") {
+		const modeText = s.orchestratorMode;
+		const desc = modeText === "organic" ? t("setup.workflow.organicDesc") : t("setup.workflow.fullDelegationDesc");
+		return [t("setup.col.workflowMode"), pixelText("sky", modeText, mode), pixelText("steel", desc, mode)];
 	}
 	if (row.kind === "role") {
 		const route = s.roles[row.role];
@@ -218,7 +225,8 @@ export function renderStepper(screen: StepperScreen, ui: StepperUi): StepperView
 	});
 	const stepNumber = SETUP_STEPS.indexOf(s.step) + 1;
 	const stepBar = pixelBar(stepNumber / SETUP_STEPS.length, 8, { mode, frame: ui.frame, animate: ui.animate });
-	lines.push(`${crumbs.join(" › ")}  ${stepBar} ${stepNumber}/${SETUP_STEPS.length}`);
+	const scaleMini = ui.animate ? ["⚖ ", "⚞ ", "⚖ ", "⚟ "][Math.floor((ui.frame ?? 0) / 3) % 4] : "⚖ ";
+	lines.push(`${crumbs.join(" › ")}  ${stepBar} ${stepNumber}/${SETUP_STEPS.length} ${scaleMini}`);
 	lines.push(...wrap(t(stepDescription(s.step)), left).map(line => paint("dim", line)), "");
 
 	// Body: scrollable; remember which content line each selectable row occupies.
@@ -313,6 +321,8 @@ function activate(s: SetupStepperState, row: StepRow | undefined): SetupStepperS
 			return setPoolStrategy(s, row.poolId, cycle(STRATEGIES, s.pools.find(p => p.id === row.poolId)?.strategy));
 		case "candidate":
 			return toggleCandidate(s, row.poolId, row.ref);
+		case "workflow-mode":
+			return setOrchestratorMode(s, s.orchestratorMode === "organic" ? "full-delegation" : "organic");
 		case "role": {
 			const targets = buildAvailableModelTargets(enabledProviders(s), s.pools);
 			if (targets.length === 0) return s;
@@ -370,6 +380,7 @@ export function stepperInput(screen: StepperScreen, event: StepperEvent): Result
 			return edit(moveCandidate(s, row.poolId, index, key === "u" ? -1 : 1));
 		}
 		if (key === "t" && row?.kind === "role") return edit(cycleThinking(s, row.role));
+		if (key === "m" && (row?.kind === "workflow-mode" || s.step === "roles")) return edit(setOrchestratorMode(s, s.orchestratorMode === "organic" ? "full-delegation" : "organic"));
 		return none();
 	}
 

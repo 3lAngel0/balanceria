@@ -12,6 +12,7 @@ import {
 	goTo,
 	initStepper,
 	moveCandidate,
+	setOrchestratorMode,
 	setPoolStrategy,
 	setRole,
 	stepDescription,
@@ -230,4 +231,38 @@ test("applyStepper keeps existing pool names and rules, and drops rules whose ca
 	assert.deepEqual(sonnet.rules, [rules[0], rules[2]]);
 	const diff = buildStepperDiff(state, withRules).lines.join("\n");
 	assert.match(diff, /drops rule prefer-for-role reviewer/);
+});
+
+test("initStepper initializes orchestratorMode and setOrchestratorMode marks dirty", () => {
+	const s = fresh();
+	assert.equal(s.orchestratorMode, "organic");
+	const updated = setOrchestratorMode(s, "full-delegation");
+	assert.equal(updated.orchestratorMode, "full-delegation");
+	assert.equal(updated.dirty, true);
+
+	const custom = initStepper(detected, pools(), {}, "full-delegation");
+	assert.equal(custom.orchestratorMode, "full-delegation");
+});
+
+test("buildStepperDiff and applyStepper track workflow orchestratorMode changes", () => {
+	let writtenWorkflow: unknown = null;
+	const deps: StepperDeps = {
+		root: "/r",
+		current: { profiles: { active: "my-profile", profiles: { "my-profile": {} } } },
+		writeConfig: () => ({ success: true, integrationsPath: "/r/integrations.json", poolsPath: "/r/pools.json", backupCreated: false }),
+		writeProfiles: (_name, _roles, workflow) => {
+			writtenWorkflow = workflow;
+		},
+		profilesPath: "/r/profiles.json",
+	};
+
+	let state = fresh();
+	state = setOrchestratorMode(state, "full-delegation");
+	const diff = buildStepperDiff(state, deps.current);
+	assert.ok(diff.writes.profiles, "profiles write triggered on workflow change");
+	assert.match(diff.lines.join("\n"), /workflow: orchestratorMode -> full-delegation/);
+
+	const res = applyStepper(state, deps);
+	assert.equal(res.ok, true);
+	assert.deepEqual(writtenWorkflow, { orchestratorMode: "full-delegation" });
 });
