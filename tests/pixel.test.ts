@@ -33,6 +33,8 @@ test("colorMode: NO_COLOR wins, COLORTERM enables truecolor, anything else keeps
 	assert.equal(colorMode({ TERM: "xterm-256color" }), "ansi");
 	assert.equal(colorMode({ COLORTERM: "truecolor", TERM: "dumb" }), "none");
 	assert.equal(colorMode({}), "ansi");
+	assert.equal(colorMode({ TMUX: "1", TERM: "tmux-256color" }), "truecolor", "modern tmux supports truecolor");
+	assert.equal(colorMode({ AI_BALANCER_COLOR_MODE: "truecolor" }), "truecolor", "explicit override works");
 });
 
 test("motionEnabled: on by default, off when the user asks to reduce motion", () => {

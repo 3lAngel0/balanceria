@@ -66,12 +66,41 @@ export interface RoleRoute {
 
 export type ProfileConfig = Record<string, RoleRoute>;
 
+export const ORCHESTRATOR_MODES = ["organic", "full-delegation"] as const;
+export type OrchestratorMode = (typeof ORCHESTRATOR_MODES)[number];
+export const DEFAULT_ORCHESTRATOR_MODE: OrchestratorMode = "organic";
+
+export interface ProfileWorkflow {
+  orchestratorMode: OrchestratorMode;
+}
+
+export function isOrchestratorMode(value: unknown): value is OrchestratorMode {
+  return typeof value === "string" && (ORCHESTRATOR_MODES as readonly string[]).includes(value);
+}
+
 export interface ProfilesStore {
   kind: string;
   version: number;
   profiles: Record<string, ProfileConfig>;
   active?: string;
+  workflow?: Record<string, ProfileWorkflow>;
   [key: string]: unknown;
+}
+
+export function getProfileWorkflow(store: ProfilesStore | null | undefined, profileName: string): ProfileWorkflow {
+  const raw = store?.workflow?.[profileName];
+  const mode = raw && isOrchestratorMode(raw.orchestratorMode) ? raw.orchestratorMode : DEFAULT_ORCHESTRATOR_MODE;
+  return { orchestratorMode: mode };
+}
+
+export function setProfileWorkflow(store: ProfilesStore, profileName: string, workflow: ProfileWorkflow): ProfilesStore {
+  return {
+    ...store,
+    workflow: {
+      ...(store.workflow ?? {}),
+      [profileName]: workflow,
+    },
+  };
 }
 
 // profiles.json belongs to gentle-pi: the balancer reads and writes only the
@@ -209,6 +238,7 @@ export interface SaveProfilesOptions {
   modelsPath?: string;
   syncSubagents?: boolean;
   syncModels?: boolean;
+  syncLiveSession?: boolean;
   now?: number;
   /** Pi's model registry lookup. */
   hasModel(provider: string, model: string): boolean;
@@ -317,6 +347,86 @@ export function syncModelsJson(activeConfig: ProfileConfig, modelsPath?: string)
   }
 }
 
+function cloneProfileRoutes(config: ProfileConfig, includeOrchestrator: boolean): Record<string, { model: string; thinking?: string }> {
+  const out: Record<string, { model: string; thinking?: string }> = {};
+  for (const [role, route] of Object.entries(config)) {
+    if ((!includeOrchestrator && role === "orchestrator") || !route || typeof route !== "object") continue;
+    const model = (route as RoleRoute).model;
+    const thinking = (route as RoleRoute).thinking;
+    if (typeof model !== "string" || !model) continue;
+    out[role] = {
+      model,
+      ...(typeof thinking === "string" && thinking ? { thinking } : {}),
+    };
+  }
+  return out;
+}
+
+/**
+ * Updates Gentle Shell 4.6.0's in-memory session profile freeze and session bindings
+ * on globalThis so changes saved in /balancer take effect immediately in the running
+ * session without restarting Pi.
+ */
+export function syncLiveSessionProfile(store: ProfilesStore): void {
+  const activeName = store.active;
+  const activeConfig = activeName ? store.profiles[activeName] : undefined;
+  const holder = globalThis as Record<symbol, unknown>;
+
+  if (activeName && activeConfig) {
+    const startupNone = holder[Symbol.for("gentle-pi:session-profile-startup-none")];
+    if (startupNone instanceof Set) {
+      startupNone.clear();
+    }
+  }
+
+  const freezeRegistry = holder[Symbol.for("gentle-pi:session-profile-freeze")] as
+    | {
+        frozen?: Map<string, { profile?: { name: string; origin: string; modelProfiles: Record<string, { model: string; thinking?: string }> }; [key: string]: unknown }>;
+        definitions?: Map<string, Record<string, { model: string; thinking?: string }>>;
+      }
+    | undefined;
+
+  if (freezeRegistry?.frozen instanceof Map) {
+    for (const [sessionId, entry] of freezeRegistry.frozen.entries()) {
+      const currentProfile = entry?.profile;
+      const isGlobal = !currentProfile || currentProfile.origin === "global";
+      const targetName = isGlobal ? activeName : currentProfile.name;
+      const targetConfig = targetName ? store.profiles[targetName] : undefined;
+      if (!targetName || !targetConfig) continue;
+
+      const origin = currentProfile?.origin ?? "global";
+      freezeRegistry.frozen.set(sessionId, {
+        ...(entry && typeof entry === "object" ? entry : {}),
+        profile: {
+          name: targetName,
+          origin,
+          modelProfiles: cloneProfileRoutes(targetConfig, false),
+        },
+      });
+      if (freezeRegistry.definitions instanceof Map) {
+        freezeRegistry.definitions.set(sessionId, cloneProfileRoutes(targetConfig, true));
+      }
+    }
+  }
+
+  const bindingsMap = holder[Symbol.for("gentle-pi:session-profile-bindings")];
+  if (bindingsMap instanceof Map) {
+    for (const [sessionId, binding] of bindingsMap.entries()) {
+      if (!binding || typeof binding !== "object") continue;
+      const b = binding as { name?: string; origin?: string; modelProfiles?: unknown; [key: string]: unknown };
+      const targetName = b.origin === "global" && activeName ? activeName : b.name;
+      const targetConfig = targetName ? store.profiles[targetName] : undefined;
+      if (!targetName || !targetConfig) continue;
+
+      bindingsMap.set(sessionId, {
+        ...b,
+        name: targetName,
+        modelProfiles: cloneProfileRoutes(targetConfig, true),
+      });
+    }
+  }
+}
+
 /**
  * Writes `next` over the file `read` came from, with a backup. Throws, writing
  * nothing, when the file changed or vanished since it was read, when `next`
@@ -353,6 +463,14 @@ export function saveProfilesStore(next: ProfilesStore, read: ProfilesRead, optio
           // Non-fatal if models.json sync fails.
         }
       }
+    }
+  }
+
+  if (options.syncLiveSession !== false) {
+    try {
+      syncLiveSessionProfile(next);
+    } catch {
+      // Non-fatal if in-memory session profile sync fails.
     }
   }
 

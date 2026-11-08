@@ -10,12 +10,17 @@ import {
   defaultProfilesPath,
   defaultSubagentsPath,
   loadProfilesStore,
+  ORCHESTRATOR_MODES,
+  isOrchestratorMode,
+  getProfileWorkflow,
+  setProfileWorkflow,
   PROFILE_BACKUPS_KEPT,
   qualifyModel,
   readProfiles,
   resolveAgentHome,
   resolveConfigHome,
   saveProfilesStore,
+  syncLiveSessionProfile,
   syncModelsJson,
   syncSubagentsJson,
   type ProfilesStore,
@@ -359,6 +364,80 @@ test("saveProfilesStore synchronizes models.json when syncModels is enabled", ()
   }
 });
 
+test("syncLiveSessionProfile updates Gentle Shell 4.6.0 in-memory session freeze and bindings on saveProfilesStore", () => {
+  const freezeKey = Symbol.for("gentle-pi:session-profile-freeze");
+  const bindingsKey = Symbol.for("gentle-pi:session-profile-bindings");
+  const holder = globalThis as Record<symbol, unknown>;
+  const prevFreeze = holder[freezeKey];
+  const prevBindings = holder[bindingsKey];
+
+  const dir = mkdtempSync(join(tmpdir(), "prof-live-sync-"));
+  const file = join(dir, "profiles.json");
+  const subagentsPath = join(dir, "subagents.json");
+  const modelsPath = join(dir, "models.json");
+  try {
+    const frozenMap = new Map<string, unknown>([
+      [
+        "sess-1",
+        {
+          profile: {
+            name: "balanced",
+            origin: "global",
+            modelProfiles: {
+              "gentle-ai-worker": { model: "pool/claude-sonnet-5-5", thinking: "medium" },
+            },
+          },
+        },
+      ],
+    ]);
+    const definitionsMap = new Map<string, unknown>();
+    holder[freezeKey] = {
+      frozen: frozenMap,
+      definitions: definitionsMap,
+      ownStart: new Set(["sess-1"]),
+      orchestrators: new Map(),
+      notified: new Map(),
+    };
+
+    const bindingsMap = new Map<string, unknown>([
+      [
+        "sess-2",
+        {
+          name: "balanced",
+          origin: "user",
+          modelProfiles: {
+            orchestrator: { model: "pool/orchestrator", thinking: "medium" },
+            "gentle-ai-worker": { model: "pool/claude-sonnet-5-5", thinking: "medium" },
+          },
+        },
+      ],
+    ]);
+    holder[bindingsKey] = bindingsMap;
+
+    writeFileSync(file, JSON.stringify(SAMPLE_STORE, null, 2));
+    const updated = withRole(SAMPLE_STORE, "balanced", "gentle-ai-worker", "antigravity/gemini-3-8-flash");
+    saveProfilesStore(updated, readOk(file), { path: file, subagentsPath, modelsPath, now: NOW, hasModel });
+
+    const frozenAfter = frozenMap.get("sess-1") as { profile: { name: string; origin: string; modelProfiles: Record<string, { model: string }> } };
+    assert.equal(frozenAfter.profile.name, "balanced");
+    assert.equal(frozenAfter.profile.modelProfiles["gentle-ai-worker"].model, "antigravity/gemini-3-8-flash");
+    assert.equal(frozenAfter.profile.modelProfiles.orchestrator, undefined);
+
+    const defAfter = definitionsMap.get("sess-1") as Record<string, { model: string }>;
+    assert.equal(defAfter["gentle-ai-worker"].model, "antigravity/gemini-3-8-flash");
+    assert.equal(defAfter.orchestrator.model, "pool/orchestrator");
+
+    const boundAfter = bindingsMap.get("sess-2") as { name: string; modelProfiles: Record<string, { model: string }> };
+    assert.equal(boundAfter.modelProfiles["gentle-ai-worker"].model, "antigravity/gemini-3-8-flash");
+  } finally {
+    if (prevFreeze === undefined) delete holder[freezeKey];
+    else holder[freezeKey] = prevFreeze;
+    if (prevBindings === undefined) delete holder[bindingsKey];
+    else holder[bindingsKey] = prevBindings;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("qualifyModel adds the provider only when Pi knows exactly one for a bare model id", () => {
   const known = [
     { provider: "antigravity", id: "gemini-3-8-flash" },
@@ -400,4 +479,20 @@ test("applySuggestionToProfile creates a new profile with the cheaper model for 
   });
   // Original untouched
   assert.equal(result.store.profiles["balanced"]["gentle-ai-verify"].model, "claude-bridge/claude-opus-5-5");
+});
+
+test("isOrchestratorMode and get/setProfileWorkflow support Gentle Shell 4.7.0 workflow mode", () => {
+  assert.equal(isOrchestratorMode("organic"), true);
+  assert.equal(isOrchestratorMode("full-delegation"), true);
+  assert.equal(isOrchestratorMode("unknown"), false);
+  assert.equal(isOrchestratorMode(null), false);
+
+  assert.deepEqual([...ORCHESTRATOR_MODES], ["organic", "full-delegation"]);
+
+  const storeWithoutWorkflow = SAMPLE_STORE;
+  assert.deepEqual(getProfileWorkflow(storeWithoutWorkflow, "balanced"), { orchestratorMode: "organic" });
+
+  const updated = setProfileWorkflow(storeWithoutWorkflow, "balanced", { orchestratorMode: "full-delegation" });
+  assert.deepEqual(getProfileWorkflow(updated, "balanced"), { orchestratorMode: "full-delegation" });
+  assert.equal(updated.workflow?.["balanced"]?.orchestratorMode, "full-delegation");
 });

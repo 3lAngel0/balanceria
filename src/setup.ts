@@ -5,7 +5,7 @@ import { homedir } from "node:os";
 import type { Integration } from "./integrations.ts";
 import { validateIntegrationsConfig, validatePoolsConfig } from "./config-schema.ts";
 import { ruleIssues } from "./pools.ts";
-import { DEFAULT_PROFILES_PATH, loadProfilesStore, PROFILES_KIND, PROFILES_VERSION, readProfiles, saveProfilesStore, type ProfileConfig } from "./profiles.ts";
+import { DEFAULT_PROFILES_PATH, loadProfilesStore, PROFILES_KIND, PROFILES_VERSION, readProfiles, saveProfilesStore, type ProfileConfig, type ProfileWorkflow } from "./profiles.ts";
 import { t } from "./i18n/index.ts";
 import type { RoutingStrategy, RuleBlock } from "./router.ts";
 import {
@@ -733,17 +733,24 @@ export function saveProfileRoles(
 	name: string,
 	roles: ProfileConfig,
 	hasModel: (provider: string, model: string) => boolean,
+	workflow?: ProfileWorkflow,
 ): void {
 	const existingStore = loadProfilesStore(profilesPath);
 	if (existingStore) {
 		existingStore.profiles[name] = roles;
 		existingStore.active = name;
+		if (workflow) {
+			existingStore.workflow = {
+				...(existingStore.workflow ?? {}),
+				[name]: workflow,
+			};
+		}
 		const read = readProfiles(profilesPath);
 		saveProfilesStore(existingStore, read, { path: profilesPath, hasModel });
 	} else {
 		writeFileSync(
 			profilesPath,
-			`${JSON.stringify({ kind: PROFILES_KIND, version: PROFILES_VERSION, active: name, profiles: { [name]: roles } }, null, 2)}\n`,
+			`${JSON.stringify({ kind: PROFILES_KIND, version: PROFILES_VERSION, active: name, profiles: { [name]: roles }, ...(workflow ? { workflow: { [name]: workflow } } : {}) }, null, 2)}\n`,
 			{ encoding: "utf8", mode: 0o600 },
 		);
 	}

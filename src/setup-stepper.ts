@@ -2,7 +2,7 @@
 // No UI and no filesystem access: writes go through the functions injected in `StepperDeps`.
 
 import type { Integration } from "./integrations.ts";
-import type { ProfileConfig } from "./profiles.ts";
+import { DEFAULT_ORCHESTRATOR_MODE, isOrchestratorMode, type OrchestratorMode, type ProfileConfig, type ProfileWorkflow } from "./profiles.ts";
 import type { RoutingStrategy } from "./router.ts";
 import { t } from "./i18n/index.ts";
 import {
@@ -24,6 +24,7 @@ interface StepperDraft {
 	enabled: string[];
 	pools: PoolConfig[];
 	roles: ProfileConfig;
+	orchestratorMode: OrchestratorMode;
 }
 
 export interface SetupStepperState extends StepperDraft {
@@ -54,7 +55,7 @@ export interface StepperDeps {
 		poolsPath: string;
 		backupCreated: boolean;
 	};
-	writeProfiles: (profileName: string, roles: ProfileConfig) => void;
+	writeProfiles: (profileName: string, roles: ProfileConfig, workflow?: ProfileWorkflow) => void;
 }
 
 export interface StepperApplyResult {
@@ -67,13 +68,30 @@ export interface StepperApplyResult {
 
 const clonePools = (pools: readonly PoolConfig[]): PoolConfig[] => pools.map(pool => ({ ...pool, candidates: [...pool.candidates] }));
 const cloneRoles = (roles: ProfileConfig): ProfileConfig => JSON.parse(JSON.stringify(roles));
-const cloneDraft = (draft: StepperDraft): StepperDraft => ({ enabled: [...draft.enabled], pools: clonePools(draft.pools), roles: cloneRoles(draft.roles) });
+const cloneDraft = (draft: StepperDraft): StepperDraft => ({
+	enabled: [...draft.enabled],
+	pools: clonePools(draft.pools),
+	roles: cloneRoles(draft.roles),
+	orchestratorMode: draft.orchestratorMode,
+});
 
-export function initStepper(detected: DetectedProvider[], recommended: PoolConfig[], existingRoles: ProfileConfig = {}): SetupStepperState {
+export function initStepper(
+	detected: DetectedProvider[],
+	recommended: PoolConfig[],
+	existingRoles: ProfileConfig = {},
+	initialWorkflow?: ProfileWorkflow | OrchestratorMode,
+): SetupStepperState {
+	const orchestratorMode: OrchestratorMode =
+		typeof initialWorkflow === "string" && isOrchestratorMode(initialWorkflow)
+			? initialWorkflow
+			: typeof initialWorkflow === "object" && initialWorkflow && isOrchestratorMode(initialWorkflow.orchestratorMode)
+				? initialWorkflow.orchestratorMode
+				: DEFAULT_ORCHESTRATOR_MODE;
 	const baseline: StepperDraft = {
 		enabled: detected.filter(p => p.detected).map(p => p.id),
 		pools: clonePools(recommended),
 		roles: cloneRoles(existingRoles),
+		orchestratorMode,
 	};
 	return { step: "providers", reached: 0, detected, dirty: false, messages: {}, ...cloneDraft(baseline), baseline };
 }
@@ -150,6 +168,11 @@ export function setRole(state: SetupStepperState, role: string, model: string, t
 	return edit(state, { roles: { ...state.roles, [role]: { ...previous, model, ...(thinking !== undefined ? { thinking } : {}) } } });
 }
 
+export function setOrchestratorMode(state: SetupStepperState, mode: OrchestratorMode): SetupStepperState {
+	if (state.orchestratorMode === mode) return state;
+	return edit(state, { orchestratorMode: mode });
+}
+
 /** i18n key of the plain-language description of what a step decides. */
 export function stepDescription(step: SetupStep): string {
 	return `setup.stepper.desc.${step}`;
@@ -196,12 +219,14 @@ export function buildStepperDiff(state: SetupStepperState, current: StepperCurre
 	const { name, live } = profileTarget(state, current);
 	const roles = roleChanges(state.roles, live);
 	if (roles.length > 0) lines.push(`  • profiles.json [${name}] role assignments:`, ...roles.map(line => `      ${line}`));
+	const workflowChanged = state.orchestratorMode !== state.baseline.orchestratorMode;
+	if (workflowChanged) lines.push(`  • profiles.json [${name}] workflow: orchestratorMode -> ${state.orchestratorMode}`);
 	return {
 		lines,
 		writes: {
 			pools: !lines.some(line => line.includes("pools.json: Unchanged")),
 			integrations: !lines.some(line => line.includes("integrations.json: Unchanged")),
-			profiles: roles.length > 0,
+			profiles: roles.length > 0 || workflowChanged,
 		},
 	};
 }
@@ -223,9 +248,10 @@ export function applyStepper(state: SetupStepperState, deps: StepperDeps): Stepp
 		backups: res.backupCreated ? [`${res.poolsPath}.bak`, `${res.integrationsPath}.bak`] : [],
 	};
 	const { name, live } = profileTarget(state, deps.current);
-	if (roleChanges(state.roles, live).length > 0) {
+	const workflowChanged = state.orchestratorMode !== state.baseline.orchestratorMode;
+	if (roleChanges(state.roles, live).length > 0 || workflowChanged) {
 		try {
-			deps.writeProfiles(name, state.roles);
+			deps.writeProfiles(name, state.roles, { orchestratorMode: state.orchestratorMode });
 			result.written.push(deps.profilesPath);
 		} catch (err) {
 			result.profilesError = err instanceof Error ? err.message : String(err);

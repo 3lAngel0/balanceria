@@ -127,6 +127,25 @@ test("roles step: enter cycles the model through available targets, t cycles thi
 	assert.equal(thinking, "low");
 });
 
+test("roles step: m key or selecting workflow-mode row toggles orchestratorMode", () => {
+	const base = onStep("roles");
+	assert.equal(base.stepper.orchestratorMode, "organic");
+
+	// Pressing m toggles orchestratorMode
+	const toggled = send(base, key("m"));
+	assert.equal(toggled.state.stepper.orchestratorMode, "full-delegation");
+	const toggledBack = send(toggled.state, key("m"));
+	assert.equal(toggledBack.state.stepper.orchestratorMode, "organic");
+
+	// Moving cursor to workflow-mode (last row) and pressing enter
+	const rows = stepRows(base.stepper);
+	const lastIndex = rows.length - 1;
+	assert.equal(rows[lastIndex].kind, "workflow-mode");
+	const atWorkflow = { ...base, cursor: lastIndex };
+	const activated = send(atWorkflow, key("\r"));
+	assert.equal(activated.state.stepper.orchestratorMode, "full-delegation");
+});
+
 test("save is only available on a valid confirm step", () => {
 	assert.equal(send(fresh(), key("s")).effect, "none");
 	const confirm = onStep("confirm");
