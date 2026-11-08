@@ -225,8 +225,7 @@ export function renderStepper(screen: StepperScreen, ui: StepperUi): StepperView
 	});
 	const stepNumber = SETUP_STEPS.indexOf(s.step) + 1;
 	const stepBar = pixelBar(stepNumber / SETUP_STEPS.length, 8, { mode, frame: ui.frame, animate: ui.animate });
-	const scaleMini = ui.animate ? ["⚖ ", "⚞ ", "⚖ ", "⚟ "][Math.floor((ui.frame ?? 0) / 3) % 4] : "⚖ ";
-	lines.push(`${crumbs.join(" › ")}  ${stepBar} ${stepNumber}/${SETUP_STEPS.length} ${scaleMini}`);
+	lines.push(`${crumbs.join(" › ")}  ${stepBar} ${stepNumber}/${SETUP_STEPS.length}`);
 	lines.push(...wrap(t(stepDescription(s.step)), left).map(line => paint("dim", line)), "");
 
 	// Body: scrollable; remember which content line each selectable row occupies.
