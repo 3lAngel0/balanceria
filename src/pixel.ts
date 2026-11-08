@@ -45,8 +45,14 @@ export type Env = Readonly<Record<string, string | undefined>>;
 /** NO_COLOR (non-empty) and a dumb terminal turn color off; COLORTERM opts into truecolor. */
 export function colorMode(env: Env = process.env): ColorMode {
 	if ((env.NO_COLOR ?? "") !== "" || env.TERM === "dumb") return "none";
+	const override = (env.AI_BALANCER_COLOR_MODE ?? "").toLowerCase();
+	if (override === "truecolor" || override === "24bit") return "truecolor";
+	if (override === "ansi") return "ansi";
+	if (override === "none") return "none";
 	const colorterm = (env.COLORTERM ?? "").toLowerCase();
-	return colorterm === "truecolor" || colorterm === "24bit" ? "truecolor" : "ansi";
+	if (colorterm === "truecolor" || colorterm === "24bit") return "truecolor";
+	if (env.TMUX && env.TERM && /256color/.test(env.TERM)) return "truecolor";
+	return "ansi";
 }
 
 /** Animation is on unless the user asks to reduce motion or the terminal is dumb. */
