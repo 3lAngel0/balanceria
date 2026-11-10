@@ -338,13 +338,13 @@ export function installerPageScript(): string {
 					"..............#RDdP#..",
 					"..............#dRRd#G.",
 					"............##.#GG#...",
-					"............#S######..",
-					"...........#MHHHMMMM#.",
-					"...........#MMMME*NNN#",
-					"..........#SMMMMEENNE#",
-					"..........#SMMMMMMNNE#",
-					".........#HSSMMMMSNNN#",
-					"........#MHMBLBBLBW###",
+					"............#S#####...",
+					"...........#MHHHM#....",
+					"...........#ME*MM#NN#.",
+					"..........#SMEEMM#NNE#",
+					"..........#SMMMMM#NNE#",
+					".........#HSSMMMM#NN##",
+					"........#MHMBLBBLB####",
 					".......#HMMMBBLBWWB#..",
 					".....##MHMMHMMMSLB#...",
 					"....#MHMMMHMMMMSSB#...",
@@ -400,20 +400,20 @@ export function installerPageScript(): string {
 
 		var eye = svg("g", { class: "eye" });
 		if (pose === "happy") {
-			eye.appendChild(rect("c-dark", 16, 7, 2, 1));
-			eye.appendChild(rect("c-dark", 15, 8, 1, 1));
-			eye.appendChild(rect("c-r-light", 14, 9, 2, 1));
+			eye.appendChild(rect("c-dark", 13, 7, 2, 1));
+			eye.appendChild(rect("c-fur", 13, 8, 2, 1));
+			eye.appendChild(rect("c-r-light", 12, 9, 3, 1));
 			eye.appendChild(rect("c-g-neon sparkle", 12, 2, 1, 1));
 			eye.appendChild(rect("c-r-neon sparkle", 21, 1, 1, 1));
 		} else if (pose === "working") {
-			eye.appendChild(rect("c-sh", 16, 7, 2, 1));
-			eye.appendChild(rect("c-dark", 16, 8, 1, 1));
-			eye.appendChild(rect("c-glint", 17, 8, 1, 1));
+			eye.appendChild(rect("c-sh", 13, 6, 2, 1));
+			eye.appendChild(rect("c-dark", 13, 7, 1, 2));
+			eye.appendChild(rect("c-glint", 14, 7, 1, 1));
 			eye.appendChild(rect("c-g-neon sparkle", 21, 3, 1, 1));
 		} else {
-			eye.appendChild(rect("c-dark eye-blink", 16, 7, 1, 1));
-			eye.appendChild(rect("c-glint eye-blink", 17, 7, 1, 1));
-			eye.appendChild(rect("c-dark", 16, 8, 2, 1));
+			eye.appendChild(rect("c-dark eye-blink", 13, 7, 1, 1));
+			eye.appendChild(rect("c-glint eye-blink", 14, 7, 1, 1));
+			eye.appendChild(rect("c-dark", 13, 8, 2, 1));
 		}
 		body.appendChild(eye);
 		root.appendChild(body);
