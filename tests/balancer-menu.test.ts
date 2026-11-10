@@ -7,7 +7,7 @@ test("the menu offers every action with a label and a description, in a stable o
 	setLang("en");
 	assert.deepEqual(
 		BALANCER_MENU.map(item => item.value),
-		["panel", "quota", "usage", "refresh", "setup", "setup classic", "report", "simulate", "switch-cost", "loans", "permissions", "permissions grant", "permissions revoke", "lab", "lab new", "lab diff", "lab simulate", "lab apply", "lab undo", "lab discard", "serve", "serve lan", "serve setup", "serve status", "serve stop", "serve autostart off", "lang", "help"],
+		["panel", "quota", "usage", "refresh", "setup", "setup --dummy", "setup classic", "report", "simulate", "switch-cost", "loans", "permissions", "permissions grant", "permissions revoke", "lab", "lab new", "lab diff", "lab simulate", "lab apply", "lab undo", "lab discard", "serve", "serve lan", "serve setup", "serve status", "serve stop", "serve autostart off", "lang", "help"],
 	);
 	for (const item of BALANCER_MENU) {
 		assert.ok(item.label.length > 0, item.value);
@@ -97,4 +97,25 @@ test("the glossary explains each term in English and Spanish", () => {
 test("`setup classic` resolves to its own command and other setup suffixes stay unknown", () => {
 	assert.deepEqual(resolveBalancerArgs(" setup classic "), { kind: "command", command: "setup classic" });
 	assert.equal(resolveBalancerArgs("setup other").kind, "unknown");
+});
+
+test("dummy and skip entry points resolve to the guided/advanced setup", () => {
+	assert.deepEqual(resolveBalancerArgs("skip"), { kind: "menu" });
+	assert.deepEqual(resolveBalancerArgs(" dummy "), { kind: "command", command: "setup --dummy" });
+	for (const command of ["setup --dummy", "setup -d", "setup --skip", "setup -s"]) {
+		assert.deepEqual(resolveBalancerArgs(command), { kind: "command", command }, command);
+	}
+	assert.equal(resolveBalancerArgs("setup --other").kind, "unknown");
+});
+
+test("the menu lists the dummy setup right after setup in both languages", () => {
+	for (const lang of ["en", "es"] as const) {
+		setLang(lang);
+		const items = balancerMenu();
+		const i = items.findIndex(item => item.value === "setup");
+		assert.equal(items[i + 1]?.value, "setup --dummy");
+		assert.ok(!items[i + 1]!.label.startsWith("menu."));
+		assert.ok(!(items[i + 1]!.description ?? "menu.").startsWith("menu."));
+	}
+	setLang("en");
 });

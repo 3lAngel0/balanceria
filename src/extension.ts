@@ -6,8 +6,9 @@ import { fileURLToPath } from "node:url";
 import { copyToClipboard, type ExtensionAPI, type ExtensionCommandContext, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Key, matchesKey, SelectList, truncateToWidth, visibleWidth, type TuiMouseEvent, type TuiMouseEventResult } from "@earendil-works/pi-tui";
 import { CONTENT_X, emphasize, hitTest, layoutButtons, sameTarget, tabHitAreas, wheelOffset, type ButtonCell, type HitLayout, type MouseTarget } from "./control-center-mouse.ts";
-import { applyStepper, initStepper, type StepperCurrent } from "./setup-stepper.ts";
+import { applyAdvisorReport, applyStepper, initStepper, type StepperCurrent } from "./setup-stepper.ts";
 import { initScreen, renderStepper, stepperInput, type StepperEffect, type StepperEvent, type StepperTone, stepperThemeColor } from "./setup-stepper-view.ts";
+import { initDummyGuide, dummyGuideInput, initModePrompt, modePromptInput, renderDummyGuide, renderModePrompt, type SetupMode } from "./setup-dummy-guide.ts";
 import { initLangPrompt, langPromptInput, renderLangPrompt } from "./setup-lang-prompt.ts";
 import { BALANCER_MENU, balancerMenu, glossaryText, resolveBalancerArgs } from "./balancer-menu.ts";
 import { initLang, getLang, setLang, saveLangSetting, t } from "./i18n/index.ts";
@@ -23,7 +24,7 @@ import { HUD_VIEWS, hudHints, moveCursor, pressRedKey, renderHud, selectedSessio
 import { runHudChoice, type HudChoice } from "./hud-actions.ts";
 import { loadIntegrations } from "./integrations.ts";
 import { renderPanel, statusLine, statusWithContext, turnTelemetry, renderControlCenter, controlCenterButtons, controlCenterTabLabels, CONTROL_CENTER_TABS, type ControlCenterTab, type OverviewSessionRow, type TurnTelemetry } from "./panel.ts";
-import { ROLE_CATALOG, buildAvailableModelTargets, recommendRolesHeuristic, recommendRolesWithAdvisor, createDefaultCliAiRunner, applyRecommendationsToProfile, type AdvisorReport } from "./setup-advisor.ts";
+import { ROLE_CATALOG, buildAvailableModelTargets, recommendRolesHeuristic, recommendRolesWithAdvisor, createDefaultCliAiRunner, createModelCliAiRunner, applyRecommendationsToProfile, type AdvisorReport } from "./setup-advisor.ts";
 import { applySuggestionToProfile, DEFAULT_PROFILES_PATH, loadProfilesStore, qualifyModel, readProfiles, saveProfilesStore, type ProfilesStore } from "./profiles.ts";
 import { loadPrices } from "./prices.ts";
 import { clipAlias, createSessionIndex, DEFAULT_SESSIONS_ROOT, findSessionFile } from "./session-index.ts";
@@ -1290,6 +1291,14 @@ export default function aiBalancer(pi: ExtensionAPI) {
 							return;
 						}
 
+						if (input === "D" || (input === "d" && tab === "overview")) {
+							done();
+							setTimeout(() => {
+								void runSetup(ctx, { mode: "guided" });
+							}, 50);
+							return;
+						}
+
 						if (input === "w") {
 							done();
 							setTimeout(() => {
@@ -1796,15 +1805,79 @@ export default function aiBalancer(pi: ExtensionAPI) {
 		});
 
 	/** `/balancer setup`: the stepper overlay, or the classic prompts when there is no UI or no custom overlay. */
-	const runSetup = async (ctx: ExtensionContext): Promise<void> => {
-		if (ctx.hasUI && typeof ctx.ui?.custom === "function") {
-			await promptSetupLanguage(ctx);
-		}
-		if (!ctx.hasUI || typeof ctx.ui?.custom !== "function") {
+	const runSetup = async (ctx: ExtensionContext, options?: { classic?: boolean; mode?: SetupMode }): Promise<void> => {
+		if (options?.classic || !ctx.hasUI || typeof ctx.ui?.custom !== "function") {
 			await runClassicSetup(ctx);
 			return;
 		}
-		await openSetupStepper(ctx);
+		await promptSetupLanguage(ctx);
+		const mode = options?.mode ?? (await promptSetupMode(ctx));
+		if (!mode) return;
+		if (mode === "guided") {
+			const detected = detectSystemProviders();
+			const ok = await openDummyGuide(ctx, detected.filter(d => d.detected).map(d => d.label));
+			if (!ok) return;
+		}
+		await openSetupStepper(ctx, { guided: mode === "guided" });
+	};
+
+	/** Overlay frame shared by the setup prompts: a bordered box around the view's lines. */
+	const framed = (theme: { fg(name: any, text: string): string }, width: number, lines: string[]): string[] => {
+		const border = (text: string) => theme.fg("border", text);
+		const inner = Math.max(20, width - 4);
+		const row = (text: string) => `${border("│")} ${truncateToWidth(text, inner, "…", true)} ${border("│")}`;
+		return [border(`╭${"─".repeat(inner + 2)}╮`), ...lines.map(row), border(`╰${"─".repeat(inner + 2)}╯`)];
+	};
+
+	const promptSetupMode = async (ctx: ExtensionContext): Promise<SetupMode | undefined> => {
+		let state = initModePrompt("guided");
+		const mode = colorMode();
+		return ctx.ui.custom<SetupMode | undefined>(
+			(tui, theme, _keybindings, done) => ({
+				render(width: number): string[] {
+					return framed(theme, width, renderModePrompt(state, Math.max(20, width - 4), mode));
+				},
+				handleInput(data: string) {
+					state = modePromptInput(state, { type: "key", data: canonicalKey(data) });
+					if (state.cancelled) done(undefined);
+					else if (state.done) done(state.selected);
+					else tui.requestRender();
+				},
+				invalidate() {},
+				dispose() {},
+			}),
+			{ overlay: true, overlayOptions: { width: "70%", minWidth: 44, anchor: "center" } },
+		);
+	};
+
+	/** The pedagogical guide; resolves true when the user reaches the end or skips to the stepper. */
+	const openDummyGuide = async (ctx: ExtensionContext, detectedIds: readonly string[]): Promise<boolean> => {
+		let state = initDummyGuide(detectedIds);
+		const mode = colorMode();
+		const result = await ctx.ui.custom<boolean>(
+			(tui, theme, _keybindings, done) => {
+				const animate = motionEnabled();
+				const motion = animate ? setInterval(() => tui.requestRender(), FRAME_MS) : undefined;
+				motion?.unref?.();
+				return {
+					render(width: number): string[] {
+						return framed(theme, width, renderDummyGuide(state, Math.max(20, width - 4), mode, frameOf(Date.now()), animate));
+					},
+					handleInput(data: string) {
+						state = dummyGuideInput(state, { type: "key", data: canonicalKey(data) });
+						if (state.cancelled) done(false);
+						else if (state.done) done(true);
+						else tui.requestRender();
+					},
+					invalidate() {},
+					dispose() {
+						if (motion) clearInterval(motion);
+					},
+				};
+			},
+			{ overlay: true, overlayOptions: { width: "80%", minWidth: 60, anchor: "center" } },
+		);
+		return result === true;
 	};
 
 	const promptSetupLanguage = async (ctx: ExtensionContext): Promise<void> => {
@@ -1866,7 +1939,7 @@ export default function aiBalancer(pi: ExtensionAPI) {
 		return data;
 	};
 
-	const openSetupStepper = async (ctx: ExtensionContext): Promise<void> => {
+	const openSetupStepper = async (ctx: ExtensionContext, options?: { guided?: boolean }): Promise<void> => {
 		const detected = detectSystemProviders();
 		if (!detected.some(p => p.detected && p.kind === "subscription")) {
 			ctx.ui.notify(`ai-balancer: ${t("setup.stepper.noProviders")}`, "warning");
@@ -1882,9 +1955,9 @@ export default function aiBalancer(pi: ExtensionAPI) {
 		const store = loadProfilesStore();
 		const current: StepperCurrent = { pools: readJson("pools.json"), integrations: readJson("integrations.json"), profiles: store };
 		const recommended = generateRecommendedConfig(detected.filter(p => p.detected), { hasModel: (provider, model) => Boolean(ctx.modelRegistry.find(provider, model)) }).pools;
-		let screen = initScreen(initStepper(detected, recommended, store?.profiles?.[store.active ?? ""] ?? {}, store?.workflow?.[store.active ?? ""]), current);
+		let screen = initScreen(initStepper(detected, recommended, store?.profiles?.[store.active ?? ""] ?? {}, store?.workflow?.[store.active ?? ""], options), current);
 
-		const effect = await ctx.ui.custom<StepperEffect>(
+		const effect = await ctx.ui.custom<"save" | "cancel" | "discard" | "none">(
 			(tui, theme, _keybindings, done) => {
 				const bodyRows = () => Math.max(8, ((tui as { terminal?: { rows?: number } }).terminal?.rows ?? 40) - 14);
 				const mode = colorMode();
@@ -1896,8 +1969,19 @@ export default function aiBalancer(pi: ExtensionAPI) {
 					const result = stepperInput(screen, event);
 					const changed = result.state !== screen;
 					screen = result.state;
-					if (result.effect !== "none") done(result.effect);
-					else if (changed) tui.requestRender();
+					if (result.effect === "save" || result.effect === "cancel") {
+						done(result.effect);
+					} else if (typeof result.effect === "object" && result.effect.type === "deep-search") {
+						void recommendRolesWithAdvisor(
+							{ providers: detected, pools: screen.stepper.pools },
+							{ aiRunner: createModelCliAiRunner(result.effect.model, AGY_BIN), deep: true },
+						).then(report => {
+							screen = { ...screen, stepper: applyAdvisorReport(screen.stepper, report) };
+							tui.requestRender();
+						});
+					} else if (changed) {
+						tui.requestRender();
+					}
 				};
 				return {
 					render(width: number): string[] {
@@ -2295,6 +2379,14 @@ export default function aiBalancer(pi: ExtensionAPI) {
 			}
 			if (command === "setup") {
 				await runSetup(ctx);
+				return;
+			}
+			if (command === "setup --dummy" || command === "setup -d") {
+				await runSetup(ctx, { mode: "guided" });
+				return;
+			}
+			if (command === "setup --skip" || command === "setup -s") {
+				await runSetup(ctx, { mode: "advanced" });
 				return;
 			}
 			if (command === "setup classic") {

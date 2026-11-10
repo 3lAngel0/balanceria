@@ -500,6 +500,13 @@ gentle-shell install <path-to-repo>
 ### Interactive Setup Hub (`/balancer setup`)
 Running `/balancer setup` opens a step-by-step overlay: **Providers → Strategy → Roles → Confirm**. Each step shows a short description; the Confirm step shows a diff of what Save will write to `pools.json`, `integrations.json` and `profiles.json`. Nothing is written until **Save**; **Discard** (or `Esc`, which asks first when you have edits) leaves every file untouched. Keys: `←/→`/`h`/`l` or `Tab`/`Shift+Tab` change step, `↑/↓`/`j`/`k` move between rows, `Space`/`Enter` toggle or cycle (provider on/off, candidate on/off, pool strategy, role model), `u`/`d` reorder a candidate, `t` cycles a role's thinking level, `s` saves on the Confirm step. Mouse (click breadcrumb steps, rows and buttons; wheel scrolls) works only when Pi runs fullscreen (`TuiAltScreen`); otherwise the overlay is keyboard-only. Without a UI, or if overlays are unavailable, `/balancer setup` falls back to the classic wizard. The AI role advisor is only in the classic wizard. On start it asks **Select language** (English / Español): `Enter` applies it to this run only, `P` saves it permanently, and the whole interface, Help included, switches at once. On the Roles step, the **Orchestrator mode** row (`m`, or `Space`/`Enter`) sets `organic` or `full-delegation` for the active profile (Gentle Shell 4.7.0 `workflow.orchestratorMode`).
 
+**Guided vs. Advanced mode.** After the language prompt, `/balancer setup` asks which mode to use:
+
+- **Guided / Dummy** (`/balancer setup --dummy`, `-d`, `/balancer dummy`, or `D` in the Control Center overview): four acts. Acts 1–2 explain with an interactive balance animation (`Space`/`Enter`/`→` advance, `←` goes back, `s` skips to the stepper) what a provider, a pool and a profile are, and which files hold them. Act 3 is a guided pool creator (`n`, or the `[+ Create new pool]` row) with templates and a live cost warning when a pool mixes cheap `flash` models with expensive `claude-` quota. Act 4, on the Roles step, offers **Auto-assign** `[a]` (0 tokens) and **Deep Search** `[d]` (spends tokens: you pick the model that evaluates the roles).
+- **Advanced / Skip** (`/balancer setup --skip`, `-s`): straight to the stepper, no tutorial. `/balancer skip` opens the action menu directly.
+
+**Language.** Set it explicitly with `AI_BALANCER_LANG=es|en`. Priority: `AI_BALANCER_LANG` > `LC_ALL` > `LC_MESSAGES` > `LANG` > `LANGUAGE`; `/balancer lang es|en|auto` persists the choice in `~/.gentle-shell/agent/settings.json`.
+
 `/balancer setup classic` runs the previous prompt-based wizard:
 1. **Auto-Detection**: Probes installed CLI tools (`agy`, `claude`, `opencode`, `ollama`), NPM packages, and environment keys.
 2. **Strategy Selection**: Choose `hybrid` (recommended) or `waterfall`.
@@ -545,6 +552,7 @@ Operational overlay showing real-time subscription burn velocity (`+X%/h`), rese
 | `/balancer panel` | *(none)* | Toggles sidebar overlay and Control Center (`Ctrl+Alt+B`). |
 | `/balancer usage` | *(none)* | Opens 5-tab usage and quota console (`Ctrl+Alt+U`). |
 | `/balancer setup` | *(none)* | Opens the step-by-step setup overlay. |
+| `/balancer setup --dummy` / `-d`, `--skip` / `-s` | *(none)* | Force Guided (Dummy) or Advanced (Skip) mode. `/balancer dummy` is an alias; `/balancer skip` opens the action menu. |
 | `/balancer setup classic` | *(none)* | Runs the previous prompt-based setup wizard (includes the AI role advisor). |
 | `/balancer refresh` | *(none)* | Triggers immediate poll of Antigravity usage. |
 | `/balancer report` | *(none)* | Generates standalone offline HTML report (`report.html`). |

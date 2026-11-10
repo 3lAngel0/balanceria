@@ -170,6 +170,13 @@ Ejecute el centro de configuración interactivo para detectar automáticamente l
 
 `/balancer setup` abre un overlay de cuatro pasos: **Providers → Estrategia → Roles → Confirmar**. Cada paso explica qué decide, el último muestra un diff exacto de lo que se escribirá, y nada cambia hasta que pulsa **Guardar** (**Descartar** o `Esc` dejan todos los archivos como están). Teclas: `←/→` pasos, `↑/↓` filas, `Espacio`/`Enter` alternar o ciclar, `u`/`d` reordenar candidatos, `s` guardar. El ratón y la rueda funcionan solo en terminales a pantalla completa; en otros casos las teclas hacen lo mismo. Sin interfaz, recurre al asistente clásico, que también se ejecuta con `/balancer setup classic`. Al iniciar pregunta **Seleccionar lenguaje** (Español / English): `Enter` lo aplica solo a esta ejecución, `P` lo guarda de forma permanente, y toda la interfaz, la Ayuda incluida, cambia al instante. En el paso Roles, la fila **Modo del orquestador** (`m`, o `Espacio`/`Enter`) fija `organic` o `full-delegation` para el perfil activo (`workflow.orchestratorMode` de Gentle Shell 4.7.0).
 
+**Modo Guiado vs. Avanzado.** Después de elegir el idioma, `/balancer setup` pregunta qué modo usar:
+
+- **Guiado / Dummy** (`/balancer setup --dummy`, `-d`, `/balancer dummy`, o `D` en la pestaña Resumen del Centro de control): cuatro actos. Los actos 1–2 explican con una animación interactiva de la balanza (`Espacio`/`Enter`/`→` avanzan, `←` retrocede, `s` salta al stepper) qué son un provider, un pool y un perfil, y qué archivos los guardan. El acto 3 es un creador guiado de pools (`n`, o la fila `[+ Crear nuevo pool]`) con plantillas y una advertencia de costo en vivo cuando un pool mezcla modelos baratos `flash` con cuota cara de `claude-`. El acto 4, en el paso Roles, ofrece **Auto-asignar** `[a]` (0 tokens) y **Búsqueda profunda** `[d]` (gasta tokens: elegís el modelo que evalúa los roles).
+- **Avanzado / Skip** (`/balancer setup --skip`, `-s`): directo al stepper, sin tutorial. `/balancer skip` abre el menú de acciones directamente.
+
+**Idioma.** Se fija explícitamente con `AI_BALANCER_LANG=es|en`. Prioridad: `AI_BALANCER_LANG` > `LC_ALL` > `LC_MESSAGES` > `LANG` > `LANGUAGE`; `/balancer lang es|en|auto` guarda la elección en `~/.gentle-shell/agent/settings.json`.
+
 El asistente clásico detecta los proveedores del sistema, orienta la elección de estrategia (`hybrid` o `waterfall`), permite reorganizar candidatos y prioridades por pool, e integra un Asesor de Roles con IA (seguro contra costos; nunca recomienda Opus). Las modificaciones se guardan de forma atómica con respaldos automáticos `.bak`.
 
 ### 3. Asignación de roles de agentes a pools
@@ -201,6 +208,7 @@ Seleccione un pool directamente en el chat mediante `/model pool/claude-sonnet-5
 | `/balancer panel` o `Ctrl+Alt+B` | Muestra u oculta el panel lateral y el Control Center de 4 pestañas. |
 | `/balancer usage` o `Ctrl+Alt+U` | Abre la consola completa de uso en 5 pestañas (Now, Quotas, Days, Sessions, HUD). |
 | `/balancer setup` | Abre el overlay de configuración paso a paso (Providers → Estrategia → Roles → Confirmar). `/balancer setup classic` ejecuta el asistente anterior basado en preguntas. |
+| `/balancer setup --dummy` / `-d` / `--skip` / `-s` | Fuerza el modo Guiado (Dummy) o Avanzado (Skip). `/balancer skip` abre el menú de acciones. |
 | `/balancer lang [es\|en\|auto]` | Consulta o modifica el idioma de la interfaz sin reiniciar la sesión. |
 | `/balancer help` | Glosario breve: pool, candidato, préstamo, permiso, circuit breaker, rol, ritmo de ventana, contexto reenviado. |
 | `/balancer serve [lan] [port]` | Inicia el dashboard web en tiempo real con autenticación (soporta LAN y TLS). |
