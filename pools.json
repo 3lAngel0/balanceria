@@ -20,13 +20,12 @@
     },
     {
       "id": "orchestrator",
-      "name": "Orchestrator (pool: argon → agy claude → claude-bridge)",
+      "name": "Orchestrator (pool: flash → argon → agy claude)",
       "candidates": [
+        "antigravity/gemini-3-8-flash",
         "antigravity/gemini-4-argon",
         "antigravity/claude-sonnet-5-5",
-        "antigravity/claude-opus-5-5",
-        "claude-bridge/claude-opus-5-5",
-        "claude-bridge/claude-sonnet-5-5"
+        "antigravity/claude-opus-5-5"
       ],
       "strategy": "hybrid"
     }
