@@ -464,6 +464,86 @@ test("the page may send the new backup actions and nothing else", () => {
 	assert.equal(parseInstallerAction({ type: "button", id: "cycle-strategy" }), undefined);
 });
 
+test("T7 (S11, S14, S15, S17, S19): /installer serves Design 3 conversational guide, capybara mascot, right-hand help, closing notice and welcome", async () => {
+	const h = await harness();
+	try {
+		const style = installerPageStyle();
+		for (const token of ["--bg:#181425", "--surface:#262b44", "--accent:#feae34", ".rail", ".talk", ".guide", ".bubble", ".stage", ".reply", ".close-note", ".help", ".cap", "prefers-reduced-motion:reduce"]) {
+			assert.ok(style.includes(token), `missing style token: ${token}`);
+		}
+		const script = installerPageScript();
+		for (const part of ["0 0 35 14", "close-note", "bubble", "guide", "rail", "stage", "help", "defs", "narr", "steps-run"]) {
+			assert.ok(script.includes(part), `missing script part: ${part}`);
+		}
+		const view = (await get(h)).json();
+		assert.equal(view.pose, "idle");
+		assert.equal(typeof view.reduceMotion, "boolean");
+		assert.ok(view.text.guideName.length > 0);
+		assert.ok(view.text.helpWhat.length > 0);
+		assert.ok(view.text.helpPurpose.length > 0);
+		assert.ok(view.text.helpIf.length > 0);
+		assert.match(view.screen.notice, /nothing is applied/i);
+		assert.equal(view.screen.welcome.star.url, "https://github.com/3lAngel0/balanceria");
+		assert.equal(view.screen.welcome.definitions.length, 5);
+		assert.equal(view.screen.welcome.willDo.length, 4);
+	} finally {
+		await h.cleanup();
+	}
+});
+
+test("T7 (S13, S14, S18, S20, S21): web view exposes focused help, backup pipeline actions, deep analysis pose/progress/confirmation, and human summary", async () => {
+	let release!: () => void;
+	const gate = new Promise<void>(resolve => (release = resolve));
+	const h = await harness({
+		deepAnalysis: async () => {
+			await gate;
+			return REPORT;
+		},
+	});
+	try {
+		await post(h, { type: "next" }); // type
+		let view = (await post(h, { type: "select", index: 1 })).json(); // custom
+		assert.equal(view.screen.help.focus.technicalName, "guided setup");
+		assert.match(view.text.helpName, /guided setup/);
+		await post(h, { type: "next" }); // scan
+		await settle(h);
+		view = (await post(h, { type: "next" })).json(); // subscriptions
+		assert.equal(view.screen.step, "subscriptions");
+		assert.ok(view.screen.help.focus.ifPicked.length > 0);
+		view = (await post(h, { type: "next" })).json(); // backups
+		assert.equal(view.screen.step, "backups");
+		assert.equal(view.screen.backupDetail.method, "hybrid");
+		view = (await post(h, { type: "button", id: "cycle-method" })).json();
+		assert.equal(view.screen.backupDetail.method, "waterfall");
+		await post(h, { type: "next" }); // tasks
+		await post(h, { type: "button", id: "deep-analysis" });
+		await post(h, { type: "select", index: 0 });
+		await post(h, { type: "button", id: "deep-analysis" });
+		view = (await get(h)).json();
+		assert.equal(view.pose, "working");
+		assert.equal(view.screen.pending.kind, "deep-analysis");
+		release();
+		view = await settle(h);
+		assert.equal(view.pose, "idle");
+		assert.match(view.screen.confirmation, /Consulted in .*900 tokens of subscription claude-bridge/);
+		await post(h, { type: "next" }); // main-agent
+		view = (await post(h, { type: "next" })).json(); // summary
+		assert.equal(view.screen.step, "summary");
+		assert.match(view.screen.summary.narrative, /balance the load/i);
+		assert.ok(view.screen.summary.detail.length >= 4);
+		assert.match(view.screen.summary.closing, /Enter/i);
+		assert.ok(view.screen.notice);
+		await post(h, { type: "button", id: "install" });
+		view = await settle(h);
+		assert.equal(view.screen.step, "done");
+		assert.equal(view.pose, "happy");
+		assert.equal(view.screen.notice, undefined);
+	} finally {
+		release();
+		await h.cleanup();
+	}
+});
+
 test("the install effect receives the draft with the backups saved profiles still use", async () => {
 	let received: string[] = [];
 	const current = {

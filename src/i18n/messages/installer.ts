@@ -113,6 +113,8 @@ export const installerMessages = {
 		"installer.web.page.advanced": "The advanced setup continues in the terminal. You can close this tab.",
 		"installer.web.page.panel": "Opening the panel...",
 		"installer.web.page.diagram": "Your agent, then the backup, then the subscriptions in order",
+		"installer.web.page.guide": "ai-balancer capybara",
+		"installer.web.page.mascot": "Capybara guide with a balance",
 
 		"installer.tui.undone": "Restored {count} file(s) from their .bak copies.",
 		"installer.tui.undoFailed": "Could not restore the files: {error}",
@@ -491,6 +493,8 @@ export const installerMessages = {
 		"installer.web.page.advanced": "La instalación avanzada sigue en la terminal. Podés cerrar esta pestaña.",
 		"installer.web.page.panel": "Abriendo el panel...",
 		"installer.web.page.diagram": "Tu agente, después el respaldo, después las suscripciones en orden",
+		"installer.web.page.guide": "Capibara de ai-balancer",
+		"installer.web.page.mascot": "Capibara guía con una balanza",
 
 		"installer.tui.undone": "Se restauraron {count} archivo(s) desde sus copias .bak.",
 		"installer.tui.undoFailed": "No se pudieron restaurar los archivos: {error}",
