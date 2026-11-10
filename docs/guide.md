@@ -498,28 +498,157 @@ gentle-shell install <path-to-repo>
 ```
 
 ### Interactive Setup Hub (`/balancer setup`)
-Running `/balancer setup` starts an installer: one decision per screen, the recommended option already marked, a step sidebar (✓ done, ● current, ○ pending), `[Back] [Next] [Cancel]` buttons, a chart that reflects what you chose, and a `[?] What is this?` box that shows the technical name (in gray) and the file where each choice is saved. Nothing is written until the end, and you can always go back. Keys: `↑/↓` move, `Space` tick, `Enter` accept, `←/→` back / next, `Tab` buttons, `?` help, `Esc` cancel. Mouse clicks work only when Pi runs fullscreen (`TuiAltScreen`). It also works with `NO_COLOR` and in narrow terminals (the sidebar collapses to "Step N of M"). Without a UI, or if overlays are unavailable, `/balancer setup` falls back to the classic wizard. Both the terminal and the web channel draw the same screens from one shared model, so texts, options and recommendations are identical.
+
+Running `/balancer setup` starts the conversational setup installer. The setup hub auto-detects installed AI providers, builds virtual model pools with tailored failover strategies, and optimizes agent role assignments across two unified presentation channels:
+- **Terminal Console (TUI)**: Runs directly within your terminal with full keyboard navigation and mouse click support in fullscreen terminals (`TuiAltScreen`).
+- **Web Installer (`/installer`)**: Runs in any modern desktop or mobile browser via a local loopback server or secure SSH tunnel.
+
+Both channels execute against the same underlying state model and planning engine, guaranteeing identical decisions, texts, recommendations, and validations.
+
+#### 1. Three-Column Conversational Layout
+The installer layout is organized into 3 columns designed to eliminate cognitive overload:
+
+```
++-------------------+------------------------------------------+------------------------+
+| 1. Welcome     ✓  |  [ Mascot & Balance ]                    | [?] DETAILED HELP      |
+| 2. Mode        ●  |  "Let's choose your routing strategy..." | What it is:            |
+| 3. Subscriptions○ |                                          | Hybrid pool strategy.  |
+| 4. Backups     ○  |  [ Interactive Stage Area ]              |                        |
+| 5. Tasks       ○  |  ( ) Mixed (hybrid)                      | Purpose:               |
+| 6. Summary     ○  |  ( ) In order (waterfall)                | Balances load while    |
+|                   |  ( ) Most room left (highest-quota)      | preserving cache.      |
+|                   |                                          |                        |
+|                   |  --------------------------------------- | If you pick this:      |
+|                   |  Nothing is applied until you confirm    | Starts with 1st, then  |
+|                   |  [ Back ] [ Next ]                       | shifts smoothly.       |
+| Step 2 of 6       |                                          | Target: pools.json     |
++-------------------+------------------------------------------+------------------------+
+```
+
+- **Left Rail (Steps Navigation)**:
+  - Displays the ordered sequence of installation steps with live status icons:
+    - `✓` (`done`): Completed steps.
+    - `●` (`current`): Currently active step.
+    - `○` (`todo`): Upcoming steps.
+  - Features an explicit step progress indicator ("Step N of M"). In narrow terminal windows, the rail collapses into a compact status header.
+- **Center Column (Conversational Guide & Stage)**:
+  - **Conversational Guide**: Features the pixel-art Capybara mascot and an animated mechanical balance scale alongside a speech bubble explaining the step in plain language.
+  - **Stage Area**: Renders interactive controls, options lists, candidate ordering widgets, and dynamic ASCII / SVG routing diagrams.
+  - **Closing Reassurance Notice**: Displays an explicit notice at the base of every stage: "*Nothing is applied until you confirm*" (`No se aplica nada hasta que confirmes`).
+  - **Action Navigation**: Standard action buttons (`[Back]`, `[Next]`, `[Cancel]`, `[Install]`) protected by a single-flight double-click guard that locks UI dispatch until current processing concludes.
+- **Right Rail (Dedicated Help Panel)**:
+  - An always-visible context panel that updates synchronously with the focused item:
+    - **What it is**: High-level definition of the selected choice.
+    - **Purpose**: Why this decision matters to your agent team.
+    - **If you pick this**: Operational impact, prompt cache implications, and failover behavior.
+    - **Technical Name**: Formal configuration key (displayed in muted gray text).
+    - **Destination Config File**: The file where the choice is saved (`pools.json`, `integrations.json`, `profiles.json`).
+
+#### 2. Capybara Mascot & Balance Animations
+The installer features a pixel-art Capybara mascot paired with an animated mechanical balance scale. The mascot serves as an intuitive visual companion reflecting setup activity:
+
+- **Expressive Poses**:
+  - `idle`: Default resting pose during decision and review steps.
+  - `working`: Active pose during subscription discovery scans, AI deep analysis evaluations, and final installation.
+  - `happy`: Celebratory pose displayed on the final "Done" screen once configuration is complete.
+- **Procedural Animations**:
+  - Mascot breathing and natural blinking intervals.
+  - Tilting mechanical balance beam and bobbing pans reflecting balancing dynamics.
+- **Accessibility & Reduced Motion**:
+  - Fully respects accessibility preferences. When `AI_BALANCER_REDUCE_MOTION=1` is set in the environment or the browser reports `prefers-reduced-motion: reduce` (or the `.still` class is active), all animations are disabled. The mascot and balance scale freeze to crisp, static frames, preventing visual fatigue.
+
+#### 3. Welcome Screen & Concept Glossary
+The Welcome screen introduces core architectural concepts in plain, everyday language before asking for any configuration decisions:
+
+| Plain Name | Technical Name | Destination File | Description |
+|---|---|---|---|
+| **Subscription** | `provider` | `integrations.json` | An AI plan you pay for or are logged into (e.g., Claude Pro/Max, Google AI Pro). Each subscription maintains its own quota limits and reset windows. |
+| **Backup** | `pool` | `pools.json` | A virtual priority group of subscriptions that provide the same model family. When the primary subscription runs out of quota, agents roll over to the next candidate without stopping. |
+| **Agent task** | `role` | `profiles.json` | A specific job your agents perform (reading files, writing code, checking results, architecture reviews). Each task can be bound to a fast model or a deep reasoning pool. |
+| **Routing strategy** | `strategy` | `pools.json` | The deterministic rule a backup pool uses to choose which subscription answers next (`hybrid`, `waterfall`, `highest-quota`). |
+| **Main agent** | `orchestratorMode` | `profiles.json` | The primary coordinator mode: whether the chat agent works autonomously on tasks (`organic`) or strictly delegates work to specialized worker subagents (`full-delegation`). |
+
+The Welcome screen also presents an upfront summary of what the installer will do (detect subscriptions without spending quota, create backups, optimize role assignments, and stage changes safely), along with a community star link: [https://github.com/3lAngel0/balanceria](https://github.com/3lAngel0/balanceria).
+
+#### 4. Backup Pipeline & Strategy Configuration
+When multiple subscriptions offer overlapping models, the installer suggests virtual backup pools and gives you full control over candidate ordering, membership, and routing algorithms:
+
+- **Mixed / Hybrid (`hybrid` - Recommended)**:
+  - Starts with the primary candidate and shifts smoothly to one with more headroom when quota drops low.
+  - *Tradeoff*: Preserves prompt cache reuse during ongoing turns while preventing mid-turn `429` quota exhaustion.
+- **In Order / Waterfall (`waterfall`)**:
+  - Always routes to the primary candidate until its quota is completely exhausted, then fails over to secondary candidates in sequence.
+  - *Tradeoff*: Simple and predictable; ideal when you want to exhaust a primary quota before touching secondary limits.
+- **Most Room Left / Highest Quota (`highest-quota`)**:
+  - Always selects the candidate subscription currently reporting the highest available quota percentage.
+  - *Tradeoff*: Distributes load evenly across subscriptions; may cause prompt cache rewarming when switching between providers.
+
+Candidates within a pool can be reordered using `u` (up) and `d` (down) keys or interactive controls. The installer automatically warns you when mixing low-cost models (e.g., Flash) with premium models in the same backup pool without cost containment guards.
+
+#### 5. Agent Tasks & Deep Analysis ("Búsqueda profunda")
+The installer maps agent tasks across the full catalog of 11 roles (reading files, writing code, checking results, etc.). You can choose between two assignment methods:
+
+1. **Auto-Assign Recommended ("Assign the recommended")**:
+   - Zero-quota heuristic assignment. Evaluates your available pools against proven agentic workload profiles in 0 ms and 0 LLM tokens.
+2. **Deep Analysis ("Realizar búsqueda profunda")**:
+   - Consults an active AI advisor model to evaluate task allocations against real model capabilities, reasoning benchmarks, context length requirements, and cost efficiency.
+   - **Live Progress Feedback**: Displays an animated indeterminate progress bar and a live elapsed seconds counter.
+   - **Single-Flight Concurrency Lock**: Enforces an atomic lock during evaluation. Re-clicking buttons or pressing Enter is blocked, preventing duplicate requests and avoiding accidental quota spend.
+   - **Confirmation Banner**: Displays an informative completion banner detailing duration in seconds, tokens used, and the billed subscription:
+     `Consulted in 4.2 s, used 348 tokens of subscription Google AI Pro`
+
+#### 6. Human-Readable Summary & Review
+Before any configuration file is written to disk, the installer presents a comprehensive, human-readable summary:
+
+- **Narrative Story**:
+  - A plain-language paragraph explaining how your balanced environment will operate:
+    > *"You will balance the load between these subscriptions: Google AI Pro, Claude Pro. Then you have these backups, groups of subscriptions that offer the same model so your agents never stop: Claude Sonnet 3.5 (Google AI Pro, Claude Pro). They use the Mixed strategy. Your main agent works in organic mode."*
+- **Bulleted Breakdown**:
+  - Connected subscriptions.
+  - Backup pools, candidate priority chains, and chosen routing strategies.
+  - Agent task assignments to pools or direct models.
+  - Preserved backups (if existing profiles rely on them).
+  - Target configuration files to be written (`integrations.json`, `pools.json`, `profiles.json`).
+- **Closing Notice & Confirmation**:
+  - Concludes with the reassurance: "*Nothing is applied until you confirm*". Pressing `Enter` or clicking `[Install]` writes changes atomically; pressing `Esc` or clicking `[Cancel]` exits leaving every file untouched.
+
+#### 7. Installation Integrity & Non-Overwriting Backups
+The installer guarantees safe atomic configuration and zero data loss through three mechanisms:
+
+- **Backup Preservation ("Kept Backups")**:
+  - If any existing profile in `profiles.json` references a virtual backup pool (`pool/<id>`), that pool is preserved in `pools.json` and never dropped. If all subscriptions supporting a required pool are disabled, the installer alerts you with an installation blocker instead of breaking existing agent tasks.
+- **Per-Install Timestamped Copies**:
+  - Before writing any file, the installer creates an isolated, timestamped snapshot:
+    `<file>.bak-installer-YYYYMMDDHHMMSS` (or `-2`, `-3` if run in the same second).
+  - Unlike legacy systems that overwrite a single `.bak` file, every installation pass keeps its own distinct, non-overwriting historical copy.
+- **Exact Undo ("Undo everything" / "Deshacer todo")**:
+  - On the final "Done" screen, clicking **[Undo everything]** immediately restores the exact files and state from immediately prior to that installation pass, and safely removes any configuration files created anew. Prior backups are preserved.
+
+#### 8. Web Installer Security Sandbox
+When running via the web (`/balancer setup` -> Install via web, or navigating to `/installer`):
+
+- **Ephemeral Lifecycle**: The `/installer` page and its companion API endpoints (`GET /api/installer`, `POST /api/installer`) exist only while an active interactive installer session is in progress.
+- **Token Authentication**: All requests require the session token generated by the server.
+- **Strict Content Security Policy (CSP)**:
+  - Disallows inline styles (`style-src 'self'`).
+  - Disallows dynamic code evaluation (`script-src 'self'`, no `eval`).
+  - Strict DOM safety: no `innerHTML` in client scripts; all UI updates use pure DOM element and text node construction.
+- **Loopback & HTTPS Enforcement**:
+  - State mutations (`POST`) are permitted strictly over loopback (`127.0.0.1`) or TLS/HTTPS connections.
+  - Plain-HTTP connections over LAN are strictly forbidden (`actions are permitted only over loopback or HTTPS`), preventing DNS rebinding attacks and credential exposure.
+- **Remote / SSH Access**:
+  - In remote SSH sessions, the terminal prints the exact SSH tunnel command to run on your local machine (`ssh -N -L 8787:127.0.0.1:8787 <user>@<host>`), allowing secure setup from your local desktop browser.
+
+---
 
 **How setup starts.** `/balancer setup` first asks **Select language** (English / Español): `Enter` applies it to this run only, `P` saves it permanently, and the whole interface, Help included, switches at once. Then it asks **Where do you want to install?**:
 
 - **Install via terminal**: the installer opens in the terminal.
-- **Install via web**: the terminal shows the specific steps and waits.
+- **Install via web**: the terminal shows the specific steps and waits:
   1. The web server starts on `127.0.0.1:8787` (this computer only). If a web server is already running it is reused exactly as you configured it, never widened.
   2. The terminal shows the link with the token and, when there is a desktop session, an **[Open in browser]** button (`O`).
   3. In a remote session (SSH) it also prints the exact tunnel command to run on your own computer and leave open, and then the link to open in your computer's browser.
   4. It shows "Waiting for you to finish the installation in the browser..." with **[Cancel]** (`Esc`). When the browser finishes, the terminal shows the same "Done" summary. Cancel stops the server if the installer started it; if you ended with **[Open the panel]**, the server stays up because it also serves the panel.
-
-  The `/installer` page and its `GET`/`POST /api/installer` API exist only while an installer session is running and use the web server's existing protections: the token, a host check and a CSP. Changes (`POST`) are accepted only from the same origin and only over `127.0.0.1` or HTTPS; over plain-HTTP LAN they are refused (`actions are permitted only over loopback or HTTPS`). If you want to reach the page from another computer, use an SSH tunnel (above) or `/balancer serve lan` with TLS.
-
-**Plain names.** The installer avoids jargon. Each plain word maps to a technical name, which you only see in the `[?]` box and in Advanced:
-
-| The installer says | Technical name | Stored in |
-|---|---|---|
-| Subscription | provider | `integrations.json` |
-| Backup | pool | `pools.json` |
-| Agent task | role | `profiles.json` |
-| How to choose which to use first | strategy (`hybrid`, `waterfall`, `highest-quota`) | `pools.json` |
-| Main agent: works on its own / hands out everything | orchestrator mode (`organic` / `full-delegation`) | `profiles.json` |
 
 **Install types.** The second screen asks how to install:
 
@@ -535,18 +664,18 @@ If ai-balancer is already installed, the first screen offers instead:
 
 **Installer steps** (Recommended and Repair visit only some of them):
 
-1. **Welcome**: what ai-balancer does, how long it takes (about 2 minutes), and that nothing changes until the end.
+1. **Welcome**: what ai-balancer does, concept glossary, how long it takes (about 2 minutes), star link, and that nothing changes until confirmed.
 2. **Install type** (Recommended / Custom / Advanced).
 3. **Finding subscriptions**: progress with a ✓ for each one found, without spending quota. If none is found it shows what to do (sign in to a subscription) and **[Retry]**.
-4. **Your subscriptions**: tick the ones ai-balancer may use; each shows its models and that it has its own usage limit.
-5. **Backups**: a diagram that changes with what you tick (Your agent → Backup → 1st subscription, 2nd subscription if the 1st runs out). It suggests one backup for each model offered by more than one subscription; models in a single subscription say they need no backup. **[+ Create another backup]** asks the name or a template, which subscriptions go in (with the cost alert when a cheap Flash model mixes with Claude), their order, and how to choose which to use first (Mixed, In order, Most room left), each with an example.
-6. **Agent tasks**: each task with a plain name ("Reading files", "Writing code", "Checking the result"...), what it does, how much quota it uses and the recommendation. **[Assign the recommended]** spends no quota; **[Deep analysis (uses quota)]** lists the tasks and asks which model to use for the analysis.
-7. **Main agent**: does it work on its own, or hand out all the work.
-8. **Summary**: what will change, in plain words and file by file, and that a `.bak` copy of each file is saved before it is written.
-9. **Installing**: progress with a ✓ for saving the copies, setting up the backups, assigning the agent tasks and checking that each subscription is signed in (no quota spent).
-10. **Done**: what changed, with **[Open the panel]**, **[Exit]** and **[Undo everything]**, which restores the `.bak` copies (`pools.json.bak`, `integrations.json.bak`, `profiles.json.bak`) made by this install.
+4. **Your subscriptions**: tick the ones ai-balancer may use; each shows its models and independent usage limits.
+5. **Backups**: interactive diagrams reflecting your selections (Agent → Backup → 1st subscription, 2nd subscription on exhaustion). Configure members, candidate priority order, and routing strategies (Mixed, In order, Most room left).
+6. **Agent tasks**: catalog tasks with plain descriptions, quota impact, and recommendations. Choose **[Assign the recommended]** (0 quota) or **[Deep analysis]** (AI advisor model evaluation with live progress and single-flight lock).
+7. **Main agent**: choose between `organic` (works directly) or `full-delegation` (delegates all work to subagents).
+8. **Summary**: plain-language narrative story and bulleted breakdown before modifying files.
+9. **Installing**: progress indicators for saving timestamped backup snapshots, writing configurations, and verifying credentials.
+10. **Done**: summary of changes with **[Open the panel]**, **[Exit]**, and **[Undo everything]** (restores pre-install state).
 
-**Advanced (technical stepper).** A four-step overlay: **Providers → Strategy → Roles → Confirm**. Each step shows a short description; the Confirm step shows a diff of what Save will write to `pools.json`, `integrations.json` and `profiles.json`. Nothing is written until **Save**; **Discard** (or `Esc`, which asks first when you have edits) leaves every file untouched. Keys: `←/→`/`h`/`l` or `Tab`/`Shift+Tab` change step, `↑/↓`/`j`/`k` move between rows, `Space`/`Enter` toggle or cycle (provider on/off, candidate on/off, pool strategy, role model), `u`/`d` reorder a candidate, `t` cycles a role's thinking level, `s` saves on the Confirm step. Mouse (click breadcrumb steps, rows and buttons; wheel scrolls) works only when Pi runs fullscreen (`TuiAltScreen`); otherwise the overlay is keyboard-only. Without a UI, or if overlays are unavailable, `/balancer setup` falls back to the classic wizard. The AI role advisor is only in the classic wizard. On the Roles step, the **Orchestrator mode** row (`m`, or `Space`/`Enter`) sets `organic` or `full-delegation` for the active profile (Gentle Shell 4.7.0 `workflow.orchestratorMode`).
+**Advanced (technical stepper).** A four-step overlay: **Providers → Strategy → Roles → Confirm**. Each step shows a short description; the Confirm step shows a diff of what Save will write to `pools.json`, `integrations.json` and `profiles.json`. Nothing is written until **Save**; **Discard** (or `Esc`, which asks first when you have edits) leaves every file untouched. Keys: `←/→`/`h`/`l` or `Tab`/`Shift+Tab` change step, `↑/↓`/`j`/`k` move between rows, `Space`/`Enter` toggle or cycle (provider on/off, candidate on/off, pool strategy, role model), `u`/`d` reorder a candidate, `t` cycles a role's thinking level, `s` saves on the Confirm step. Mouse (click breadcrumb steps, rows and buttons; wheel scrolls) works only when Pi runs fullscreen (`TuiAltScreen`); otherwise the overlay is keyboard-only. Without a UI, or if overlays are unavailable, `/balancer setup` falls back to the classic wizard. On the Roles step, the **Orchestrator mode** row (`m`, or `Space`/`Enter`) sets `organic` or `full-delegation` for the active profile (Gentle Shell 4.7.0 `workflow.orchestratorMode`).
 
 **Shortcuts into setup.**
 
