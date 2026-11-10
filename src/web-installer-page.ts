@@ -332,30 +332,30 @@ export function installerPageScript(): string {
 		});
 
 		var SPRITE = [
-					"............##.##.....",
-					"...........#G#P#G#....",
-					"..........#RPPRRPP#...",
-					".........#PdDdDDdRP#..",
-					".........#PDdRRdDRP#..",
-					"....##...#PddDDddP#...",
-					"..##SS##..##G##G##....",
-					".#SMHHMS####..........",
-					"#SMHHHHHMMMMMM##......",
-					"#SMHHHHHHHHMMMMN#.....",
-					"#SMHHHHHHMMMMMMN#.....",
-					"#SMHHHHHHMMMMw##......",
-					".#SSMMHHMM####........",
-					"..##BBLLBB#MMMM##.....",
-					".#BBLLWWLLBBMMMMM##...",
-					"#SSBBBBBBSSMMMMMMMM#..",
-					"#SSMMMMMSSMMMMMMMMMMS#",
-					"#MMMMMMMMMMHHHHHHMMMS#",
-					"#MMMMMMMMHHHHHHHHHMMS#",
-					"#MMMMMMMMMMMMMMMMMMMS#",
-					".#MMMMMMMSSMMMMMMMMM#.",
-					"..#SSSS##MM#SSSSMM##..",
-					"...####..##..####.....",
-					"......................"
+					"............PRP.......",
+					"...........PRDRP......",
+					"..........GPdDdPG.....",
+					".........GG#RdR#GG....",
+					".......##...#dd#......",
+					"......#SS##HHHHH##....",
+					".....#SMHHHHHHHHHHH#..",
+					".....#SMMHHH##HHMMMM#.",
+					"....#SMMMMMME*MMMMMMM#",
+					"....#SSMMMMMEEMMMMM#M#",
+					"...#SSMMMMMMMMMMMMMMS#",
+					"...#SSSMMMMMMMMMMM##S#",
+					"..#SSSMMLLLLL#######..",
+					"..#HHMBBLLLLWWB#......",
+					".#HHMMMMSBLLLLLB#.....",
+					".#SHMMMMMMSBLLLBM#....",
+					"#SHMMMMMMMMMSBLBMM#...",
+					"#SMMMMMMMMMMMMBMMMS#..",
+					"#SMMMMMMMMMMMS#MMMMS#.",
+					"#SMMMMMMMMMMS#SMMMMS#.",
+					"#SSMMMMMMMMMS##MMMS#..",
+					"#SSSMMMMMMSSS#.#SMMS#.",
+					".#SSSSSSSSMMMMS##SMMS#",
+					"..####################"
 		];
 
 		var CLASS_MAP = {
@@ -364,13 +364,12 @@ export function installerPageScript(): string {
 			"O": "c-fur",
 			"H": "c-hi",
 			"S": "c-sh",
-			"N": "c-dark",
-			"w": "c-sh",
 			"E": "c-dark",
+			"*": "c-glint",
+			"b": "c-r-light",
 			"B": "c-s-base",
 			"L": "c-s-hi",
 			"W": "c-glint",
-			"b": "c-s-sh",
 			"s": "c-s-sh",
 			"R": "c-r-neon",
 			"P": "c-r-light",
@@ -399,23 +398,22 @@ export function installerPageScript(): string {
 
 		var eye = svg("g", { class: "eye" });
 		if (pose === "happy") {
-			eye.appendChild(rect("c-dark", 12, 10, 1, 1));
-			eye.appendChild(rect("c-dark", 13, 9, 2, 1));
-			eye.appendChild(rect("c-dark", 15, 10, 1, 1));
-			eye.appendChild(rect("c-r-light", 13, 11, 2, 1));
-			eye.appendChild(rect("c-r-neon sparkle", 15, 2, 1, 1));
-			eye.appendChild(rect("c-r-neon sparkle", 6, 2, 1, 1));
-			eye.appendChild(rect("c-g-neon sparkle", 17, 4, 1, 1));
-		} else if (pose === "working") {
-			eye.appendChild(rect("c-out", 13, 8, 2, 1));
-			eye.appendChild(rect("c-glint", 13, 9, 2, 2));
-			eye.appendChild(rect("c-dark", 14, 9, 1, 2));
-			eye.appendChild(rect("c-g-neon", 13, 9, 1, 1));
-		} else {
-			eye.appendChild(rect("c-glint", 13, 9, 1, 1));
+			eye.appendChild(rect("c-dark", 12, 8, 2, 1));
+			eye.appendChild(rect("c-dark", 11, 9, 1, 1));
 			eye.appendChild(rect("c-dark", 14, 9, 1, 1));
-			eye.appendChild(rect("c-dark eye-blink", 13, 10, 2, 1));
-			eye.appendChild(rect("c-r-light", 13, 11, 2, 1));
+			eye.appendChild(rect("c-r-light", 13, 10, 2, 1));
+			eye.appendChild(rect("c-dark", 17, 10, 1, 1));
+			eye.appendChild(rect("c-r-neon sparkle", 16, 2, 1, 1));
+			eye.appendChild(rect("c-g-neon sparkle", 8, 3, 1, 1));
+		} else if (pose === "working") {
+			eye.appendChild(rect("c-out", 12, 6, 2, 1));
+			eye.appendChild(rect("c-glint", 13, 7, 1, 1));
+			eye.appendChild(rect("c-dark", 12, 7, 1, 1));
+			eye.appendChild(rect("c-dark", 12, 8, 2, 2));
+		} else {
+			eye.appendChild(rect("c-dark eye-blink", 12, 8, 1, 2));
+			eye.appendChild(rect("c-glint", 13, 8, 1, 1));
+			eye.appendChild(rect("c-dark", 13, 9, 1, 1));
 		}
 		body.appendChild(eye);
 		root.appendChild(body);
