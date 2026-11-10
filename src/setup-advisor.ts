@@ -346,18 +346,69 @@ export function createDefaultCliAiRunner(agyBin = "agy", timeoutMs = 12_000): Li
 		});
 }
 
+/**
+ * Enriched prompt for the user-triggered deep search: all roles, free quota, 7-day token use per role
+ * and the quota-protection rules of the `pi-token-analysis` skill.
+ */
+export function buildDeepAdvisorPrompt(input: AdvisorInput, availableTargets: readonly string[]): string {
+	const rolesBrief = ROLE_CATALOG.map(r => `${r.role}(${r.category},${r.defaultThinking})`).join(", ");
+	const percent = (entries: Readonly<Record<string, number>> | undefined) =>
+		entries && Object.keys(entries).length > 0
+			? Object.entries(entries)
+					.map(([k, v]) => `${k}:${Math.round(v * 100)}%`)
+					.join(", ")
+			: "none";
+	const tokens =
+		input.roleTokensLast7d && Object.keys(input.roleTokensLast7d).length > 0
+			? Object.entries(input.roleTokensLast7d)
+					.map(([k, v]) => `${k}:${v}`)
+					.join(", ")
+			: "none";
+	return [
+		'Return ONLY valid JSON: {"summary":"1-2 sentence advice","roles":{"<role>":{"model":"<target>","thinking":"low|medium|high","reason":"short reason"}}}.',
+		`Allowed targets: ${availableTargets.join(", ")}.`,
+		`Free quota by key: ${percent(input.quotaByKey)}.`,
+		`Tokens used per role, last 7d: ${tokens}.`,
+		`Roles (${ROLE_CATALOG.length}): ${rolesBrief}.`,
+		"Rules (pi-token-analysis): protect Claude quota from high-volume read roles by assigning fast direct models like antigravity/gemini-3-8-flash;",
+		"route write roles to pool/claude-sonnet-5-5; route audit and orchestrate roles to pool/orchestrator or antigravity/gemini-4-argon;",
+		"the heavier a role's 7d token use, the cheaper its model must be; never assign a model outside the allowed targets.",
+	].join(" ");
+}
+
+/**
+ * Runner for a user-picked model: the `provider/` prefix is stripped and the bare model goes to `agy --model`;
+ * `claude-bridge/` refs try `claude -p` first and fall back to `agy`.
+ */
+export function createModelCliAiRunner(modelRef: string, agyBin = "agy", timeoutMs = 15_000): LightweightAiRunner {
+	const slash = modelRef.indexOf("/");
+	const model = slash >= 0 ? modelRef.slice(slash + 1) : modelRef;
+	const run = (bin: string, args: string[], prompt: string) =>
+		new Promise<LightweightAiResponse>((resolve, reject) => {
+			execFile(bin, args, { timeout: timeoutMs }, (err, stdout) => {
+				if (err) return reject(err);
+				const text = String(stdout ?? "").trim();
+				if (!text) return reject(new Error("empty output"));
+				resolve({ text, tokensUsed: Math.max(120, Math.round((prompt.length + text.length) / 4)) });
+			});
+		});
+	const viaAgy = (prompt: string) => run(agyBin, ["--model", model, "--print", prompt], prompt);
+	if (modelRef.startsWith("claude-bridge/")) return prompt => run("claude", ["-p", prompt], prompt).catch(() => viaAgy(prompt));
+	return viaAgy;
+}
+
 const OPUS = /opus/i;
 
 export async function recommendRolesWithAdvisor(
 	input: AdvisorInput,
-	options?: { aiRunner?: LightweightAiRunner },
+	options?: { aiRunner?: LightweightAiRunner; deep?: boolean },
 ): Promise<AdvisorReport> {
 	const baseline = recommendRolesHeuristic(input);
 	if (!options?.aiRunner) return baseline;
 
 	// Opus is never offered to or accepted from the advisor; cost containment decides, not the model.
 	const available = new Set(buildAvailableModelTargets(input.providers, input.pools).filter(target => !OPUS.test(target)));
-	const prompt = buildCompactAdvisorPrompt(input, [...available]);
+	const prompt = options.deep ? buildDeepAdvisorPrompt(input, [...available]) : buildCompactAdvisorPrompt(input, [...available]);
 
 	try {
 		const response = await options.aiRunner(prompt);

@@ -14,12 +14,15 @@ import type { RoutingStrategy } from "./router.ts";
 import { ROLE_CATALOG, THINKING_DEFAULT, buildAvailableModelTargets, displayModel, displayThinking } from "./setup-advisor.ts";
 import {
 	SETUP_STEPS,
+	applyAutoAssignRoles,
 	buildStepperDiff,
+	createPoolFromTemplate,
 	discard,
 	goBack,
 	goNext,
 	goTo,
 	moveCandidate,
+	poolCostWarning,
 	setOrchestratorMode,
 	setPoolStrategy,
 	setRole,
@@ -47,7 +50,7 @@ const KEYS = {
 } as const;
 const is = (data: string, name: keyof typeof KEYS): boolean => (KEYS[name] as readonly string[]).includes(data);
 
-export type StepperEffect = "none" | "save" | "discard" | "cancel";
+export type StepperEffect = "none" | "save" | "discard" | "cancel" | { type: "deep-search"; model: string };
 
 export type StepperTone = "accent" | "dim" | "warn" | "ok";
 
@@ -61,7 +64,10 @@ export type StepRow =
 	| { kind: "pool"; poolId: string }
 	| { kind: "candidate"; poolId: string; ref: string }
 	| { kind: "role"; role: string }
-	| { kind: "workflow-mode" };
+	| { kind: "workflow-mode" }
+	| { kind: "create-pool" }
+	| { kind: "auto-assign" }
+	| { kind: "deep-search" };
 
 export interface StepperHit {
 	target: MouseTarget;
@@ -86,6 +92,10 @@ export interface StepperScreen {
 	help?: boolean;
 	/** Whether the last frame showed the Help box, so `?` knows which way to toggle. */
 	helpOn?: boolean;
+	/** Inline model picker of the deep search (roles step). */
+	deepPickerOpen?: boolean;
+	deepPickerCursor?: number;
+	deepPickerModels?: string[];
 	/** Hit areas of the last rendered frame. */
 	hits: readonly StepperHit[];
 }
@@ -133,9 +143,9 @@ export function stepRows(s: SetupStepperState): StepRow[] {
 				const known = new Set(s.baseline.pools.find(p => p.id === pool.id)?.candidates ?? []);
 				const refs = [...pool.candidates, ...[...known].filter(ref => !pool.candidates.includes(ref))];
 				return [{ kind: "pool", poolId: pool.id }, ...refs.map((ref): StepRow => ({ kind: "candidate", poolId: pool.id, ref }))];
-			});
+			}).concat({ kind: "create-pool" });
 		case "roles":
-			return [...ROLE_CATALOG.map(entry => ({ kind: "role", role: entry.role })), { kind: "workflow-mode" }];
+			return [...ROLE_CATALOG.map(entry => ({ kind: "role", role: entry.role })), { kind: "workflow-mode" }, { kind: "auto-assign" }, { kind: "deep-search" }];
 		case "confirm":
 			return [];
 	}
@@ -157,6 +167,7 @@ const rowCells = (s: SetupStepperState, row: StepRow, mode: ColorMode = "none"):
 		const desc = modeText === "organic" ? t("setup.workflow.organicDesc") : t("setup.workflow.fullDelegationDesc");
 		return [t("setup.col.workflowMode"), pixelText("sky", modeText, mode), pixelText("steel", desc, mode)];
 	}
+	if (row.kind === "auto-assign" || row.kind === "deep-search") return [t(row.kind === "auto-assign" ? "setup.stepper.row.autoAssign" : "setup.stepper.row.deepSearch"), "", ""];
 	if (row.kind === "role") {
 		const route = s.roles[row.role];
 		const model = displayModel(route?.model ?? "(unassigned)");
@@ -182,6 +193,8 @@ const rowText = (s: SetupStepperState, row: StepRow): string => {
 			const position = s.pools.find(p => p.id === row.poolId)!.candidates.indexOf(row.ref);
 			return `  [${position >= 0 ? "x" : " "}] ${position >= 0 ? `${position + 1}. ` : "   "}${row.ref}`;
 		}
+		case "create-pool":
+			return t("setup.stepper.row.createPool");
 		default:
 			return rowCells(s, row).join("  ");
 	}
@@ -249,7 +262,11 @@ export function renderStepper(screen: StepperScreen, ui: StepperUi): StepperView
 			}
 		}
 	}
+	if (s.step === "strategy") {
+		for (const warning of s.pools.map(poolCostWarning)) if (warning) body.push(...wrapIndented(`! ${warning}`, boxInner).map(line => paint("warn", line)));
+	}
 	if (s.step === "roles") body.push(...wrap(t("setup.stepper.rolesHint"), boxInner).map(line => paint("dim", line)));
+	if (s.step === "roles" && s.advisorSummary) body.push(...wrap(t("setup.stepper.advisorSummary", { summary: s.advisorSummary }), boxInner).map(line => paint("dim", line)));
 	const headers = s.step === "providers" ? ["provider", "status", "source", "enabled"] : s.step === "roles" ? ["role", "model", "thinking"] : [];
 	const grid =
 		headers.length > 0
@@ -263,6 +280,21 @@ export function renderStepper(screen: StepperScreen, ui: StepperUi): StepperView
 		const out = grid ? grid[index + 2]! : `${selected ? "›" : " "} ${rowText(s, row)}`;
 		body.push(selected ? paint("accent", hot(target, out)) : hot(target, out));
 	});
+
+	if (s.step === "strategy" && s.guided) {
+		const preview = JSON.stringify(s.pools.map(p => ({ id: p.id, strategy: p.strategy, candidates: p.candidates })), null, 2);
+		body.push("", paint("dim", t("setup.stepper.poolsPreview")), ...preview.split("\n").map(line => pixelText("steel", line, mode)));
+	}
+	if (screen.deepPickerOpen) {
+		// The picker replaces the body while open; row hits are dropped below because no row is selectable.
+		body.length = 0;
+		rowLines.length = 0;
+		body.push(...wrap(t("setup.stepper.deepSearchPrompt", { roles: ROLE_CATALOG.map(r => r.shortName).join(", ") }), boxInner).map(line => paint("accent", line)), "");
+		const models = screen.deepPickerModels ?? [];
+		if (models.length === 0) body.push(paint("warn", t("setup.stepper.deepPickerEmpty")));
+		models.forEach((model, i) => body.push(i === (screen.deepPickerCursor ?? 0) ? paint("accent", `› ${model}`) : `  ${model}`));
+		body.push("", paint("dim", t("setup.stepper.deepPickerHint")));
+	}
 
 	const viewport = Math.max(1, ui.bodyRows);
 	const maxOffset = Math.max(0, body.length - viewport);
@@ -320,6 +352,12 @@ function activate(s: SetupStepperState, row: StepRow | undefined): SetupStepperS
 			return setPoolStrategy(s, row.poolId, cycle(STRATEGIES, s.pools.find(p => p.id === row.poolId)?.strategy));
 		case "candidate":
 			return toggleCandidate(s, row.poolId, row.ref);
+		case "create-pool":
+			return createPoolFromTemplate(s);
+		case "auto-assign":
+			return applyAutoAssignRoles(s);
+		case "deep-search":
+			return s;
 		case "workflow-mode":
 			return setOrchestratorMode(s, s.orchestratorMode === "organic" ? "full-delegation" : "organic");
 		case "role": {
@@ -337,6 +375,23 @@ const cycleThinking = (s: SetupStepperState, role: string): SetupStepperState =>
 };
 
 type Result = { state: StepperScreen; effect: StepperEffect };
+
+const openDeepPicker = (screen: StepperScreen): StepperScreen => {
+	const models = buildAvailableModelTargets(enabledProviders(screen.stepper), screen.stepper.pools).filter(target => !/opus/i.test(target));
+	return { ...screen, deepPickerOpen: true, deepPickerCursor: 0, deepPickerModels: models };
+};
+
+/** Keys while the deep-search picker is open: it owns all input until it closes. */
+function pickerInput(screen: StepperScreen, key: string): Result {
+	const models = screen.deepPickerModels ?? [];
+	const cursor = screen.deepPickerCursor ?? 0;
+	const close = { ...screen, deepPickerOpen: false, deepPickerCursor: 0, deepPickerModels: undefined };
+	if (is(key, "escape")) return { state: close, effect: "none" };
+	if (is(key, "down") || key === "j") return { state: { ...screen, deepPickerCursor: Math.min(cursor + 1, Math.max(0, models.length - 1)) }, effect: "none" };
+	if (is(key, "up") || key === "k") return { state: { ...screen, deepPickerCursor: Math.max(0, cursor - 1) }, effect: "none" };
+	if ((is(key, "enter") || is(key, "space")) && models[cursor] !== undefined) return { state: close, effect: { type: "deep-search", model: models[cursor]! } };
+	return { state: screen, effect: "none" };
+}
 
 function runButton(screen: StepperScreen, id: string): Result {
 	const s = screen.stepper;
@@ -362,6 +417,7 @@ export function stepperInput(screen: StepperScreen, event: StepperEvent): Result
 	const select = (cursor: number) => none({ ...screen, cursor: Math.min(Math.max(0, cursor), Math.max(0, rows.length - 1)), follow: true });
 	const edit = (next: SetupStepperState) => none({ ...screen, stepper: next, follow: true });
 
+	if (screen.deepPickerOpen) return event.type === "key" ? pickerInput(screen, event.data) : none();
 	if (event.type === "key") {
 		const key = event.data;
 		if (screen.confirmDiscard) return key === "y" ? { state: screen, effect: "cancel" } : none({ ...screen, confirmDiscard: false });
@@ -373,7 +429,10 @@ export function stepperInput(screen: StepperScreen, event: StepperEvent): Result
 		if (is(key, "up") || key === "k") return select(screen.cursor - 1);
 		if (key === "s") return runButton(screen, "save");
 		const row = rows[screen.cursor];
-		if (is(key, "enter") || is(key, "space")) return edit(activate(s, row));
+		if (is(key, "enter") || is(key, "space")) return row?.kind === "deep-search" ? none(openDeepPicker(screen)) : edit(activate(s, row));
+		if (key === "n" && s.step === "strategy") return edit(createPoolFromTemplate(s));
+		if (key === "a" && s.step === "roles") return edit(applyAutoAssignRoles(s));
+		if (key === "d" && s.step === "roles") return none(openDeepPicker(screen));
 		if ((key === "u" || key === "d") && row?.kind === "candidate") {
 			const index = s.pools.find(p => p.id === row.poolId)!.candidates.indexOf(row.ref);
 			return edit(moveCandidate(s, row.poolId, index, key === "u" ? -1 : 1));
@@ -389,6 +448,6 @@ export function stepperInput(screen: StepperScreen, event: StepperEvent): Result
 	if (!target || screen.confirmDiscard) return none();
 	if (target.kind === "tab") return none({ ...screen, stepper: goTo(s, target.tab as SetupStep), cursor: 0, offset: 0 });
 	if (target.kind === "button") return runButton(screen, target.id);
-	if (target.index === screen.cursor) return edit(activate(s, rows[target.index]));
+	if (target.index === screen.cursor) return rows[target.index]?.kind === "deep-search" ? none(openDeepPicker(screen)) : edit(activate(s, rows[target.index]));
 	return select(target.index);
 }

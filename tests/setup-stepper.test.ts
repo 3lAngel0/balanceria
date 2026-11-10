@@ -4,14 +4,18 @@ import { t } from "../src/i18n/index.ts";
 import type { DetectedProvider, PoolConfig } from "../src/setup.ts";
 import {
 	SETUP_STEPS,
+	applyAdvisorReport,
+	applyAutoAssignRoles,
 	applyStepper,
 	buildStepperDiff,
+	createPoolFromTemplate,
 	discard,
 	goBack,
 	goNext,
 	goTo,
 	initStepper,
 	moveCandidate,
+	poolCostWarning,
 	setOrchestratorMode,
 	setPoolStrategy,
 	setRole,
@@ -265,4 +269,60 @@ test("buildStepperDiff and applyStepper track workflow orchestratorMode changes"
 	const res = applyStepper(state, deps);
 	assert.equal(res.ok, true);
 	assert.deepEqual(writtenWorkflow, { orchestratorMode: "full-delegation" });
+});
+
+test("initStepper is not guided unless asked", () => {
+	assert.equal(fresh().guided, false);
+	assert.equal(initStepper(detected, pools(), {}, undefined, { guided: true }).guided, true);
+});
+
+test("poolCostWarning flags a secondary pool mixing flash with claude, never the orchestrator pool", () => {
+	const mixed = { id: "mix", name: "Mix", candidates: ["antigravity/gemini-3-8-flash", "claude-bridge/claude-sonnet-5-5"], strategy: "hybrid" as const };
+	assert.equal(poolCostWarning(mixed), t("setup.stepper.costWarning", { pool: "mix" }));
+	assert.match(poolCostWarning(mixed)!, /mix/);
+	assert.equal(poolCostWarning({ ...mixed, id: "orchestrator" }), undefined);
+	assert.equal(poolCostWarning({ ...mixed, candidates: ["antigravity/gemini-3-8-flash"] }), undefined);
+	assert.equal(poolCostWarning({ ...mixed, candidates: ["claude-bridge/claude-sonnet-5-5"] }), undefined);
+});
+
+test("createPoolFromTemplate adds the first missing template with matching candidates and marks dirty", () => {
+	const rich = [{ ...provider("claude-bridge"), availableModels: ["claude-opus-5-5", "claude-sonnet-5-5"] }, { ...provider("antigravity"), availableModels: ["gemini-4-argon"] }];
+	const state = initStepper(rich, [], {});
+	const one = createPoolFromTemplate(state);
+	assert.equal(one.dirty, true);
+	assert.deepEqual(one.pools.map(p => p.id), ["claude-opus-5-5"]);
+	assert.deepEqual(one.pools[0]!.candidates, ["claude-bridge/claude-opus-5-5"]);
+	const two = createPoolFromTemplate(one);
+	assert.equal(two.pools[1]!.id, "claude-sonnet-5-5");
+	assert.deepEqual(two.pools[1]!.candidates, ["claude-bridge/claude-sonnet-5-5"]);
+	assert.equal(state.pools.length, 0, "input state is not mutated");
+	const three = createPoolFromTemplate(two);
+	assert.equal(three.pools[2]!.id, "orchestrator");
+	const custom = createPoolFromTemplate(three);
+	assert.equal(custom.pools[3]!.id, "custom-pool-4");
+	assert.deepEqual(custom.pools[3]!.candidates, ["claude-bridge/claude-opus-5-5", "claude-bridge/claude-sonnet-5-5", "antigravity/gemini-4-argon"]);
+	assert.equal(createPoolFromTemplate(two, "claude-sonnet-5-5"), two, "an existing template is not duplicated");
+});
+
+test("applyAutoAssignRoles assigns every catalog role and records the advisor summary", () => {
+	const rich = [{ ...provider("antigravity"), availableModels: ["gemini-3-8-flash", "gemini-4-argon"] }];
+	const state = applyAutoAssignRoles(initStepper(rich, [], {}));
+	assert.equal(state.dirty, true);
+	assert.equal(Object.keys(state.roles).length, 11);
+	assert.equal(state.roles["gentle-ai-explore"]!.model, "antigravity/gemini-3-8-flash");
+	assert.ok(state.advisorSummary && state.advisorSummary.length > 0);
+});
+
+test("applyAdvisorReport applies the recommendations and keeps unrelated roles", () => {
+	const base = setRole(fresh(), "custom", "x/y");
+	const next = applyAdvisorReport(base, {
+		source: "ai+heuristic",
+		estimatedTokens: 10,
+		summary: "deep summary",
+		recommendations: [{ role: "orchestrator", category: "orchestrate", purpose: "p", recommendedModel: "pool/sonnet", thinking: "low", reason: "r" }],
+	});
+	assert.deepEqual(next.roles.orchestrator, { model: "pool/sonnet", thinking: "low" });
+	assert.deepEqual(next.roles.custom, { model: "x/y" });
+	assert.equal(next.advisorSummary, "deep summary");
+	assert.equal(next.dirty, true);
 });
