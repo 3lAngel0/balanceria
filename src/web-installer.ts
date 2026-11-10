@@ -438,7 +438,7 @@ export function installerPageScript(): string {
 				const input = el("input", { type: "radio", name: "choice", "data-index": i, checked: i === c.selected });
 				input.addEventListener("click", () => post({ type: "select", index: i }));
 				const what = el("span", { class: "what", text: item.label });
-				if (item.recommended) what.append(el("span", { class: "tag", text: " [" + view.text.recommended + "]" }));
+				if (item.recommended && item.label !== view.text.recommended) what.append(el("span", { class: "tag", text: " [" + view.text.recommended + "]" }));
 				const label = el("label", { class: "card" + (i === c.selected ? " selected" : "") + (i === cursor ? " cursor" : "") }, input, el("span", {}, what, item.description ? el("span", { class: "desc", text: item.description }) : null));
 				group.append(label);
 			});
@@ -488,7 +488,7 @@ export function installerPageScript(): string {
 		const rows = Math.max(1, d.members.length);
 		const height = 20 + rows * 54;
 		const middle = height / 2;
-		const root = svg("svg", { class: "diagram", viewBox: "0 0 640 " + height, width: 640, height, role: "img", "aria-label": view.text.diagram });
+		const root = svg("svg", { class: "diagram", viewBox: "0 0 800 " + height, width: 800, height, role: "img", "aria-label": view.text.diagram });
 		root.append(svg("title", {}, view.text.diagram));
 		const node = (x, y, w, cls, label, sub) => {
 			root.append(svg("rect", { class: "node " + cls, x, y: y - 22, width: w, height: 44, rx: 4 }));
@@ -501,7 +501,7 @@ export function installerPageScript(): string {
 		d.members.forEach((m, i) => {
 			const y = 10 + 27 + i * 54;
 			root.append(svg("path", { class: "edge", d: "M340 " + middle + " H365 V" + y + " H390" }));
-			node(390, y, 242, m.state, m.order + ". " + m.label, view.text.members[i]);
+			node(390, y, 402, m.state, m.order + ". " + m.label, view.text.members[i]);
 		});
 		return root;
 	}

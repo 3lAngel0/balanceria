@@ -100,10 +100,18 @@ test("every step of both runs renders its title, control and buttons", () => {
 	}
 });
 
-test("the type step tags Recommended and marks the selected radio", () => {
+test("the type step marks the selected radio and does not repeat the Recommended tag on the Recommended option", () => {
 	const out = text(renderInstaller(installerScreen(recommendedRun()[1]!), { width: 90, mode: "none" }).lines);
-	assert.match(out, /\(●\) Recommended\s+\[Recommended\]/);
+	assert.match(out, /\(●\) Recommended\s*$/m);
+	assert.doesNotMatch(out, /\[Recommended\]/);
 	assert.match(out, /\( \) Custom/);
+});
+
+test("a recommended choice whose label differs keeps its Recommended tag", () => {
+	const screen = installerScreen(recommendedRun()[1]!);
+	const control = screen.control as Extract<InstallerScreen["control"], { kind: "choice" }>;
+	const tagged = { ...screen, control: { ...control, items: control.items.map((item, i) => (i === 1 ? { ...item, recommended: true } : item)) } } as InstallerScreen;
+	assert.match(text(renderInstaller(tagged, { width: 90, mode: "none" }).lines), /Custom\s+\[Recommended\]/);
 });
 
 test("the sidebar shows done, current and pending; below 70 columns it collapses to Step N of M", () => {

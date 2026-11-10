@@ -85,7 +85,7 @@ function controlRows(control: InstallerControl, cursor: number, width: number, m
 			control.items.forEach((item, i) => {
 				const on = i === control.selected;
 				const label = on ? pixelText("sky", item.label, mode) : item.label;
-				const tag = item.recommended ? `  ${pixelText("gold", `[${t("installer.tui.recommended")}]`, mode)}` : "";
+				const tag = item.recommended && item.label !== t("installer.tui.recommended") ? `  ${pixelText("gold", `[${t("installer.tui.recommended")}]`, mode)}` : "";
 				const hit: InstallerAction = { type: "select", index: i };
 				rows.push({ item: i, text: `${pointer(i === cursor)} ${on ? "(●)" : "( )"} ${label}${tag}`, hits: [{ start: 0, end: width, action: hit }] });
 				details(i, wrap(item.description, Math.max(10, width - INDENT.length)), hit);
