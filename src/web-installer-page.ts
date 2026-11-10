@@ -152,18 +152,31 @@ table.tasks tr:hover td, table.tasks tr:focus-within td { background: var(--surf
 .dg-d { fill: var(--dim); font: 12px ui-monospace, Menlo, Consolas, monospace; }
 
 .cap { display: block; shape-rendering: crispEdges; image-rendering: pixelated; }
+.cap .c-out { fill: #2b170f; }
+.cap .c-fur { fill: #ba7636; }
+.cap .c-hi { fill: #dc9852; }
+.cap .c-sh { fill: #8c4e20; }
+.cap .c-dark { fill: #1a0b06; }
+.cap .c-glint { fill: #ffffff; }
+.cap .c-s-base { fill: #2f69e6; }
+.cap .c-s-hi { fill: #6ea4ff; }
+.cap .c-s-sh { fill: #1a429e; }
+.cap .c-r-neon { fill: #ff2d87; }
+.cap .c-r-light { fill: #ff79b0; }
+.cap .c-r-core { fill: #34071f; }
+.cap .c-r-crim { fill: #6d0d3c; }
+.cap .c-g-neon { fill: #00f5a0; }
 .cap .c-o { fill: var(--shadow); }
 .cap .c-b { fill: var(--accent); }
 .cap .c-w { fill: var(--text); }
 .cap .c-l { fill: var(--light); }
 .cap .c-h { fill: var(--hp); }
 .cap .body { animation: breathe 3.2s steps(1) infinite; }
-.cap .eye { animation: blink 4.8s steps(1) infinite; }
-.cap .panl { animation: bob 2.4s steps(1) infinite; }
-.cap .panr { animation: bob 2.4s steps(1) infinite reverse; }
-@keyframes breathe { 0% { transform: translateY(0); } 50% { transform: translateY(-1px); } }
-@keyframes blink { 0%, 94% { opacity: 1; } 95%, 100% { opacity: 0; } }
-@keyframes bob { 0% { transform: translateY(0); } 50% { transform: translateY(1px); } }
+.cap .eye-blink { animation: blink 4.8s steps(1) infinite; }
+.cap .sparkle { animation: spark 1.2s steps(2) infinite alternate; }
+@keyframes breathe { 0% { transform: translateY(0); } 50% { transform: translateY(-0.5px); } }
+@keyframes blink { 0%, 92% { opacity: 1; } 93%, 100% { opacity: 0; } }
+@keyframes spark { 0%, 100% { opacity: 0.3; } 50% { opacity: 1; } }
 
 .star { display: inline-flex; gap: 8px; align-items: center; color: var(--accent); }
 .star-row { margin: 12px 0 16px; }
@@ -311,98 +324,98 @@ export function installerPageScript(): string {
 	function renderCapybara(pose) {
 		var root = svg("svg", {
 			class: "cap",
-			viewBox: "0 0 35 14",
-			width: "210",
-			height: "84",
+			viewBox: "0 0 24 24",
+			width: "120",
+			height: "120",
 			role: "img",
 			"aria-label": view.text.mascot
 		});
 
-		// Stand & Pole
-		var stand = svg("g");
-		stand.appendChild(rect("c-w", 6, 0, 2, 1));
-		stand.appendChild(rect("c-w", 6, 1, 2, 1));
-		stand.appendChild(rect("c-w", 0, 2, 14, 1));
-		stand.appendChild(rect("c-w", 6, 3, 2, 1));
-		stand.appendChild(rect("c-w", 6, 4, 2, 1));
-		stand.appendChild(rect("c-w", 6, 5, 2, 1));
-		stand.appendChild(rect("c-w", 6, 6, 2, 1));
-		stand.appendChild(rect("c-w", 6, 7, 2, 1));
-		stand.appendChild(rect("c-w", 6, 8, 2, 1));
-		stand.appendChild(rect("c-w", 6, 9, 2, 1));
-		stand.appendChild(rect("c-w", 6, 10, 2, 1));
-		stand.appendChild(rect("c-w", 6, 11, 2, 1));
-		stand.appendChild(rect("c-w", 6, 12, 2, 1));
-		stand.appendChild(rect("c-w", 3, 13, 8, 1));
-		root.appendChild(stand);
+		var SPRITE = [
+			".........PPRRP..........",
+			".......PPrRDDdRP........",
+			".....PRdDDdDdDDP........",
+			".....PRDdRRdDDDP........",
+			".......PDdDDddP.........",
+			"......G.GPRRP.G.G.......",
+			".......##...######......",
+			".....##OO###HHHHHH##....",
+			"....#OH..SHHHHHHHHH##...",
+			"...#OO...SHHHHHHHHHHHH#.",
+			"...#OOOO.EHHHHHHHHHHHHEE#",
+			"...#OOOOOHHHHHHHHHHHOOEE#",
+			"....##OOOSHHHHHHHHHOOO#.",
+			"..##BBBBBB#######OOOO#..",
+			".#HOOBBBLLBBbBBLBB####...",
+			"#HHHOOOBBoBBbBBLLBo#....",
+			"HHHHHOOOOOSsBBbBBOO#....",
+			"HHHHHOOOOOOSsBbB#OO#....",
+			"#HHHOOOOOOOOSsB#OOO#....",
+			".##OOOOOOOOOOSs#OOO#....",
+			"#OS#OOOOOOOOOOSs#OO#....",
+			"#OS#OOOOOOOOOOSs#EE#...",
+			"#OSSS#OOOOOOOOOSs#EEE#..",
+			".####.##########.#####.."
+		];
 
-		// Left pan
-		var panl = svg("g", { class: "panl" });
-		panl.appendChild(rect("c-w", 2, 3, 1, 1));
-		panl.appendChild(rect("c-w", 2, 4, 1, 1));
-		panl.appendChild(rect("c-w", 2, 5, 1, 1));
-		panl.appendChild(rect("c-l", 0, 6, 5, 1));
-		panl.appendChild(rect("c-l", 1, 7, 3, 1));
-		root.appendChild(panl);
+		var CLASS_MAP = {
+			"#": "c-out",
+			"O": "c-fur",
+			"H": "c-hi",
+			"S": "c-sh",
+			"E": "c-dark",
+			"B": "c-s-base",
+			"L": "c-s-hi",
+			"b": "c-s-sh",
+			"s": "c-s-sh",
+			"R": "c-r-neon",
+			"P": "c-r-light",
+			"D": "c-r-core",
+			"d": "c-r-crim",
+			"G": "c-g-neon"
+		};
 
-		// Right pan
-		var panr = svg("g", { class: "panr" });
-		panr.appendChild(rect("c-w", 11, 3, 1, 1));
-		panr.appendChild(rect("c-w", 11, 4, 1, 1));
-		panr.appendChild(rect("c-w", 11, 5, 1, 1));
-		panr.appendChild(rect("c-l", 9, 6, 5, 1));
-		panr.appendChild(rect("c-l", 10, 7, 3, 1));
-		root.appendChild(panr);
-
-		// Body & Eyes
 		var body = svg("g", { class: "body" });
-		body.appendChild(rect("c-o", 27, 2, 2, 1));
-		body.appendChild(rect("c-o", 17, 3, 11, 1));
-		body.appendChild(rect("c-b", 28, 3, 1, 1));
-		body.appendChild(rect("c-o", 29, 3, 2, 1));
-		body.appendChild(rect("c-o", 16, 4, 1, 1));
-		body.appendChild(rect("c-b", 17, 4, 14, 1));
-		body.appendChild(rect("c-o", 31, 4, 4, 1));
-		body.appendChild(rect("c-o", 15, 5, 1, 1));
-		body.appendChild(rect("c-b", 16, 5, 3, 1));
-		body.appendChild(rect("c-w", 19, 5, 2, 1));
-		body.appendChild(rect("c-b", 21, 5, 13, 1));
-		body.appendChild(rect("c-o", 34, 5, 1, 1));
-		body.appendChild(rect("c-o", 15, 6, 1, 1));
-		body.appendChild(rect("c-b", 16, 6, 18, 1));
-		body.appendChild(rect("c-o", 34, 6, 1, 1));
-		body.appendChild(rect("c-o", 15, 7, 1, 1));
-		body.appendChild(rect("c-b", 16, 7, 18, 1));
-		body.appendChild(rect("c-o", 34, 7, 1, 1));
-		body.appendChild(rect("c-o", 15, 8, 1, 1));
-		body.appendChild(rect("c-b", 16, 8, 17, 1));
-		body.appendChild(rect("c-o", 33, 8, 1, 1));
-		body.appendChild(rect("c-o", 16, 9, 1, 1));
-		body.appendChild(rect("c-b", 17, 9, 15, 1));
-		body.appendChild(rect("c-o", 32, 9, 1, 1));
-		body.appendChild(rect("c-o", 16, 10, 16, 1));
-		body.appendChild(rect("c-o", 17, 11, 1, 1));
-		body.appendChild(rect("c-b", 18, 11, 2, 1));
-		body.appendChild(rect("c-o", 20, 11, 1, 1));
-		body.appendChild(rect("c-o", 28, 11, 1, 1));
-		body.appendChild(rect("c-b", 29, 11, 2, 1));
-		body.appendChild(rect("c-o", 31, 11, 1, 1));
-		body.appendChild(rect("c-o", 17, 12, 1, 1));
-		body.appendChild(rect("c-b", 18, 12, 2, 1));
-		body.appendChild(rect("c-o", 20, 12, 1, 1));
-		body.appendChild(rect("c-o", 28, 12, 1, 1));
-		body.appendChild(rect("c-b", 29, 12, 2, 1));
-		body.appendChild(rect("c-o", 31, 12, 1, 1));
-		body.appendChild(rect("c-o", 17, 13, 4, 1));
-		body.appendChild(rect("c-o", 28, 13, 4, 1));
 
-		if (pose === "happy") {
-			body.appendChild(rect("c-o", 30, 5, 1, 1));
-			body.appendChild(rect("c-o", 32, 5, 1, 1));
-			body.appendChild(rect("c-o", 31, 4, 1, 1));
-		} else {
-			body.appendChild(rect("c-o eye", 31, 5, 1, 1));
+		for (var y = 0; y < SPRITE.length; y++) {
+			var row = SPRITE[y];
+			var x = 0;
+			while (x < row.length) {
+				var ch = row[x];
+				if (ch === "." || !CLASS_MAP[ch]) {
+					x++;
+					continue;
+				}
+				var len = 1;
+				while (x + len < row.length && row[x + len] === ch) len++;
+				body.appendChild(rect(CLASS_MAP[ch], x, y, len, 1));
+				x += len;
+			}
 		}
+
+		var eye = svg("g", { class: "eye" });
+		if (pose === "happy") {
+			eye.appendChild(rect("c-out", 7, 8, 1, 1));
+			eye.appendChild(rect("c-hi", 8, 8, 1, 1));
+			eye.appendChild(rect("c-out", 9, 8, 1, 1));
+			eye.appendChild(rect("c-hi", 7, 9, 1, 1));
+			eye.appendChild(rect("c-out", 8, 9, 1, 1));
+			eye.appendChild(rect("c-hi", 9, 9, 1, 1));
+			eye.appendChild(rect("c-fur", 7, 10, 2, 1));
+			eye.appendChild(rect("c-r-neon sparkle", 6, 0, 1, 1));
+			eye.appendChild(rect("c-r-neon sparkle", 18, 1, 1, 1));
+			eye.appendChild(rect("c-r-neon sparkle", 4, 4, 1, 1));
+		} else if (pose === "working") {
+			eye.appendChild(rect("c-out", 7, 8, 2, 1));
+			eye.appendChild(rect("c-out", 7, 9, 1, 1));
+			eye.appendChild(rect("c-glint", 8, 9, 1, 1));
+			eye.appendChild(rect("c-fur", 7, 10, 2, 1));
+		} else {
+			eye.appendChild(rect("c-hi", 7, 8, 2, 1));
+			eye.appendChild(rect("c-out eye-blink", 7, 9, 3, 1));
+			eye.appendChild(rect("c-fur", 7, 10, 2, 1));
+		}
+		body.appendChild(eye);
 		root.appendChild(body);
 
 		return root;
