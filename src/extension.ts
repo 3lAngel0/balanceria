@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { copyFileSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -8,7 +8,7 @@ import { Key, matchesKey, SelectList, truncateToWidth, visibleWidth, type TuiMou
 import { CONTENT_X, CONTENT_Y, emphasize, hitTest, layoutButtons, sameTarget, tabHitAreas, wheelOffset, type ButtonCell, type HitLayout, type MouseTarget } from "./control-center-mouse.ts";
 import { applyAdvisorReport, applyStepper, initStepper, type StepperCurrent } from "./setup-stepper.ts";
 import { initScreen, renderStepper, stepperInput, type StepperEffect, type StepperEvent, type StepperTone, stepperThemeColor } from "./setup-stepper-view.ts";
-import { INSTALL_PROGRESS_STEPS, initInstaller, installerInput, installerScreen, withAdvisorReport, withInstallProgress, withInstallResult, withScanResult, type InstallerAction, type InstallerEffect, type InstallerState } from "./installer-model.ts";
+import type { InstallerAction } from "./installer-model.ts";
 import { planUndo } from "./installer-plan.ts";
 import { hitInstaller, installerKey, renderInstaller, type InstallerHit } from "./installer-tui.ts";
 import { channelPromptInput, initChannelPrompt, renderChannelPrompt, type InstallChannel } from "./installer-channel.ts";
@@ -66,8 +66,9 @@ import { CircuitBreaker } from "./circuit-breaker.ts";
 import { runSetupWizard, detectSystemProviders, generateRecommendedConfig, saveProfileRoles, writeConfigSafely, toggleCandidateInList, moveCandidateInList, type DetectedProvider, type PoolConfig } from "./setup.ts";
 import { buildSessionDetail, buildWebReport, readSessionCwd, snapshotSessionIds, type WebReport } from "./web-data.ts";
 import { webSnapshotHtml } from "./web-page.ts";
-import { bindWebHandlers, formatServeStart, isValidSessionId, parseServeArgs, runningWebServer, startServing, stopServing, type WebHandlers } from "./web-serve.ts";
-import { loadTlsFiles, probeReport, type OpenResult, type TlsMaterial } from "./web-server.ts";
+import { bindWebHandlers, formatServeStart, isValidSessionId, parseServeArgs, runningWebServer, sshTunnelHint, startServing, stopServing, type WebHandlers } from "./web-serve.ts";
+import { DEFAULT_WEB_PORT, loadTlsFiles, probeReport, type OpenResult, type TlsMaterial, type WebServer } from "./web-server.ts";
+import { createInstallerSession, setInstallerSession, type InstallerHostDeps, type InstallerOutcome, type InstallerSession } from "./web-installer.ts";
 import {
 	agyUsageLimits,
 	CLAUDE_BRIDGE_PROVIDER,
@@ -193,11 +194,6 @@ function readAgyUsage(onReport: (report: unknown) => void): Promise<boolean> {
 			}
 		});
 	});
-}
-
-/** Web install channel. Stub: the web installer comes with the web page (next task). */
-export async function runWebInstall(ctx: ExtensionContext): Promise<void> {
-	ctx.ui.notify(`ai-balancer: ${t("installer.tui.webSoon")}`, "info");
 }
 
 export default function aiBalancer(pi: ExtensionAPI) {
@@ -1933,8 +1929,35 @@ export default function aiBalancer(pi: ExtensionAPI) {
 		return data;
 	};
 
-	/** The installer overlay: the shared model drawn in the terminal; hosts the scan, install, analysis and undo effects. */
-	const openInstaller = async (ctx: ExtensionContext): Promise<void> => {
+	/** The effects of the installer (scan, install, analysis, undo) on this machine; the terminal and the web channel run the same ones. */
+	const installerHost = (ctx: ExtensionContext): InstallerHostDeps => ({
+		detect: detectSystemProviders,
+		install: (draft, current) => {
+			// applyStepper only reports the pools/integrations backups; keep a plain .bak of profiles.json too so Undo restores all three.
+			const profilesBackup = `${DEFAULT_PROFILES_PATH}.bak`;
+			const hadProfiles = existsSync(DEFAULT_PROFILES_PATH);
+			if (hadProfiles) copyFileSync(DEFAULT_PROFILES_PATH, profilesBackup);
+			const result = applyStepper(draft, {
+				root: ROOT,
+				current,
+				profilesPath: DEFAULT_PROFILES_PATH,
+				writeConfig: writeConfigSafely,
+				writeProfiles: (name, roles, workflow) => saveProfileRoles(DEFAULT_PROFILES_PATH, name, roles, (provider, model) => Boolean(ctx.modelRegistry.find(provider, model)), workflow),
+			});
+			const backups = hadProfiles && result.written.includes(DEFAULT_PROFILES_PATH) ? [...result.backups, profilesBackup] : result.backups;
+			return result.ok ? { ok: true, written: result.written, backups, profilesError: result.profilesError } : { ok: false, error: result.error ?? "" };
+		},
+		undo: backups => {
+			const steps = planUndo(backups);
+			for (const step of steps) copyFileSync(step.backup, step.file);
+			return steps.length;
+		},
+		deepAnalysis: (providers, pools, model) => recommendRolesWithAdvisor({ providers, pools }, { aiRunner: createModelCliAiRunner(model, AGY_BIN), deep: true }),
+		notify: (message, level) => ctx.ui.notify(message, level),
+		changed: () => refreshStatus(ctx),
+	});
+
+	const newInstallerSession = (ctx: ExtensionContext): InstallerSession => {
 		const readJson = (file: string): unknown => {
 			try {
 				return JSON.parse(readFileSync(join(ROOT, file), "utf8"));
@@ -1944,9 +1967,20 @@ export default function aiBalancer(pi: ExtensionAPI) {
 		};
 		const store = loadProfilesStore();
 		const current: StepperCurrent = { pools: readJson("pools.json"), integrations: readJson("integrations.json"), profiles: store };
-		let state: InstallerState = initInstaller({ detected: detectSystemProviders(), current, workflow: store?.workflow?.[store.active ?? ""] });
+		return createInstallerSession({ detected: detectSystemProviders(), current, workflow: store?.workflow?.[store.active ?? ""] }, installerHost(ctx));
+	};
 
-		const outcome = await ctx.ui.custom<"panel" | "advanced" | "exit">(
+	/** Where the installer leaves the user once it ends. */
+	const afterInstaller = async (ctx: ExtensionContext, session: InstallerSession, outcome: InstallerOutcome | undefined): Promise<void> => {
+		if (outcome === "panel") await openControlCenter(ctx);
+		else if (outcome === "advanced") await openSetupStepper(ctx);
+		else if (!session.state.finished) ctx.ui.notify(`ai-balancer: ${t("setup.stepper.cancelled")}`, "info");
+	};
+
+	/** The installer overlay: the shared model drawn in the terminal. */
+	const openInstaller = async (ctx: ExtensionContext): Promise<void> => {
+		const session = newInstallerSession(ctx);
+		const outcome = await ctx.ui.custom<InstallerOutcome>(
 			(tui, theme, _keybindings, done) => {
 				const mode = colorMode();
 				let focus: number | undefined;
@@ -1955,81 +1989,18 @@ export default function aiBalancer(pi: ExtensionAPI) {
 				const redraw = () => {
 					if (!closed) tui.requestRender();
 				};
-				const later = (job: () => void | Promise<void>) => {
-					setTimeout(() => {
-						if (!closed) void Promise.resolve(job()).catch(error => ctx.ui.notify(`ai-balancer: ${error instanceof Error ? error.message : String(error)}`, "error"));
-					}, 0);
-				};
-				const install = () => {
-					state = withInstallProgress(state, "copies", "running");
-					redraw();
-					later(() => {
-						const result = applyStepper(state.draft, {
-							root: ROOT,
-							current,
-							profilesPath: DEFAULT_PROFILES_PATH,
-							writeConfig: writeConfigSafely,
-							writeProfiles: (name, roles, workflow) => saveProfileRoles(DEFAULT_PROFILES_PATH, name, roles, (provider, model) => Boolean(ctx.modelRegistry.find(provider, model)), workflow),
-						});
-						if (!result.ok) {
-							state = withInstallResult(state, { ok: false, written: [], backups: [], error: result.error });
-							redraw();
-							return;
-						}
-						for (const id of INSTALL_PROGRESS_STEPS) state = withInstallProgress(state, id, "done");
-						if (result.profilesError) ctx.ui.notify(`ai-balancer: ${t("setup.stepper.profilesFailed", { error: result.profilesError })}`, "warning");
-						state = withInstallResult(state, { ok: true, written: result.written, backups: result.backups });
-						refreshStatus(ctx);
-						redraw();
-					});
-				};
-				const undo = () => {
-					const steps = planUndo(state.backups);
-					try {
-						for (const step of steps) copyFileSync(step.backup, step.file);
-						ctx.ui.notify(`ai-balancer: ${t("installer.tui.undone", { count: steps.length })}`, "info");
-						refreshStatus(ctx);
-					} catch (error) {
-						ctx.ui.notify(`ai-balancer: ${t("installer.tui.undoFailed", { error: error instanceof Error ? error.message : String(error) })}`, "error");
-					}
-				};
-				const runEffect = (effect: InstallerEffect) => {
-					if (effect === "scan") {
-						later(() => {
-							try {
-								state = withScanResult(state, { found: detectSystemProviders() });
-							} catch (error) {
-								state = withScanResult(state, { error: error instanceof Error ? error.message : String(error) });
-							}
-							redraw();
-						});
-					} else if (effect === "install") install();
-					else if (effect === "undo") undo();
-					else if (effect === "open-panel") done("panel");
-					else if (effect === "advanced") done("advanced");
-					else if (effect === "exit") done("exit");
-					else {
-						ctx.ui.notify(`ai-balancer: ${t("installer.tui.deepRunning")}`, "info");
-						const providers = state.draft.detected.filter(p => p.detected && state.draft.enabled.includes(p.id));
-						void recommendRolesWithAdvisor({ providers, pools: state.draft.pools }, { aiRunner: createModelCliAiRunner(effect.model, AGY_BIN), deep: true })
-							.then(report => {
-								state = withAdvisorReport(state, report);
-								redraw();
-							})
-							.catch(error => ctx.ui.notify(`ai-balancer: ${error instanceof Error ? error.message : String(error)}`, "warning"));
-					}
-				};
+				session.onChange(redraw);
+				session.onEnd(outcome => done(outcome));
 				const apply = (action: InstallerAction) => {
-					const result = installerInput(state, action);
-					if (result.state.step !== state.step) focus = undefined;
-					state = result.state;
-					if (result.effect) runEffect(result.effect);
+					const before = session.state.step;
+					session.act(action);
+					if (session.state.step !== before) focus = undefined;
 				};
 				return {
 					render(width: number): string[] {
 						const inner = Math.max(20, width - 4);
 						const rows = Math.max(14, ((tui as { terminal?: { rows?: number } }).terminal?.rows ?? 40) - 6);
-						const view = renderInstaller(installerScreen(state), { width: inner, mode, focus, rows });
+						const view = renderInstaller(session.screen(), { width: inner, mode, focus, rows });
 						hits = view.hits;
 						const border = (text: string) => theme.fg("border", text);
 						const row = (text: string) => `${border("│")} ${truncateToWidth(text, inner, "…", true)} ${border("│")}`;
@@ -2037,7 +2008,7 @@ export default function aiBalancer(pi: ExtensionAPI) {
 						return [border(`╭${"─".repeat(inner + 2)}╮`), ...painted.map(row), border(`╰${"─".repeat(inner + 2)}╯`)];
 					},
 					handleInput(data: string) {
-						const result = installerKey(installerScreen(state), focus, canonicalKey(data));
+						const result = installerKey(session.screen(), focus, canonicalKey(data));
 						focus = result.focus;
 						for (const action of result.actions) apply(action);
 						redraw();
@@ -2055,15 +2026,121 @@ export default function aiBalancer(pi: ExtensionAPI) {
 					invalidate() {},
 					dispose() {
 						closed = true;
+						session.close();
 					},
 				};
 			},
 			{ overlay: true, overlayOptions: { width: "90%", minWidth: 72, anchor: "center" } },
 		);
+		await afterInstaller(ctx, session, outcome);
+	};
 
-		if (outcome === "panel") await openControlCenter(ctx);
-		else if (outcome === "advanced") await openSetupStepper(ctx);
-		else if (!state.finished) ctx.ui.notify(`ai-balancer: ${t("setup.stepper.cancelled")}`, "info");
+	/** The web channel: the installer page runs in the browser, this overlay tells the user how to reach it and waits. */
+	const runWebInstall = async (ctx: ExtensionContext): Promise<void> => {
+		let served: { server: WebServer; started: boolean };
+		try {
+			// Never wider than the user configured: a running server is reused as it is, a new one listens on 127.0.0.1 only.
+			served = await startServing({ port: DEFAULT_WEB_PORT, tokenFile: WEB_TOKEN_FILE, handlers: webHandlers() });
+		} catch (error) {
+			const running = runningWebServer();
+			if (!running) {
+				ctx.ui.notify(`ai-balancer: ${t("installer.web.startFailed", { error: error instanceof Error ? error.message : String(error) })}`, "error");
+				return;
+			}
+			served = { server: running, started: false };
+		}
+		const { server, started } = served;
+		const session = newInstallerSession(ctx);
+		setInstallerSession(session);
+		const remote = Boolean(process.env.SSH_CONNECTION || process.env.SSH_TTY);
+		const link = server.url.replace("/?token=", "/installer?token=");
+		const lanLinks = server.lan ? server.lanUrls.map(url => url.replace("/?token=", "/installer?token=")) : [];
+		const opener = process.platform === "darwin" ? "open" : process.platform === "linux" && (process.env.DISPLAY || process.env.WAYLAND_DISPLAY) ? "xdg-open" : undefined;
+		const canOpen = opener !== undefined && !remote;
+
+		type Phase = "waiting" | "done" | "cancelled";
+		const outcome = await ctx.ui.custom<InstallerOutcome | undefined>(
+			(tui, theme, _keybindings, done) => {
+				const mode = colorMode();
+				let phase: Phase = "waiting";
+				let rows: { y: number; key: string }[] = [];
+				const finishWith = (value: InstallerOutcome | undefined) => done(value);
+				session.onChange(() => tui.requestRender());
+				session.onEnd(() => {
+					phase = "done";
+					tui.requestRender();
+				});
+				const press = (key: string) => {
+					if (phase === "done") {
+						if (key === "enter" || key === "escape") finishWith(session.outcome);
+					} else if (key === "o" && canOpen) {
+						execFile(opener!, [link], () => {});
+					} else if (key === "escape" || key === "cancel") {
+						phase = "cancelled";
+						finishWith(undefined);
+					}
+				};
+				const body = (inner: number): { lines: string[]; buttons: { y: number; key: string }[] } => {
+					const dim = (text: string) => theme.fg("muted", text);
+					const lines: string[] = [theme.fg("accent", t("installer.web.title")), ""];
+					const buttons: { y: number; key: string }[] = [];
+					lines.push(t(started ? "installer.web.started" : "installer.web.reused", { port: server.port }), "");
+					lines.push(t("installer.web.link"), `  ${link}`);
+					for (const url of lanLinks) lines.push(`  ${t("installer.web.lan", { urls: url })}`);
+					if (canOpen) {
+						buttons.push({ y: lines.length, key: "o" });
+						lines.push(`  [ ${t("installer.web.open")} ]`);
+					}
+					lines.push("");
+					if (remote) lines.push(t("installer.web.remote"), `  ${sshTunnelHint(server.port)}`, "", t("installer.web.remoteLink"), `  ${link}`, "");
+					if (phase === "done") {
+						lines.push(...renderInstaller(session.screen(), { width: inner, mode, rows: 30 }).lines.map(line => paintTones(line, (name, text) => theme.fg(name, text))), "", dim(t("installer.web.doneKeys")));
+					} else {
+						lines.push(t("installer.web.waiting"));
+						buttons.push({ y: lines.length, key: "cancel" });
+						lines.push(`  [ ${t("installer.web.cancel")} ]`, "", dim(t("installer.web.keys")));
+					}
+					return { lines, buttons };
+				};
+				return {
+					render(width: number): string[] {
+						const inner = Math.max(20, width - 4);
+						const view = body(inner);
+						rows = view.buttons;
+						const border = (text: string) => theme.fg("border", text);
+						const row = (text: string) => `${border("│")} ${truncateToWidth(text, inner, "…", true)} ${border("│")}`;
+						return [border(`╭${"─".repeat(inner + 2)}╮`), ...view.lines.map(row), border(`╰${"─".repeat(inner + 2)}╯`)];
+					},
+					handleInput(data: string) {
+						const key = matchesKey(data, Key.escape) ? "escape" : matchesKey(data, Key.enter) ? "enter" : data.toLowerCase();
+						press(key);
+					},
+					handleMouse(event: TuiMouseEvent): TuiMouseEventResult | undefined {
+						if (event.type !== "click" || event.button !== "left") return undefined;
+						const hit = rows.find(r => r.y === event.y - CONTENT_Y);
+						if (!hit) return undefined;
+						press(hit.key);
+						return { handled: true, render: true };
+					},
+					invalidate() {},
+					dispose() {
+						session.close();
+					},
+				};
+			},
+			{ overlay: true, overlayOptions: { width: "90%", minWidth: 72, anchor: "center" } },
+		);
+		setInstallerSession(undefined);
+		session.close();
+		if (outcome === undefined) {
+			// Cancel ends the session; the server stops only when this install started it.
+			if (started) await stopServing();
+			ctx.ui.notify(`ai-balancer: ${t("installer.web.cancelled")}`, "info");
+			return;
+		}
+		// The panel is served by this same server; any other ending hands it back if this install started it.
+		if (started && outcome !== "panel") await stopServing();
+		await afterInstaller(ctx, session, outcome);
 	};
 
 	const openSetupStepper = async (ctx: ExtensionContext): Promise<void> => {
