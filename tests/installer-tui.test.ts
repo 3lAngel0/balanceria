@@ -9,6 +9,7 @@ import {
 	initInstaller,
 	installerInput,
 	installerScreen,
+	withError,
 	withInstallResult,
 	withScanResult,
 	INSTALLER_STEPS,
@@ -16,15 +17,17 @@ import {
 	type InstallerScreen,
 	type InstallerState,
 } from "../src/installer-model.ts";
-import { hitInstaller, installerKey, renderDiagram, renderInstaller } from "../src/installer-tui.ts";
+import { canonicalKey, hitInstaller, installerKey, renderDiagram, renderInstaller } from "../src/installer-tui.ts";
 
 setLang("en");
 
 const provider = (id: string, availableModels: string[]): DetectedProvider => ({ id, label: id, kind: "subscription", detected: true, source: "test", availableModels });
 const both = [provider("claude-bridge", ["claude-opus-5-5", "claude-sonnet-5-5"]), provider("antigravity", ["claude-sonnet-5-5", "gemini-3-8-flash"])];
 const MODES: ColorMode[] = ["truecolor", "ansi", "none"];
-const WIDTHS = [60, 80, 120];
-const strip = (s: string) => s.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "").replace(/\uE000[\uE010-\uE01F]|\uE001/g, "");
+const WIDTHS = [60, 80, 90, 120, 140];
+const strip = (s: string) => s.replace(/\x1b\]8;;[^\x1b]*\x1b\\/g, "").replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "").replace(/\uE000[\uE010-\uE01F]|\uE001/g, "");
+/** Width in cells; an OSC 8 hyperlink wrapper takes none. */
+const vw = (line: string) => cellWidth(line.replace(/\x1b\]8;;[^\x1b]*\x1b\\/g, ""));
 const text = (lines: string[]) => lines.map(strip).join("\n");
 
 const step = (state: InstallerState, ...actions: InstallerAction[]) => actions.reduce((s, a) => installerInput(s, a).state, state);
@@ -73,7 +76,7 @@ test("every line has exactly the requested width at 60/80/120 columns in all col
 			for (const width of WIDTHS) {
 				const view = renderInstaller(screen, { width, mode });
 				assert.ok(view.lines.length > 0);
-				for (const line of view.lines) assert.equal(cellWidth(line), width, `${screen.step} ${mode} ${width}: ${JSON.stringify(strip(line))}`);
+				for (const line of view.lines) assert.equal(vw(line), width, `${screen.step} ${mode} ${width}: ${JSON.stringify(strip(line))}`);
 			}
 		}
 	}
@@ -169,16 +172,18 @@ test("the backups screen embeds the diagram", () => {
 	assert.match(out, /✓ in use/);
 });
 
-test("the help box toggles and shows text, technical name and file", () => {
+test("the help panel is shown without pressing ? and ? hides it; it shows text, technical name and file", () => {
 	const screen = installerScreen(recommendedRun()[1]!);
-	const closed = text(renderInstaller(screen, { width: 100, mode: "none" }).lines);
-	assert.doesNotMatch(closed, /Technical name/);
-	const open = text(renderInstaller({ ...screen, helpOpen: true }, { width: 100, mode: "none" }).lines);
-	assert.ok(open.includes(screen.help.text.slice(0, 30)));
-	assert.ok(open.includes(screen.help.technicalName));
-	assert.ok(open.includes(screen.help.file));
-	assert.match(open, /Technical name/);
-	for (const l of renderInstaller({ ...screen, helpOpen: true }, { width: 60, mode: "ansi" }).lines) assert.equal(cellWidth(l), 60);
+	const shown = text(renderInstaller(screen, { width: 100, mode: "none" }).lines);
+	assert.match(shown, /Technical name/);
+	// the technical name and file are those of the option under the cursor when there is one
+	const about = screen.help.focus ?? screen.help;
+	assert.ok(shown.includes(about.technicalName));
+	assert.ok(shown.includes(about.file));
+	assert.ok(shown.includes(screen.help.purpose.slice(0, 20)));
+	const hidden = text(renderInstaller({ ...screen, helpOpen: true }, { width: 100, mode: "none" }).lines);
+	assert.doesNotMatch(hidden, /Technical name/);
+	for (const l of renderInstaller(screen, { width: 60, mode: "ansi" }).lines) assert.equal(cellWidth(l), 60);
 });
 
 test("buttons wrap in narrow widths and the focused one is marked", () => {
@@ -332,7 +337,290 @@ test("the tasks picker renders at the exact width, tags the recommendation and m
 test("no screen text of the Recommended and Custom runs shows a raw model id or ref", () => {
 	for (const state of [...recommendedRun(), ...customRun()]) {
 		const screen = installerScreen(state);
-		const out = text(renderInstaller({ ...screen, helpOpen: false }, { width: 120, mode: "none" }).lines);
+		const out = text(renderInstaller({ ...screen, helpOpen: true }, { width: 120, mode: "none" }).lines);
 		assert.doesNotMatch(out, /(claude|gemini)-[a-z0-9-]*\d|(claude-bridge|antigravity)\/|pool\//, screen.step);
+	}
+});
+
+// ---------------------------------------------------------------------------------------------
+// Round 2 (T6): help panel, notice, shortcuts, keys, welcome, errors, summary, pending, mascot
+// ---------------------------------------------------------------------------------------------
+
+const NOW = 6000;
+const legacyCurrent = {
+	pools: { pools: [{ id: "legacy", name: "legacy", candidates: ["antigravity/gemini-3-8-flash"], strategy: "hybrid" }] },
+	profiles: { active: "p", profiles: { p: { "legacy-role": { model: "pool/legacy" } } } },
+};
+const blockedSummary = (): InstallerState => {
+	let s = withScanResult(step(initInstaller({ detected: both, current: legacyCurrent, installed: false }), next, next), { found: both });
+	s = step(s, next, next);
+	return { ...s, draft: { ...s.draft, enabled: ["claude-bridge"] } };
+};
+const tasksState = () => customRun().find(s => s.step === "tasks")!;
+const backupsState = () => customRun().find(s => s.step === "backups")!;
+const modelRef = "claude-bridge/claude-opus-5-5";
+const pending = (): InstallerState => ({ ...tasksState(), analysis: { status: "running", startedAt: 1000, model: modelRef } });
+const confirmed = (): InstallerState => ({ ...tasksState(), analysis: { status: "done", durationMs: 4200, tokens: 900, exact: false, model: modelRef } });
+const installFailed = (): InstallerState => withInstallResult(step(recommendedRun()[5]!, next), { ok: false, written: [], backups: ["/x/pools.json.bak"], error: "disk full" });
+const scanFailed = (): InstallerState => withScanResult(step(initInstaller({ detected: both }), next, next), { found: [] });
+const generic = (): InstallerState => withError(recommendedRun()[4]!, "server down");
+const draw = (state: InstallerState, width: number, mode: ColorMode, extra: object = {}) =>
+	renderInstaller(installerScreen(state), { width, mode, frame: 3, animate: true, now: NOW, ...extra });
+
+const ROUND2: [string, () => InstallerState][] = [
+	["welcome", () => recommendedRun()[0]!],
+	["backups", backupsState],
+	["tasks pending", pending],
+	["tasks confirmation", confirmed],
+	["summary blocked", blockedSummary],
+	["scan error", scanFailed],
+	["install error", installFailed],
+	["generic error", generic],
+	["installing", () => recommendedRun()[6]!],
+	["done", () => recommendedRun()[7]!],
+];
+
+test("round 2 screens keep the exact width at 60/90/120/140 in every color mode, animated or not", () => {
+	for (const [name, make] of ROUND2) {
+		for (const mode of MODES) {
+			for (const width of [60, 90, 120, 140]) {
+				for (const animate of [true, false]) {
+					const view = draw(make(), width, mode, { animate });
+					for (const line of view.lines) assert.equal(vw(line), width, `${name} ${mode} ${width}: ${JSON.stringify(strip(line))}`);
+				}
+			}
+		}
+	}
+});
+
+test("help panel: at >=110 columns it sits to the right of the content, at 90 below it, below 70 below too; ? hides it", () => {
+	const subs = customRun().find(s => s.step === "subscriptions")!;
+	const screen = installerScreen(subs);
+	const focus = screen.help.focus!;
+	for (const width of [110, 140]) {
+		const lines = renderInstaller(screen, { width, mode: "none" }).lines.map(strip);
+		const title = lines.findIndex(l => l.includes("What is this?"));
+		assert.ok(title >= 0 && title < 4, `${width} panel starts at the top`);
+		assert.ok(lines[title]!.indexOf("What is this?") >= width / 2, `${width} panel is on the right`);
+		const joined = lines.join("\n");
+		for (const needle of [focus.technicalName, focus.file, screen.help.purpose.slice(0, 15)]) assert.ok(joined.includes(needle.slice(0, 15)), `${width} ${needle}`);
+		assert.match(joined, /What it is/);
+		assert.match(joined, /What happens/);
+		// the claude-bridge row and the panel share rows: it is a column, not a block below
+		assert.ok(lines.some(l => l.includes("[x] claude-bridge") && l.lastIndexOf("│") > 40));
+	}
+	for (const width of [90, 60]) {
+		const lines = renderInstaller(screen, { width, mode: "none" }).lines.map(strip);
+		const title = lines.findIndex(l => l.includes("What is this?"));
+		const buttons = lines.findIndex(l => l.includes("Next ▶"));
+		assert.ok(title > buttons, `${width}: help below the content`);
+		assert.ok(lines.some(l => l.includes(focus.technicalName)), `${width} technical name`);
+	}
+	assert.doesNotMatch(text(renderInstaller({ ...screen, helpOpen: true }, { width: 140, mode: "none" }).lines), /What is this\?/);
+});
+
+test("the notice about closing the setup is drawn above the buttons on every screen before Install", () => {
+	for (const state of [...recommendedRun(), ...customRun()]) {
+		const screen = installerScreen(state);
+		for (const width of [60, 90, 140]) {
+			const lines = renderInstaller(screen, { width, mode: "none" }).lines.map(strip);
+			const flat = lines.join("\n").replace(/\s+/g, " ");
+			if (!screen.notice) {
+				assert.ok(!flat.includes("nothing is applied"), `${screen.step} has no notice`);
+				continue;
+			}
+			if (width === 60) assert.ok(flat.includes(screen.notice), `${screen.step} notice`);
+			const at = lines.findIndex(l => l.includes("If you close the setup"));
+			const buttons = lines.findIndex(l => l.includes("[ Cancel ]"));
+			assert.ok(at >= 0 && at < buttons, `${screen.step} ${width} notice above the buttons`);
+		}
+	}
+});
+
+test("shortcuts are drawn as a key hint line and every enabled letter maps to its action", () => {
+	for (const make of [backupsState, tasksState]) {
+		const screen = installerScreen(make());
+		assert.ok(screen.shortcuts.length >= 3);
+		const out = text(renderInstaller(screen, { width: 140, mode: "none" }).lines);
+		for (const hint of screen.shortcuts) {
+			const { key: raw, label, action, enabled } = hint;
+			const shown = raw === " " ? "Space" : raw === "enter" ? "Enter" : raw;
+			assert.ok(out.includes(`${shown} ${label}`), `${screen.step} shows "${shown} ${label}"`);
+			if (enabled && raw !== "enter" && raw !== " ") assert.deepEqual(installerKey(screen, undefined, raw).actions, [action], `${screen.step} ${raw}`);
+		}
+	}
+	assert.match(text(renderInstaller(installerScreen(tasksState()), { width: 140, mode: "none" }).lines), /d Deep analysis/);
+});
+
+test("the backups step is keyboard driven: tick, change how to choose, create a backup; u/j reorder the focused member", () => {
+	let s = backupsState();
+	const press = (data: string) => {
+		for (const action of installerKey(installerScreen(s), undefined, canonicalKey(data)).actions) s = installerInput(s, action).state;
+	};
+	const pool = () => installerScreen(s).backupDetail!;
+	const beforeMethod = pool().method;
+	press("s");
+	assert.notEqual(pool().method, beforeMethod);
+	assert.equal(s.backupsTouched, true);
+	const ticked = s.draft.pools.map(p => p.candidates.join());
+	press(" ");
+	assert.notDeepEqual(s.draft.pools.map(p => p.candidates.join()), ticked);
+	// find a member that can move down, then move it with j and back with u
+	s = backupsState();
+	const shortcuts = () => installerScreen(s).shortcuts;
+	let guard = 0;
+	while (!shortcuts().find(h => h["key"] === "j")!.enabled && guard++ < 20) press("\x1b[B");
+	assert.ok(shortcuts().find(h => h["key"] === "j")!.enabled, "a member can move down");
+	const order = () => s.draft.pools.map(p => p.candidates.join());
+	const before = order();
+	press("j");
+	assert.notDeepEqual(order(), before);
+	press("u");
+	assert.deepEqual(order(), before);
+	press("c");
+	assert.ok(s.wizard, "c opens the new backup wizard");
+});
+
+test("a disabled shortcut falls back to the plain key: j still moves down when no member can move", () => {
+	const screen = installerScreen(tasksState());
+	assert.deepEqual(installerKey(screen, undefined, "j").actions, [{ type: "move", delta: 1 }]);
+	assert.deepEqual(installerKey(screen, undefined, "a").actions, [{ type: "button", id: "assign-recommended" }]);
+	assert.deepEqual(installerKey(screen, undefined, "A").actions, [{ type: "button", id: "assign-recommended" }]);
+});
+
+test("S12: Space in kitty, CSI-u, lock-modifier and modifyOtherKeys encodings toggles a subscription exactly once, through the canonicalization extension.ts uses", () => {
+	const subs = customRun().find(s => s.step === "subscriptions")!;
+	const run = (raw: string) => {
+		let s = subs;
+		for (const action of installerKey(installerScreen(s), undefined, canonicalKey(raw)).actions) s = installerInput(s, action).state;
+		return s.draft.enabled.length;
+	};
+	const all = subs.draft.enabled.length;
+	for (const raw of [" ", "\x1b[32u", "\x1b[32;1u", "\x1b[32;1:1u", "\x1b[32;1:2u", "\x1b[32;65u", "\x1b[32;129u", "\x1b[27;1;32~"]) assert.equal(run(raw), all - 1, JSON.stringify(raw));
+	// a key release never acts (the press already did)
+	for (const raw of ["\x1b[32;1:3u", "\x1b[13;1:3u", "\x1b[1;1:3B"]) assert.equal(canonicalKey(raw), "", JSON.stringify(raw));
+	assert.equal(run("\x1b[32;1:3u"), all);
+});
+
+test("S12: Enter, arrows, Tab and printable letters in CSI-u / modifyOtherKeys encodings reach the same actions as the legacy ones", () => {
+	assert.equal(canonicalKey("\x1b[13u"), "\r");
+	assert.equal(canonicalKey("\x1b[13;1:1u"), "\r");
+	assert.equal(canonicalKey("\x1b[27;1;13~"), "\r");
+	assert.equal(canonicalKey("\x1b[27u"), "\x1b");
+	assert.equal(canonicalKey("\x1b[9u"), "\t");
+	assert.equal(canonicalKey("\x1b[9;2u"), "\x1b[Z");
+	assert.equal(canonicalKey("\x1b[127u"), "\x7f");
+	assert.equal(canonicalKey("\x1b[1;1A"), "\x1b[A");
+	assert.equal(canonicalKey("\x1b[1;1:2B"), "\x1b[B");
+	assert.equal(canonicalKey("\x1b[106u"), "j");
+	assert.equal(canonicalKey("\x1b[63u"), "?");
+	assert.equal(canonicalKey("\x1b[100;2u"), "D");
+	assert.equal(canonicalKey("\x1b[27;1;117~"), "u");
+	// legacy bytes and unknown sequences pass through unchanged
+	for (const raw of [" ", "\r", "\x1b[A", "j", "\x1b[5~", "\x1b[99;5u"]) assert.equal(canonicalKey(raw), raw);
+});
+
+test("welcome: glossary, what the installer does and the star link (OSC 8 with color, plain URL without)", () => {
+	const screen = installerScreen(recommendedRun()[0]!);
+	assert.ok(screen.welcome);
+	for (const width of [60, 90, 140]) {
+		const out = text(renderInstaller(screen, { width, mode: "none" }).lines);
+		assert.ok(out.includes(screen.welcome!.definitionsTitle));
+		for (const d of screen.welcome!.definitions) assert.ok(out.includes(d.term), `${width} ${d.term}`);
+		assert.ok(out.includes(screen.welcome!.willDoTitle));
+		assert.ok(out.includes(screen.welcome!.star.url), `${width} url`);
+	}
+	for (const mode of ["truecolor", "ansi"] as const) {
+		const raw = renderInstaller(screen, { width: 100, mode }).lines.join("\n");
+		assert.ok(raw.includes(`\x1b]8;;${screen.welcome!.star.url}\x1b\\`), `${mode} hyperlink`);
+	}
+	assert.ok(!renderInstaller(screen, { width: 100, mode: "none" }).lines.join("\n").includes("\x1b]8"));
+});
+
+test("error screens: red-bordered box with what happened, what to do and the buttons; install failure offers Undo", () => {
+	for (const [make, buttons] of [[scanFailed, ["Retry", "Back"]], [installFailed, ["Retry", "Undo"]], [generic, ["Retry", "Back"]]] as const) {
+		const screen = installerScreen(make());
+		assert.ok(screen.error);
+		const out = text(renderInstaller(screen, { width: 100, mode: "none" }).lines);
+		assert.ok(out.includes("╭") && out.includes(screen.error!.title.slice(0, 20)));
+		assert.ok(out.replace(/\s+/g, " ").includes(screen.error!.what.slice(0, 25)));
+		for (const b of buttons) assert.ok(out.includes(b), b);
+		const red = renderInstaller(screen, { width: 100, mode: "truecolor" }).lines.find(l => strip(l).includes("╭"));
+		assert.match(red!, /38;2;228;59;68m[^\x1b]*╭/);
+	}
+	assert.ok(installerScreen(installFailed()).buttons.some(b => b.id === "undo"));
+});
+
+test("summary: narrative, review sentence, indented detail and closing line; blocked warnings in the warning color", () => {
+	const screen = installerScreen(blockedSummary());
+	const out = text(renderInstaller(screen, { width: 140, mode: "none" }).lines).replace(/\s+/g, " ");
+	assert.ok(out.includes(screen.summary!.narrative.slice(0, 40)));
+	assert.ok(out.includes(screen.summary!.review.slice(0, 40)));
+	assert.ok(out.includes(screen.summary!.closing.slice(0, 40)));
+	const flat = renderInstaller(screen, { width: 90, mode: "none" }).lines.map(strip);
+	const review = flat.findIndex(l => l.includes("So you can review"));
+	const closing = flat.findIndex(l => l.includes("If you agree"));
+	assert.ok(review >= 0 && closing > review);
+	const bullets = flat.flatMap((l, i) => (l.includes("•") ? [i] : []));
+	assert.ok(bullets.length >= screen.summary!.detail.length - 1);
+	assert.ok(bullets[0]! > review && bullets[bullets.length - 1]! < closing, "detail sits between the review sentence and the closing");
+	const gold = renderInstaller(screen, { width: 100, mode: "truecolor" }).lines.filter(l => /Legacy/.test(strip(l)) && /254;174;52/.test(l));
+	assert.ok(gold.length > 0, "blocked warning is gold");
+});
+
+test("pending deep analysis: spinner, elapsed seconds and an indeterminate bar; the button is disabled; reduced motion freezes it", () => {
+	const screen = installerScreen(pending());
+	assert.ok(screen.pending);
+	const out = text(draw(pending(), 100, "none").lines);
+	assert.ok(out.includes(screen.pending!.label.slice(0, 20)));
+	assert.match(out, /5 s/);
+	assert.match(out, /▰/);
+	assert.match(out, /▱/);
+	assert.match(out, /[▖▘▝▗]/);
+	assert.match(out, /\( Deep analysis/);
+	const frames = new Set([0, 1, 2, 3, 4, 5].map(frame => draw(pending(), 100, "none", { frame }).lines.join("\n")));
+	assert.ok(frames.size > 1, "animated");
+	const still = new Set([0, 1, 2, 3, 4, 5].map(frame => draw(pending(), 100, "none", { frame, animate: false }).lines.join("\n")));
+	assert.equal(still.size, 1, "frozen");
+	// d does nothing while it runs
+	assert.deepEqual(installerKey(screen, undefined, "d").actions, []);
+});
+
+test("confirmation: shown in a success line after the analysis", () => {
+	const screen = installerScreen(confirmed());
+	assert.ok(screen.confirmation);
+	const out = text(draw(confirmed(), 140, "none").lines).replace(/\s+/g, " ");
+	assert.ok(out.includes(`✓ ${screen.confirmation}`.slice(0, 40)));
+	const green = draw(confirmed(), 140, "truecolor").lines.find(l => strip(l).includes("✓ ") && strip(l).includes(screen.confirmation!.slice(0, 12)));
+	assert.match(green!, /56;183;100/);
+});
+
+test("how to choose: the backups step lists the methods of the focused backup with the current one marked", () => {
+	const screen = installerScreen(backupsState());
+	assert.ok(screen.backupDetail);
+	const out = text(renderInstaller(screen, { width: 140, mode: "none" }).lines);
+	for (const m of screen.backupDetail!.methods) assert.ok(out.includes(m.label), m.label);
+	assert.match(out, /\(●\) /);
+});
+
+test("the mascot sits in its own block on welcome, installing and done: never beside wrapped text", () => {
+	for (const [state, pose] of [[recommendedRun()[0]!, "idle"], [recommendedRun()[6]!, "working"], [recommendedRun()[7]!, "happy"]] as const) {
+		for (const width of [60, 90]) {
+			const lines = renderInstaller(installerScreen(state), { width, mode: "none", animate: false }).lines.map(strip);
+			const at = lines.findIndex(l => l.includes(".-----'-----."));
+			assert.ok(at >= 0, `${pose} ${width}`);
+			const own = lines.slice(at - 1, at + 4).map(l => l.slice(width >= 70 ? 27 : 0).trim());
+			for (const row of own) assert.ok(row === "" || /^[\s|_/\\().,'^on-]+$/.test(row), `${pose} ${width}: ${JSON.stringify(row)}`);
+		}
+	}
+	const other = renderInstaller(installerScreen(customRun().find(s => s.step === "subscriptions")!), { width: 90, mode: "none" }).lines.map(strip);
+	assert.ok(!other.some(l => l.includes(".-----'-----.")), "no mascot on the other steps");
+});
+
+test("round 2 i18n keys exist in en and es", () => {
+	for (const lang of ["en", "es"] as const) {
+		for (const name of ["help.what", "help.purpose", "help.if", "shortcuts", "key.space", "key.enter", "method.title", "pending.elapsed"]) {
+			assert.ok((installerMessages[lang] as Record<string, string>)[`installer.tui.${name}`], `${lang} ${name}`);
+		}
 	}
 });

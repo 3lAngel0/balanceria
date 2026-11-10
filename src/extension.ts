@@ -10,7 +10,7 @@ import { applyAdvisorReport, applyStepper, initStepper, type StepperCurrent } fr
 import { initScreen, renderStepper, stepperInput, type StepperEffect, type StepperEvent, type StepperTone, stepperThemeColor } from "./setup-stepper-view.ts";
 import type { InstallerAction } from "./installer-model.ts";
 import { nodeInstallFs, snapshotForInstall, undoInstall, type InstallSnapshot } from "./installer-plan.ts";
-import { hitInstaller, installerKey, renderInstaller, type InstallerHit } from "./installer-tui.ts";
+import { canonicalKey as installerCanonicalKey, hitInstaller, installerKey, renderInstaller, type InstallerHit } from "./installer-tui.ts";
 import { channelPromptInput, initChannelPrompt, renderChannelPrompt, type InstallChannel } from "./installer-channel.ts";
 import { initLangPrompt, langPromptInput, renderLangPrompt } from "./setup-lang-prompt.ts";
 import { BALANCER_MENU, balancerMenu, glossaryText, resolveBalancerArgs } from "./balancer-menu.ts";
@@ -1918,8 +1918,10 @@ export default function aiBalancer(pi: ExtensionAPI) {
 		}
 	};
 
-	/** Pi hands overlays raw input in either terminal protocol; the view works on the legacy sequences. */
+	/** Pi hands overlays raw input in either terminal protocol; the view works on the legacy sequences. The enhanced encodings (kitty CSI-u, modifyOtherKeys, key releases) are decoded by the pure installer-tui helper, the rest by Pi's own matcher. */
 	const canonicalKey = (data: string): string => {
+		const decoded = installerCanonicalKey(data);
+		if (decoded !== data) return decoded;
 		if (matchesKey(data, Key.escape)) return "\x1b";
 		if (matchesKey(data, Key.enter)) return "\r";
 		if (matchesKey(data, Key.space)) return " ";
@@ -1982,12 +1984,16 @@ export default function aiBalancer(pi: ExtensionAPI) {
 		const outcome = await ctx.ui.custom<InstallerOutcome>(
 			(tui, theme, _keybindings, done) => {
 				const mode = colorMode();
+				const animate = motionEnabled();
 				let focus: number | undefined;
 				let hits: InstallerHit[] = [];
 				let closed = false;
 				const redraw = () => {
 					if (!closed) tui.requestRender();
 				};
+				// The mascot, spinner and bar move on a FRAME_MS tick, only while this overlay is open and only when motion is allowed.
+				const motion = animate ? setInterval(redraw, FRAME_MS) : undefined;
+				motion?.unref?.();
 				session.onChange(redraw);
 				session.onEnd(outcome => done(outcome));
 				const apply = (action: InstallerAction) => {
@@ -1999,7 +2005,8 @@ export default function aiBalancer(pi: ExtensionAPI) {
 					render(width: number): string[] {
 						const inner = Math.max(20, width - 4);
 						const rows = Math.max(14, ((tui as { terminal?: { rows?: number } }).terminal?.rows ?? 40) - 6);
-						const view = renderInstaller(session.screen(), { width: inner, mode, focus, rows });
+						const now = Date.now();
+						const view = renderInstaller(session.screen(), { width: inner, mode, focus, rows, animate, frame: frameOf(now), now });
 						hits = view.hits;
 						const border = (text: string) => theme.fg("border", text);
 						const row = (text: string) => `${border("│")} ${truncateToWidth(text, inner, "…", true)} ${border("│")}`;
@@ -2025,6 +2032,7 @@ export default function aiBalancer(pi: ExtensionAPI) {
 					invalidate() {},
 					dispose() {
 						closed = true;
+						if (motion) clearInterval(motion);
 						session.close();
 					},
 				};
