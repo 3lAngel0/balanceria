@@ -168,12 +168,23 @@ Launch the configuration hub to auto-detect installed providers, configure pools
 /balancer setup
 ```
 
-`/balancer setup` opens a four-step overlay: **Providers → Strategy → Roles → Confirm**. Each step explains what it decides, the last step shows a diff of exactly what will be written, and nothing changes until you press **Save** (**Discard** or `Esc` leaves every file as it is). Keys: `←/→` steps, `↑/↓` rows, `Space`/`Enter` toggle or cycle, `u`/`d` reorder candidates, `s` save. Mouse clicks and the wheel work in fullscreen terminals only; elsewhere the keys do the same. Without a UI it falls back to the classic wizard, which you can also run with `/balancer setup classic`. On start it asks **Select language** (English / Español): `Enter` applies it to this run only, `P` saves it permanently, and the whole interface, Help included, switches at once. On the Roles step, the **Orchestrator mode** row (`m`, or `Space`/`Enter`) sets `organic` or `full-delegation` for the active profile (Gentle Shell 4.7.0 `workflow.orchestratorMode`).
+`/balancer setup` runs an installer: one decision per screen, the recommended option already marked, a step sidebar, `[Back] [Next] [Cancel]` buttons and a `[?] What is this?` box that shows the technical name and the file where each choice is saved. Nothing is written until the end, and you can always go back. Keys: `↑/↓` move, `Space` tick, `Enter` accept, `←/→` back / next, `Tab` buttons, `?` help, `Esc` cancel; mouse clicks work in fullscreen terminals only. It also works with `NO_COLOR` and in narrow terminals (the sidebar collapses to "Step N of M"). The step-by-step detail is in the [guide](docs/guide.md#10-installation--interactive-setup-hub).
 
-**Guided vs. Advanced mode.** After the language prompt, `/balancer setup` asks which mode to use:
+**How setup starts.** `/balancer setup` first asks **Select language** (English / Español): `Enter` applies it to this run only, `P` saves it permanently, and the whole interface, Help included, switches at once. Then it asks **Where do you want to install?**:
 
-- **Guided / Dummy** (`/balancer setup --dummy`, `-d`, `/balancer dummy`, or `D` in the Control Center overview): four acts. Acts 1–2 explain with an interactive balance animation (`Space`/`Enter`/`→` advance, `←` goes back, `s` skips to the stepper) what a provider, a pool and a profile are, and which files hold them. Act 3 is a guided pool creator (`n`, or the `[+ Create new pool]` row) with templates and a live cost warning when a pool mixes cheap `flash` models with expensive `claude-` quota. Act 4, on the Roles step, offers **Auto-assign** `[a]` (0 tokens) and **Deep Search** `[d]` (spends tokens: you pick the model that evaluates the roles).
-- **Advanced / Skip** (`/balancer setup --skip`, `-s`): straight to the stepper, no tutorial. `/balancer skip` opens the action menu directly.
+- **Install via terminal**: the installer opens in the terminal.
+- **Install via web**: the terminal shows the steps to run it in a browser and waits. It starts the web server on `127.0.0.1:8787` (this computer only; a server that is already running is reused as you configured it), shows the link with the token and an **[Open in browser]** button when there is a desktop, and over SSH prints the exact tunnel command to run on your own computer plus the link to open afterwards. Then it shows "Waiting for you to finish the installation in the browser..." with **[Cancel]**; when the browser finishes, the terminal shows the same "Done" summary. Cancel stops the server if the installer started it. The `/installer` page exists only while an installer is running, needs the token, accepts changes only from the same origin, and refuses them over plain-HTTP LAN (only `127.0.0.1` or HTTPS).
+
+**Install types.** **Recommended** (preselected: finds your subscriptions, sets everything up and jumps to the Summary), **Custom** (each choice is explained and you decide: subscriptions, backups, agent tasks and main agent) or **Advanced** (the technical stepper, same as `setup --skip`). If ai-balancer is already installed, the first screen offers **Modify** (Custom with your current setup loaded), **Repair** (finds agent tasks that point to backups or models that no longer exist and proposes fixes) or **Start from scratch** (saves `.bak` copies and sets the recommended configuration again). The **Summary** lists what will change, file by file, and before writing a file a copy is saved next to it as `.bak`. The **Done** screen offers **[Open the panel]**, **[Exit]** and **[Undo everything]**, which restores the `.bak` copies made by this install.
+
+**Plain names.** The installer says *subscription* (technical name: provider), *backup* (pool), *agent task* (role), *how to choose which to use first* (strategy) and *main agent* (orchestrator mode). The technical names appear only in the `[?]` box and in Advanced.
+
+**Advanced (technical stepper).** A four-step overlay: **Providers → Strategy → Roles → Confirm**. Each step explains what it decides, the last step shows a diff of exactly what will be written, and nothing changes until you press **Save** (**Discard** or `Esc` leaves every file as it is). Keys: `←/→` steps, `↑/↓` rows, `Space`/`Enter` toggle or cycle, `u`/`d` reorder candidates, `s` save. Mouse clicks and the wheel work in fullscreen terminals only; elsewhere the keys do the same. Without a UI it falls back to the classic wizard, which you can also run with `/balancer setup classic`. On the Roles step, the **Orchestrator mode** row (`m`, or `Space`/`Enter`) sets `organic` or `full-delegation` for the active profile (Gentle Shell 4.7.0 `workflow.orchestratorMode`).
+
+**Shortcuts into setup.**
+
+- `/balancer setup --dummy` / `-d`, `/balancer dummy`, or `D` in the Control Center (`d` on the Overview tab): asks the language, then opens the installer in the terminal without the terminal/web question.
+- `/balancer setup --skip` / `-s`: asks the language, then goes straight to the technical stepper. `/balancer skip` opens the action menu directly.
 
 **Language.** Set it explicitly with `AI_BALANCER_LANG=es|en`. Priority: `AI_BALANCER_LANG` > `LC_ALL` > `LC_MESSAGES` > `LANG` > `LANGUAGE`; `/balancer lang es|en|auto` persists the choice in `~/.gentle-shell/agent/settings.json`.
 
@@ -207,8 +218,11 @@ Select a pool model directly in chat via `/model pool/claude-sonnet-5-5` or conf
 | `/balancer` | Opens the Control Center overlay (click or use the keys). `/balancer roles\|pools\|advisor` jumps to a tab; `/balancer menu` (or `/` inside the overlay) lists every action. |
 | `/balancer panel` or `Ctrl+Alt+B` | Toggle live sidebar overlay and 4-tab Control Center. |
 | `/balancer usage` or `Ctrl+Alt+U` | Open full 5-tab Usage Console (Now, Quotas, Days, Sessions, HUD). |
-| `/balancer setup` | Open the step-by-step setup overlay (Providers → Strategy → Roles → Confirm). `/balancer setup classic` runs the previous prompt-based wizard. |
-| `/balancer setup --dummy` / `-d` / `--skip` / `-s` | Force Guided (Dummy) or Advanced (Skip) mode. `/balancer skip` opens the action menu. |
+| `/balancer setup` | Open the installer: language, then **Install via terminal** or **Install via web**. |
+| `/balancer setup --dummy` / `-d`, `/balancer dummy`, or `D` in the Control Center | Open the installer in the terminal (language first, no terminal/web question). |
+| `/balancer setup --skip` / `-s` | Go straight to the technical stepper (Providers → Strategy → Roles → Confirm), after the language prompt. |
+| `/balancer skip` | Open the action menu directly. |
+| `/balancer setup classic` | Run the previous prompt-based wizard. |
 | `/balancer lang [es\|en\|auto]` | Inspect or switch active UI language without restarting. |
 | `/balancer help` | Short glossary: pool, candidate, loan, grant, circuit breaker, role, window pace, context re-sent. |
 | `/balancer serve [lan] [port]` | Start real-time authenticated web dashboard (supports LAN mode & TLS). |

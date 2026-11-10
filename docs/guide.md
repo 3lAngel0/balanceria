@@ -498,12 +498,60 @@ gentle-shell install <path-to-repo>
 ```
 
 ### Interactive Setup Hub (`/balancer setup`)
-Running `/balancer setup` opens a step-by-step overlay: **Providers → Strategy → Roles → Confirm**. Each step shows a short description; the Confirm step shows a diff of what Save will write to `pools.json`, `integrations.json` and `profiles.json`. Nothing is written until **Save**; **Discard** (or `Esc`, which asks first when you have edits) leaves every file untouched. Keys: `←/→`/`h`/`l` or `Tab`/`Shift+Tab` change step, `↑/↓`/`j`/`k` move between rows, `Space`/`Enter` toggle or cycle (provider on/off, candidate on/off, pool strategy, role model), `u`/`d` reorder a candidate, `t` cycles a role's thinking level, `s` saves on the Confirm step. Mouse (click breadcrumb steps, rows and buttons; wheel scrolls) works only when Pi runs fullscreen (`TuiAltScreen`); otherwise the overlay is keyboard-only. Without a UI, or if overlays are unavailable, `/balancer setup` falls back to the classic wizard. The AI role advisor is only in the classic wizard. On start it asks **Select language** (English / Español): `Enter` applies it to this run only, `P` saves it permanently, and the whole interface, Help included, switches at once. On the Roles step, the **Orchestrator mode** row (`m`, or `Space`/`Enter`) sets `organic` or `full-delegation` for the active profile (Gentle Shell 4.7.0 `workflow.orchestratorMode`).
+Running `/balancer setup` starts an installer: one decision per screen, the recommended option already marked, a step sidebar (✓ done, ● current, ○ pending), `[Back] [Next] [Cancel]` buttons, a chart that reflects what you chose, and a `[?] What is this?` box that shows the technical name (in gray) and the file where each choice is saved. Nothing is written until the end, and you can always go back. Keys: `↑/↓` move, `Space` tick, `Enter` accept, `←/→` back / next, `Tab` buttons, `?` help, `Esc` cancel. Mouse clicks work only when Pi runs fullscreen (`TuiAltScreen`). It also works with `NO_COLOR` and in narrow terminals (the sidebar collapses to "Step N of M"). Without a UI, or if overlays are unavailable, `/balancer setup` falls back to the classic wizard. Both the terminal and the web channel draw the same screens from one shared model, so texts, options and recommendations are identical.
 
-**Guided vs. Advanced mode.** After the language prompt, `/balancer setup` asks which mode to use:
+**How setup starts.** `/balancer setup` first asks **Select language** (English / Español): `Enter` applies it to this run only, `P` saves it permanently, and the whole interface, Help included, switches at once. Then it asks **Where do you want to install?**:
 
-- **Guided / Dummy** (`/balancer setup --dummy`, `-d`, `/balancer dummy`, or `D` in the Control Center overview): four acts. Acts 1–2 explain with an interactive balance animation (`Space`/`Enter`/`→` advance, `←` goes back, `s` skips to the stepper) what a provider, a pool and a profile are, and which files hold them. Act 3 is a guided pool creator (`n`, or the `[+ Create new pool]` row) with templates and a live cost warning when a pool mixes cheap `flash` models with expensive `claude-` quota. Act 4, on the Roles step, offers **Auto-assign** `[a]` (0 tokens) and **Deep Search** `[d]` (spends tokens: you pick the model that evaluates the roles).
-- **Advanced / Skip** (`/balancer setup --skip`, `-s`): straight to the stepper, no tutorial. `/balancer skip` opens the action menu directly.
+- **Install via terminal**: the installer opens in the terminal.
+- **Install via web**: the terminal shows the specific steps and waits.
+  1. The web server starts on `127.0.0.1:8787` (this computer only). If a web server is already running it is reused exactly as you configured it, never widened.
+  2. The terminal shows the link with the token and, when there is a desktop session, an **[Open in browser]** button (`O`).
+  3. In a remote session (SSH) it also prints the exact tunnel command to run on your own computer and leave open, and then the link to open in your computer's browser.
+  4. It shows "Waiting for you to finish the installation in the browser..." with **[Cancel]** (`Esc`). When the browser finishes, the terminal shows the same "Done" summary. Cancel stops the server if the installer started it; if you ended with **[Open the panel]**, the server stays up because it also serves the panel.
+
+  The `/installer` page and its `GET`/`POST /api/installer` API exist only while an installer session is running and use the web server's existing protections: the token, a host check and a CSP. Changes (`POST`) are accepted only from the same origin and only over `127.0.0.1` or HTTPS; over plain-HTTP LAN they are refused (`actions are permitted only over loopback or HTTPS`). If you want to reach the page from another computer, use an SSH tunnel (above) or `/balancer serve lan` with TLS.
+
+**Plain names.** The installer avoids jargon. Each plain word maps to a technical name, which you only see in the `[?]` box and in Advanced:
+
+| The installer says | Technical name | Stored in |
+|---|---|---|
+| Subscription | provider | `integrations.json` |
+| Backup | pool | `pools.json` |
+| Agent task | role | `profiles.json` |
+| How to choose which to use first | strategy (`hybrid`, `waterfall`, `highest-quota`) | `pools.json` |
+| Main agent: works on its own / hands out everything | orchestrator mode (`organic` / `full-delegation`) | `profiles.json` |
+
+**Install types.** The second screen asks how to install:
+
+- **Recommended** (preselected): detects your subscriptions, builds everything and jumps to the Summary.
+- **Custom**: each choice is explained and you decide.
+- **Advanced**: the technical stepper (below), the same as `/balancer setup --skip`.
+
+If ai-balancer is already installed, the first screen offers instead:
+
+- **Modify**: Custom with your current setup loaded, so you only adjust what you want.
+- **Repair**: finds agent tasks that point to backups or models that no longer exist and proposes fixes (ticked ones are applied).
+- **Start from scratch**: saves `.bak` copies and sets the recommended configuration again.
+
+**Installer steps** (Recommended and Repair visit only some of them):
+
+1. **Welcome**: what ai-balancer does, how long it takes (about 2 minutes), and that nothing changes until the end.
+2. **Install type** (Recommended / Custom / Advanced).
+3. **Finding subscriptions**: progress with a ✓ for each one found, without spending quota. If none is found it shows what to do (sign in to a subscription) and **[Retry]**.
+4. **Your subscriptions**: tick the ones ai-balancer may use; each shows its models and that it has its own usage limit.
+5. **Backups**: a diagram that changes with what you tick (Your agent → Backup → 1st subscription, 2nd subscription if the 1st runs out). It suggests one backup for each model offered by more than one subscription; models in a single subscription say they need no backup. **[+ Create another backup]** asks the name or a template, which subscriptions go in (with the cost alert when a cheap Flash model mixes with Claude), their order, and how to choose which to use first (Mixed, In order, Most room left), each with an example.
+6. **Agent tasks**: each task with a plain name ("Reading files", "Writing code", "Checking the result"...), what it does, how much quota it uses and the recommendation. **[Assign the recommended]** spends no quota; **[Deep analysis (uses quota)]** lists the tasks and asks which model to use for the analysis.
+7. **Main agent**: does it work on its own, or hand out all the work.
+8. **Summary**: what will change, in plain words and file by file, and that a `.bak` copy of each file is saved before it is written.
+9. **Installing**: progress with a ✓ for saving the copies, setting up the backups, assigning the agent tasks and checking that each subscription is signed in (no quota spent).
+10. **Done**: what changed, with **[Open the panel]**, **[Exit]** and **[Undo everything]**, which restores the `.bak` copies (`pools.json.bak`, `integrations.json.bak`, `profiles.json.bak`) made by this install.
+
+**Advanced (technical stepper).** A four-step overlay: **Providers → Strategy → Roles → Confirm**. Each step shows a short description; the Confirm step shows a diff of what Save will write to `pools.json`, `integrations.json` and `profiles.json`. Nothing is written until **Save**; **Discard** (or `Esc`, which asks first when you have edits) leaves every file untouched. Keys: `←/→`/`h`/`l` or `Tab`/`Shift+Tab` change step, `↑/↓`/`j`/`k` move between rows, `Space`/`Enter` toggle or cycle (provider on/off, candidate on/off, pool strategy, role model), `u`/`d` reorder a candidate, `t` cycles a role's thinking level, `s` saves on the Confirm step. Mouse (click breadcrumb steps, rows and buttons; wheel scrolls) works only when Pi runs fullscreen (`TuiAltScreen`); otherwise the overlay is keyboard-only. Without a UI, or if overlays are unavailable, `/balancer setup` falls back to the classic wizard. The AI role advisor is only in the classic wizard. On the Roles step, the **Orchestrator mode** row (`m`, or `Space`/`Enter`) sets `organic` or `full-delegation` for the active profile (Gentle Shell 4.7.0 `workflow.orchestratorMode`).
+
+**Shortcuts into setup.**
+
+- `/balancer setup --dummy` / `-d`, `/balancer dummy`, or `D` in the Control Center (`d` on the Overview tab): asks the language, then opens the installer in the terminal without the terminal/web question.
+- `/balancer setup --skip` / `-s`: asks the language, then goes straight to the technical stepper. `/balancer skip` opens the action menu directly.
 
 **Language.** Set it explicitly with `AI_BALANCER_LANG=es|en`. Priority: `AI_BALANCER_LANG` > `LC_ALL` > `LC_MESSAGES` > `LANG` > `LANGUAGE`; `/balancer lang es|en|auto` persists the choice in `~/.gentle-shell/agent/settings.json`.
 
@@ -551,8 +599,10 @@ Operational overlay showing real-time subscription burn velocity (`+X%/h`), rese
 | `/balancer` | *(none)* | Opens the Control Center overlay; `roles`, `pools`, `advisor` jump to a tab, `menu` lists every action. Mouse works under the alternate screen only. |
 | `/balancer panel` | *(none)* | Toggles sidebar overlay and Control Center (`Ctrl+Alt+B`). |
 | `/balancer usage` | *(none)* | Opens 5-tab usage and quota console (`Ctrl+Alt+U`). |
-| `/balancer setup` | *(none)* | Opens the step-by-step setup overlay. |
-| `/balancer setup --dummy` / `-d`, `--skip` / `-s` | *(none)* | Force Guided (Dummy) or Advanced (Skip) mode. `/balancer dummy` is an alias; `/balancer skip` opens the action menu. |
+| `/balancer setup` | *(none)* | Opens the installer: language, then **Install via terminal** or **Install via web**. |
+| `/balancer setup --dummy` / `-d`, `/balancer dummy`, or `D` in the Control Center | *(none)* | Opens the installer in the terminal (language first, no terminal/web question). |
+| `/balancer setup --skip` / `-s` | *(none)* | Goes straight to the technical stepper (Providers → Strategy → Roles → Confirm), after the language prompt. |
+| `/balancer skip` | *(none)* | Opens the action menu directly. |
 | `/balancer setup classic` | *(none)* | Runs the previous prompt-based setup wizard (includes the AI role advisor). |
 | `/balancer refresh` | *(none)* | Triggers immediate poll of Antigravity usage. |
 | `/balancer report` | *(none)* | Generates standalone offline HTML report (`report.html`). |
