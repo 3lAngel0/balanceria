@@ -12,6 +12,7 @@ import type { InstallerAction } from "./installer-model.ts";
 import { nodeInstallFs, snapshotForInstall, undoInstall, type InstallSnapshot } from "./installer-plan.ts";
 import { canonicalKey as installerCanonicalKey, hitInstaller, installerKey, renderInstaller, type InstallerHit } from "./installer-tui.ts";
 import { channelPromptInput, initChannelPrompt, renderChannelPrompt, type InstallChannel } from "./installer-channel.ts";
+import { applyLanFirewall, initRemoteForwardState, remoteForwardInput, renderRemoteForwardPrompt, startLanForwarder, type RemoteForwardOption } from "./installer-remote-forward.ts";
 import { initLangPrompt, langPromptInput, renderLangPrompt } from "./setup-lang-prompt.ts";
 import { BALANCER_MENU, balancerMenu, glossaryText, resolveBalancerArgs } from "./balancer-menu.ts";
 import { initLang, getLang, setLang, saveLangSetting, t } from "./i18n/index.ts";
@@ -1838,6 +1839,38 @@ export default function aiBalancer(pi: ExtensionAPI) {
 		return [border(`╭${"─".repeat(inner + 2)}╮`), ...lines.map(row), border(`╰${"─".repeat(inner + 2)}╯`)];
 	};
 
+		const promptRemoteForward = async (ctx: ExtensionContext): Promise<RemoteForwardOption | undefined> => {
+		let state = initRemoteForwardState();
+		const mode = colorMode();
+		return ctx.ui.custom<RemoteForwardOption | undefined>(
+			(tui, theme, _keybindings, done) => {
+				const finish = () => {
+					if (state.cancelled) done(undefined);
+					else if (state.done) done(state.selected);
+					else tui.requestRender();
+				};
+				return {
+				render(width: number): string[] {
+					return framed(theme, width, renderRemoteForwardPrompt(state, Math.max(20, width - 4), mode));
+				},
+				handleInput(data: string) {
+					state = remoteForwardInput(state, { type: "key", data: canonicalKey(data) });
+					finish();
+				},
+				handleMouse(event: TuiMouseEvent): TuiMouseEventResult | undefined {
+					if (event.type !== "click" || event.button !== "left") return undefined;
+					state = remoteForwardInput(state, { type: "mouse", kind: "click", x: event.x - CONTENT_X, y: event.y - CONTENT_Y });
+					finish();
+					return { handled: true, render: true };
+				},
+				invalidate() {},
+				dispose() {},
+				};
+			},
+			{ overlay: true, overlayOptions: { width: "76%", minWidth: 50, anchor: "center" } },
+		);
+	};
+
 	const promptInstallChannel = async (ctx: ExtensionContext): Promise<InstallChannel | undefined> => {
 		let state = initChannelPrompt();
 		const mode = colorMode();
@@ -2060,6 +2093,31 @@ export default function aiBalancer(pi: ExtensionAPI) {
 		const session = newInstallerSession(ctx);
 		setInstallerSession(session);
 		const remote = Boolean(process.env.SSH_CONNECTION || process.env.SSH_TTY);
+
+		let lanForwarder: { port: number; lanUrls: (token: string) => string[]; close: () => Promise<void> } | undefined;
+		if (remote && ctx.hasUI && typeof ctx.ui?.custom === "function") {
+			const choice = await promptRemoteForward(ctx);
+			if (choice === undefined) {
+				session.close();
+				if (started) await stopServing();
+				return;
+			}
+			if (choice === "lan") {
+				try {
+					lanForwarder = await startLanForwarder(server.port);
+				} catch (err) {
+					ctx.ui.notify(`ai-balancer: ${err instanceof Error ? err.message : String(err)}`, "warning");
+				}
+			} else if (choice === "firewall") {
+				const fw = await applyLanFirewall(server.port);
+				if (fw.success) {
+					ctx.ui.notify(`ai-balancer: ${t("installer.remote.firewallSuccess")}${fw.command ? ` (${fw.command})` : ""}`, "info");
+				} else {
+					ctx.ui.notify(`ai-balancer: ${t("installer.remote.firewallFailed", { error: fw.message })}`, "warning");
+				}
+			}
+		}
+
 		const link = server.url.replace("/?token=", "/installer?token=");
 		const lanLinks = server.lan ? server.lanUrls.map(url => url.replace("/?token=", "/installer?token=")) : [];
 		const opener = process.platform === "darwin" ? "open" : process.platform === "linux" && (process.env.DISPLAY || process.env.WAYLAND_DISPLAY) ? "xdg-open" : undefined;
@@ -2082,6 +2140,19 @@ export default function aiBalancer(pi: ExtensionAPI) {
 						if (key === "enter" || key === "escape") finishWith(session.outcome);
 					} else if (key === "o" && canOpen) {
 						execFile(opener!, [link], () => {});
+					} else if (key === "f") {
+						if (lanForwarder) {
+							lanForwarder.close().catch(() => {});
+							lanForwarder = undefined;
+							tui.requestRender();
+						} else {
+							startLanForwarder(server.port).then(f => {
+								lanForwarder = f;
+								tui.requestRender();
+							}).catch(err => {
+								ctx.ui.notify(`ai-balancer: ${err instanceof Error ? err.message : String(err)}`, "warning");
+							});
+						}
 					} else if (key === "escape" || key === "cancel") {
 						phase = "cancelled";
 						finishWith(undefined);
@@ -2093,7 +2164,11 @@ export default function aiBalancer(pi: ExtensionAPI) {
 					const buttons: { y: number; key: string }[] = [];
 					lines.push(t(started ? "installer.web.started" : "installer.web.reused", { port: server.port }), "");
 					lines.push(t("installer.web.link"), `  ${link}`);
-					for (const url of lanLinks) lines.push(`  ${t("installer.web.lan", { urls: url })}`);
+					const allLan = [...lanLinks, ...(lanForwarder ? lanForwarder.lanUrls(server.url.split("token=")[1] ?? "") : [])];
+					for (const url of allLan) lines.push(`  ${t("installer.web.lan", { urls: url })}`);
+					if (lanForwarder) {
+						lines.push(t("installer.remote.forwarding", { port: lanForwarder.port }));
+					}
 					if (canOpen) {
 						buttons.push({ y: lines.length, key: "o" });
 						lines.push(`  [ ${t("installer.web.open")} ]`);
@@ -2131,12 +2206,14 @@ export default function aiBalancer(pi: ExtensionAPI) {
 					},
 					invalidate() {},
 					dispose() {
+						if (lanForwarder) lanForwarder.close().catch(() => {});
 						session.close();
 					},
 				};
 			},
 			{ overlay: true, overlayOptions: { width: "90%", minWidth: 72, anchor: "center" } },
 		);
+		if (lanForwarder) await lanForwarder.close().catch(() => {});
 		setInstallerSession(undefined);
 		session.close();
 		if (outcome === undefined) {
