@@ -5,6 +5,7 @@ import { setupMessages } from "./messages/setup.ts";
 import { hudMessages } from "./messages/hud.ts";
 import { opsMessages } from "./messages/ops.ts";
 import { webMessages } from "./messages/web.ts";
+import { installerMessages } from "./messages/installer.ts";
 
 export type Lang = "en" | "es";
 
@@ -103,6 +104,7 @@ const catalogs: Record<Lang, Record<string, string>> = {
 		...hudMessages.en,
 		...opsMessages.en,
 		...webMessages.en,
+		...installerMessages.en,
 	},
 	es: {
 		...menuMessages.es,
@@ -110,6 +112,7 @@ const catalogs: Record<Lang, Record<string, string>> = {
 		...hudMessages.es,
 		...opsMessages.es,
 		...webMessages.es,
+		...installerMessages.es,
 	},
 };
 
