@@ -418,14 +418,20 @@ export function installerPageScript(): string {
 		}
 		fetch("/api/installer", options)
 			.then(function(res) {
+				if (res.status === 409) {
+					return res.json().then(function(data) {
+						busy = false;
+						view = data;
+						render();
+					});
+				}
 				if (!res.ok) throw new Error("HTTP " + res.status);
-				return res.json();
-			})
-			.then(function(data) {
-				busy = false;
-				view = data;
-				render();
-				schedulePoll();
+				return res.json().then(function(data) {
+					busy = false;
+					view = data;
+					render();
+					schedulePoll();
+				});
 			})
 			.catch(function(err) {
 				busy = false;
@@ -459,6 +465,25 @@ export function installerPageScript(): string {
 	function render() {
 		while (app.firstChild) app.removeChild(app.firstChild);
 		if (!view) return;
+
+		if (view.finished) {
+			if (timer) clearTimeout(timer);
+			var isExit = view.outcome === "exit";
+			var title = isExit ? (view.text.cancelled || "Instalación cancelada") : (view.text.closed || "Instalación terminada");
+			var msg = isExit ? (view.text.cancelledHint || view.text.closed) : (view.outcome === "panel" ? view.text.panel : view.outcome === "advanced" ? view.text.advanced : view.text.closed);
+
+			var container = el("div", { class: "app" + (view.reduceMotion ? " still" : "") },
+				el("div", { class: "talk", style: "max-width: 600px; margin: 40px auto; text-align: center;" },
+					el("div", { class: "who", style: "margin: 0 auto 16px auto;" }, renderCapybara(isExit ? "idle" : "happy")),
+					el("div", { class: "pixel-card", style: "padding: 24px;" },
+						el("h2", { text: title, style: "margin-bottom: 12px;" }),
+						el("p", { text: msg, style: "color: var(--muted); margin-bottom: 8px;" })
+					)
+				)
+			);
+			app.appendChild(container);
+			return;
+		}
 
 		var screen = view.screen;
 		var container = el("div", { class: "app" + (view.reduceMotion ? " still" : "") });

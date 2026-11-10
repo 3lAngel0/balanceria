@@ -282,6 +282,8 @@ export function installerView(session: InstallerSession): Record<string, unknown
 			closed: t("installer.web.page.closed"),
 			advanced: t("installer.web.page.advanced"),
 			panel: t("installer.web.page.panel"),
+			cancelled: t("installer.web.cancelled"),
+			cancelledHint: t("installer.web.page.cancelledHint"),
 			error: t("installer.web.page.error", { error: "{error}" }),
 			members: (screen.diagram?.members ?? []).map(m => (m.state === "active" ? `✓ ${t("installer.tui.diagram.active")}` : t("installer.tui.diagram.standby", { n: m.order - 1 }))),
 		},

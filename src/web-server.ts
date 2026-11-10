@@ -359,8 +359,8 @@ async function routeInstaller(req: IncomingMessage, res: ServerResponse, path: s
 			sendText(res, 403, "ai-balancer: cross-origin request refused.\n");
 			return true;
 		}
-		if (!tls && !isLoopbackHost(req.headers.host)) {
-			sendJson(res, 403, { ok: false, message: "actions are permitted only over loopback or HTTPS" });
+		if (!tls && !isAllowedHost(req.headers.host, lan)) {
+			sendJson(res, 403, { ok: false, message: "actions are permitted only over loopback, LAN, or HTTPS" });
 			return true;
 		}
 		const body = await readJsonBody(req, res, "the installer action", "is");

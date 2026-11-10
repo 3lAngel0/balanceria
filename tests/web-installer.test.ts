@@ -241,6 +241,28 @@ test("only GET and POST reach the installer API", async () => {
 	}
 });
 
+test("cancelling in web installer finishes session gracefully and does not throw 409", async () => {
+	const h = await harness();
+	try {
+		const reply1 = await post(h, { type: "button", id: "cancel" });
+		assert.equal(reply1.status, 200);
+		const data1 = reply1.json();
+		assert.equal(data1.finished, true);
+		assert.equal(data1.outcome, "exit");
+		assert.ok(data1.text.cancelled);
+		assert.ok(data1.text.cancelledHint);
+
+		// Second click/post returns 409 with finished state
+		const reply2 = await post(h, { type: "button", id: "cancel" });
+		assert.equal(reply2.status, 409);
+		const data2 = reply2.json();
+		assert.equal(data2.finished, true);
+		assert.equal(data2.outcome, "exit");
+	} finally {
+		await h.cleanup();
+	}
+});
+
 test("a recommended install writes through the injected deps and finishes with the terminal callback", async () => {
 	const h = await harness();
 	try {

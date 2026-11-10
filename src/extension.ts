@@ -2120,10 +2120,46 @@ export default function aiBalancer(pi: ExtensionAPI) {
 
 	/** The web channel: the installer page runs in the browser, this overlay tells the user how to reach it and waits. */
 	const runWebInstall = async (ctx: ExtensionContext): Promise<void> => {
+		const remote = Boolean(process.env.SSH_CONNECTION || process.env.SSH_TTY);
+		let lanMode = false;
+
+		if (remote && ctx.hasUI && typeof ctx.ui?.custom === "function") {
+			let forwardChoice: RemoteForwardOption | undefined;
+			while (!forwardChoice) {
+				const choice = await promptRemoteForward(ctx);
+				if (choice === undefined) {
+					return;
+				}
+				if (choice === "lan") {
+					lanMode = true;
+					forwardChoice = "lan";
+				} else if (choice === "firewall") {
+					const details = await getFirewallDetails(DEFAULT_WEB_PORT);
+					const action = await promptFirewallAction(ctx, details);
+					if (action === "run" && details.commandString) {
+						const res = await runInteractiveCommand(details.commandString);
+						if (res.success) {
+							ctx.ui.notify(`ai-balancer: ${t("installer.remote.firewallSuccess")}`, "info");
+						} else {
+							ctx.ui.notify(`ai-balancer: ${t("installer.remote.firewallFailed", { error: `Exit code ${res.code}` })}`, "warning");
+						}
+						lanMode = true;
+						forwardChoice = "firewall";
+					}
+				} else {
+					forwardChoice = choice;
+				}
+			}
+		}
+
+		const existing = runningWebServer();
+		if (existing && existing.lan !== lanMode) {
+			await stopServing();
+		}
+
 		let served: { server: WebServer; started: boolean };
 		try {
-			// Never wider than the user configured: a running server is reused as it is, a new one listens on 127.0.0.1 only.
-			served = await startServing({ port: DEFAULT_WEB_PORT, tokenFile: WEB_TOKEN_FILE, handlers: webHandlers() });
+			served = await startServing({ port: DEFAULT_WEB_PORT, lan: lanMode, tokenFile: WEB_TOKEN_FILE, handlers: webHandlers() });
 		} catch (error) {
 			const running = runningWebServer();
 			if (!running) {
@@ -2135,42 +2171,6 @@ export default function aiBalancer(pi: ExtensionAPI) {
 		const { server, started } = served;
 		const session = newInstallerSession(ctx);
 		setInstallerSession(session);
-		const remote = Boolean(process.env.SSH_CONNECTION || process.env.SSH_TTY);
-
-		let lanForwarder: { port: number; lanUrls: (token: string) => string[]; close: () => Promise<void> } | undefined;
-		if (remote && ctx.hasUI && typeof ctx.ui?.custom === "function") {
-			let forwardChoice: RemoteForwardOption | undefined;
-			while (!forwardChoice) {
-				const choice = await promptRemoteForward(ctx);
-				if (choice === undefined) {
-					session.close();
-					if (started) await stopServing();
-					return;
-				}
-				if (choice === "lan") {
-					try {
-						lanForwarder = await startLanForwarder(server.port);
-					} catch (err) {
-						ctx.ui.notify(`ai-balancer: ${err instanceof Error ? err.message : String(err)}`, "warning");
-					}
-					forwardChoice = "lan";
-				} else if (choice === "firewall") {
-					const details = await getFirewallDetails(server.port);
-					const action = await promptFirewallAction(ctx, details);
-					if (action === "run" && details.commandString) {
-						const res = await runInteractiveCommand(details.commandString);
-						if (res.success) {
-							ctx.ui.notify(`ai-balancer: ${t("installer.remote.firewallSuccess")}`, "info");
-						} else {
-							ctx.ui.notify(`ai-balancer: ${t("installer.remote.firewallFailed", { error: `Exit code ${res.code}` })}`, "warning");
-						}
-						forwardChoice = "firewall";
-					}
-				} else {
-					forwardChoice = choice;
-				}
-			}
-		}
 
 		const link = server.url.replace("/?token=", "/installer?token=");
 		const lanLinks = server.lan ? server.lanUrls.map(url => url.replace("/?token=", "/installer?token=")) : [];
@@ -2185,28 +2185,20 @@ export default function aiBalancer(pi: ExtensionAPI) {
 				let rows: { y: number; key: string }[] = [];
 				const finishWith = (value: InstallerOutcome | undefined) => done(value);
 				session.onChange(() => tui.requestRender());
-				session.onEnd(() => {
-					phase = "done";
-					tui.requestRender();
+				session.onEnd(finalOutcome => {
+					if (finalOutcome === "exit") {
+						phase = "cancelled";
+						finishWith(undefined);
+					} else {
+						phase = "done";
+						tui.requestRender();
+					}
 				});
 				const press = (key: string) => {
 					if (phase === "done") {
 						if (key === "enter" || key === "escape") finishWith(session.outcome);
 					} else if (key === "o" && canOpen) {
 						execFile(opener!, [link], () => {});
-					} else if (key === "f") {
-						if (lanForwarder) {
-							lanForwarder.close().catch(() => {});
-							lanForwarder = undefined;
-							tui.requestRender();
-						} else {
-							startLanForwarder(server.port).then(f => {
-								lanForwarder = f;
-								tui.requestRender();
-							}).catch(err => {
-								ctx.ui.notify(`ai-balancer: ${err instanceof Error ? err.message : String(err)}`, "warning");
-							});
-						}
 					} else if (key === "escape" || key === "cancel") {
 						phase = "cancelled";
 						finishWith(undefined);
@@ -2218,11 +2210,7 @@ export default function aiBalancer(pi: ExtensionAPI) {
 					const buttons: { y: number; key: string }[] = [];
 					lines.push(t(started ? "installer.web.started" : "installer.web.reused", { port: server.port }), "");
 					lines.push(t("installer.web.link"), `  ${link}`);
-					const allLan = [...lanLinks, ...(lanForwarder ? lanForwarder.lanUrls(server.url.split("token=")[1] ?? "") : [])];
-					for (const url of allLan) lines.push(`  ${t("installer.web.lan", { urls: url })}`);
-					if (lanForwarder) {
-						lines.push(t("installer.remote.forwarding", { port: lanForwarder.port }));
-					}
+					for (const url of lanLinks) lines.push(`  ${t("installer.web.lan", { urls: url })}`);
 					if (canOpen) {
 						buttons.push({ y: lines.length, key: "o" });
 						lines.push(`  [ ${t("installer.web.open")} ]`);
@@ -2253,21 +2241,19 @@ export default function aiBalancer(pi: ExtensionAPI) {
 					},
 					handleMouse(event: TuiMouseEvent): TuiMouseEventResult | undefined {
 						if (event.type !== "click" || event.button !== "left") return undefined;
-						const hit = rows.find(r => r.y === event.y - CONTENT_Y);
+						const hit = rows.find(r => r.y === event.y || r.y === event.y - 1 || r.y === event.y - CONTENT_Y);
 						if (!hit) return undefined;
 						press(hit.key);
 						return { handled: true, render: true };
 					},
 					invalidate() {},
 					dispose() {
-						if (lanForwarder) lanForwarder.close().catch(() => {});
 						session.close();
 					},
 				};
 			},
 			{ overlay: true, overlayOptions: { width: "90%", minWidth: 72, anchor: "center" } },
 		);
-		if (lanForwarder) await lanForwarder.close().catch(() => {});
 		setInstallerSession(undefined);
 		session.close();
 		if (outcome === undefined) {
