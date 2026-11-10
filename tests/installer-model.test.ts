@@ -831,3 +831,42 @@ test("S16/S21: a failed or timed out analysis shows an error with retry (same mo
 	assert.equal(installerScreen(back).error, undefined);
 	assert.equal(back.step, "tasks");
 });
+
+// --- S24: a kept backup that cannot be written blocks Install ---
+
+const legacyCurrent = {
+	pools: { pools: [{ id: "legacy", name: "legacy", candidates: ["antigravity/gemini-3-8-flash"], strategy: "hybrid" }] },
+	profiles: { active: "p", profiles: { p: { "legacy-role": { model: "pool/legacy" } } } },
+};
+const summaryWith = (enabled: string[]): InstallerState => {
+	let s = withScanResult(act(initInstaller({ detected: both, current: legacyCurrent, installed: false }), next, next).state, { found: both });
+	s = act(s, next, next).state;
+	return { ...s, draft: { ...s.draft, enabled } };
+};
+
+test("summary: a backup tasks still use whose subscriptions are all off warns, names the tasks and disables Install", () => {
+	const s = summaryWith(["claude-bridge"]);
+	const screen = installerScreen(s);
+	assert.equal(screen.step, "summary");
+	assert.equal(button(screen, "install")!.enabled, false);
+	assert.ok(screen.body.some(l => /Legacy/.test(l) && /legacy-role/.test(l) && /Turn one of its subscriptions back on/.test(l)), screen.body.join("\n"));
+	assert.ok(screen.summary!.detail.some(l => /Legacy/.test(l) && /legacy-role/.test(l)));
+	assert.match(screen.summary!.narrative, /Legacy/);
+	const r = act(s, press("install"));
+	assert.deepEqual(r.effects, []);
+	assert.equal(r.state.step, "summary");
+	const enter = act(s, next); // Enter on the summary is Install
+	assert.deepEqual(enter.effects, []);
+	assert.equal(enter.state.step, "summary");
+	assert.ok(enter.state.notice?.some(l => /Legacy/.test(l)));
+	assert.ok(installerScreen(enter.state).body.some(l => /Legacy/.test(l)));
+	assert.equal(installerScreen(enter.state).body.filter(l => /Legacy/.test(l)).length, 1);
+});
+
+test("summary: re-enabling a subscription of that backup, or reassigning its tasks, enables Install again", () => {
+	assert.equal(button(installerScreen(summaryWith(["claude-bridge", "antigravity"])), "install")!.enabled, true);
+	const s = summaryWith(["claude-bridge"]);
+	const moved = { ...s, draft: { ...s.draft, roles: { ...s.draft.roles, "legacy-role": { model: "claude-bridge/claude-opus-5-5" } } } };
+	assert.equal(button(installerScreen(moved), "install")!.enabled, true);
+	assert.deepEqual(act(moved, press("install")).effects, ["install"]);
+});

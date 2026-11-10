@@ -21,6 +21,7 @@ import {
 	type InstallerScreen,
 	type InstallerState,
 } from "./installer-model.ts";
+import { withKeptBackups } from "./installer-plan.ts";
 import type { AdvisorReport } from "./setup-advisor.ts";
 import type { SetupStepperState, StepperCurrent } from "./setup-stepper.ts";
 import type { DetectedProvider, PoolConfig } from "./setup.ts";
@@ -93,7 +94,7 @@ export function createInstallerSession(init: InstallerInit, deps: InstallerHostD
 		later(() => {
 			let result: InstallResult;
 			try {
-				result = deps.install(state.draft, state.current);
+				result = deps.install(withKeptBackups(state.draft, state.current).draft, state.current);
 			} catch (error) {
 				result = { ok: false, error: message(error) };
 			}

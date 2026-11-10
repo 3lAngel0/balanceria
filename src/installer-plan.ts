@@ -1,6 +1,7 @@
 // Pure planning behind the installer: suggested backups, the recommended draft, repairs, the per-file summary and the undo plan.
 // No I/O: the host reads the files, writes through `applyStepper` and copies the `.bak` files back.
 
+import { copyFileSync, existsSync, rmSync } from "node:fs";
 import { t } from "./i18n/index.ts";
 import { DEFAULT_ORCHESTRATOR_MODE, type OrchestratorMode, type ProfileConfig, type ProfileWorkflow } from "./profiles.ts";
 import { UNASSIGNED } from "./setup-advisor.ts";
@@ -117,6 +118,57 @@ export function targetLabel(target: string, providers: ProviderNames = []): stri
 	return target.startsWith("pool/") ? t("installer.target.backup", { name: backupName({ id: target.slice("pool/".length) }) }) : refLabel(target, providers);
 }
 
+export interface KeptBackup {
+	id: string;
+	/** The tasks (technical names) that still point to this backup. */
+	roles: string[];
+}
+
+const strings = (value: unknown): string[] => (Array.isArray(value) ? value.filter((v): v is string => typeof v === "string") : []);
+
+/**
+ * The draft with every saved backup that a task still uses: a backup referenced (`pool/<id>`) by any task of any saved profile stays,
+ * unless the draft reassigns every task that uses it. Tasks of the active profile count with the draft's model when the draft sets one.
+ */
+export function withKeptBackups(draft: SetupStepperState, current: StepperCurrent): { draft: SetupStepperState; kept: KeptBackup[]; blocked: KeptBackup[] } {
+	const live = (current.pools as { pools?: unknown } | null | undefined)?.pools;
+	if (!Array.isArray(live)) return { draft, kept: [], blocked: [] };
+	const on = new Set(draft.enabled);
+	const have = new Set(draft.pools.filter(pool => pool.candidates.some(ref => on.has(ref.slice(0, ref.indexOf("/"))))).map(pool => pool.id));
+	const users = new Map<string, Set<string>>();
+	const active = current.profiles?.active ?? buildBalancerProfileName();
+	for (const [name, roles] of Object.entries(current.profiles?.profiles ?? {})) {
+		for (const [role, route] of Object.entries(roles ?? {})) {
+			const model = name === active ? (draft.roles[role]?.model ?? route?.model) : route?.model;
+			if (typeof model !== "string" || !model.startsWith("pool/")) continue;
+			users.set(model.slice("pool/".length), (users.get(model.slice("pool/".length)) ?? new Set()).add(role));
+		}
+	}
+	const kept: KeptBackup[] = [];
+	const blocked: KeptBackup[] = [];
+	const extra: PoolConfig[] = [];
+	for (const old of live as { id?: unknown; name?: unknown; candidates?: unknown; strategy?: unknown }[]) {
+		const id = old?.id;
+		if (typeof id !== "string" || have.has(id) || !users.has(id)) continue;
+		const candidates = strings(old.candidates);
+		if (!candidates.some(ref => on.has(ref.slice(0, ref.indexOf("/"))))) {
+			// Every subscription of this backup is off: it cannot be written, so the tasks that use it would point at nothing.
+			blocked.push({ id, roles: [...users.get(id)!] });
+			continue;
+		}
+		extra.push({ id, name: typeof old.name === "string" ? old.name : id, candidates, strategy: (old.strategy as PoolConfig["strategy"]) ?? "hybrid" });
+		kept.push({ id, roles: [...users.get(id)!] });
+	}
+	return { draft: kept.length === 0 ? draft : { ...draft, pools: [...draft.pools, ...extra] }, kept, blocked };
+}
+
+/** Why Install must wait: backups still used by tasks that the draft cannot write (all their subscriptions are off). */
+export function installBlockers(draft: SetupStepperState, current: StepperCurrent): string[] {
+	return withKeptBackups(draft, current).blocked.map(k => t("installer.summary.blocked", { name: backupName({ id: k.id }), tasks: keptTasks(k) }));
+}
+
+const keptTasks = (kept: KeptBackup) => kept.roles.map(roleName).join(", ");
+
 export interface FileSummary {
 	file: "integrations.json" | "pools.json" | "profiles.json";
 	lines: string[];
@@ -124,7 +176,8 @@ export interface FileSummary {
 }
 
 /** What Install would do, in plain words and grouped by file; `current` holds the live files. */
-export function summaryByFile(draft: SetupStepperState, current: StepperCurrent): FileSummary[] {
+export function summaryByFile(plain: SetupStepperState, current: StepperCurrent): FileSummary[] {
+	const { draft, kept } = withKeptBackups(plain, current);
 	const { writes } = buildStepperDiff(draft, current);
 	const on = new Set(draft.enabled);
 	const label = (ref: string) => refLabel(ref, draft.detected);
@@ -140,7 +193,10 @@ export function summaryByFile(draft: SetupStepperState, current: StepperCurrent)
 	}
 	const lines: Record<FileSummary["file"], string[]> = {
 		"integrations.json": draft.detected.filter(p => on.has(p.id)).map(p => t("installer.summary.connect", { name: p.label })),
-		"pools.json": pools.map(pool => t("installer.summary.backup", { name: backupName(pool), members: pool.candidates.map(label).join(t("installer.summary.then")) })),
+		"pools.json": [
+			...pools.map(pool => t("installer.summary.backup", { name: backupName(pool), members: pool.candidates.map(label).join(t("installer.summary.then")) })),
+			...kept.map(k => t("installer.summary.kept", { name: backupName({ id: k.id }), tasks: keptTasks(k) })),
+		],
 		"profiles.json": roleLines,
 	};
 	const changed: Record<FileSummary["file"], boolean> = {
@@ -162,9 +218,66 @@ export interface UndoStep {
 	backup: string;
 }
 
-/** Which backup restores which file; the host performs the copy. */
+const INSTALLER_COPY = /^(.*)\.bak-installer-\d{14}(?:-\d+)?$/;
+
+/** Which backup restores which file; the host performs the copy. Knows `<file>.bak` and `<file>.bak-installer-<YYYYMMDDHHMMSS>[-n]`. */
 export function planUndo(backups: readonly string[]): UndoStep[] {
-	return backups.filter(b => b.endsWith(".bak")).map(backup => ({ file: backup.slice(0, -".bak".length), backup }));
+	const steps: UndoStep[] = [];
+	for (const backup of backups) {
+		const copy = INSTALLER_COPY.exec(backup);
+		if (copy) steps.push({ file: copy[1]!, backup });
+		else if (backup.endsWith(".bak")) steps.push({ file: backup.slice(0, -".bak".length), backup });
+	}
+	return steps;
+}
+
+/** The file operations of the per-install copies; injectable so tests run on a temp dir or in memory. */
+export interface InstallFs {
+	exists(path: string): boolean;
+	copy(from: string, to: string): void;
+	remove(path: string): void;
+}
+
+export const nodeInstallFs: InstallFs = { exists: existsSync, copy: copyFileSync, remove: path => rmSync(path, { force: true }) };
+
+export interface InstallSnapshot {
+	/** The copies made by this install, one per file that existed. */
+	backups: string[];
+	/** Files that did not exist before the install: Undo removes them. */
+	created: string[];
+}
+
+const pad = (n: number, width = 2) => String(n).padStart(width, "0");
+const stamp = (now: Date) => `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+
+/** Copies each existing file to `<file>.bak-installer-<YYYYMMDDHHMMSS>` (a `-2`, `-3`... suffix when the name is taken), never overwriting a copy. */
+export function snapshotForInstall(files: readonly string[], fs: InstallFs, now: Date = new Date()): InstallSnapshot {
+	const snapshot: InstallSnapshot = { backups: [], created: [] };
+	for (const file of files) {
+		if (!fs.exists(file)) {
+			snapshot.created.push(file);
+			continue;
+		}
+		const base = `${file}.bak-installer-${stamp(now)}`;
+		let copy = base;
+		for (let n = 2; fs.exists(copy); n += 1) copy = `${base}-${n}`;
+		fs.copy(file, copy);
+		snapshot.backups.push(copy);
+	}
+	return snapshot;
+}
+
+/** Puts the files back as they were before that install; returns how many files were restored or removed. Old copies are kept. */
+export function undoInstall(snapshot: InstallSnapshot, fs: InstallFs): number {
+	const steps = planUndo(snapshot.backups);
+	for (const step of steps) fs.copy(step.backup, step.file);
+	let removed = 0;
+	for (const file of snapshot.created) {
+		if (!fs.exists(file)) continue;
+		fs.remove(file);
+		removed += 1;
+	}
+	return steps.length + removed;
 }
 
 export interface SummaryStory {
@@ -177,7 +290,9 @@ export interface SummaryStory {
 const unique = <T>(items: readonly T[]): T[] => [...new Set(items)];
 
 /** The human summary of a draft (the narrative the user reads first and the detail they review). */
-export function summaryStory(draft: SetupStepperState, current: StepperCurrent): SummaryStory {
+export function summaryStory(plain: SetupStepperState, current: StepperCurrent): SummaryStory {
+	const { draft, kept } = withKeptBackups(plain, current);
+	const blockers = installBlockers(plain, current);
 	const on = new Set(draft.enabled);
 	const providers = draft.detected.filter(p => p.detected && on.has(p.id));
 	const live = draft.pools
@@ -196,6 +311,8 @@ export function summaryStory(draft: SetupStepperState, current: StepperCurrent):
 		live.length > 0
 			? t("installer.summary.narrative.models", { models: models.join(", "), strategies: unique(live.map(strategyOf)).join(", ") })
 			: t("installer.summary.narrative.modelsOnly", { models: models.join(", ") }),
+		...kept.map(k => t("installer.summary.narrative.kept", { name: backupName({ id: k.id }), tasks: keptTasks(k) })),
+		...blockers,
 		t("installer.summary.narrative.main", { mode }),
 	].join(" ");
 	const tasks = Object.entries(draft.roles).filter(([, route]) => typeof route?.model === "string" && route.model !== UNASSIGNED);
@@ -210,6 +327,8 @@ export function summaryStory(draft: SetupStepperState, current: StepperCurrent):
 			}),
 		),
 		...(tasks.length > 0 ? tasks.map(([role, route]) => t("installer.summary.detail.task", { task: roleName(role), model: targetLabel(route.model!, draft.detected) })) : [t("installer.summary.detail.noTasks")]),
+		...kept.map(k => t("installer.summary.kept", { name: backupName({ id: k.id }), tasks: keptTasks(k) })),
+		...blockers,
 		t("installer.summary.detail.mainAgent", { mode }),
 		files.length > 0 ? t("installer.summary.detail.files", { files: files.join(", ") }) : t("installer.summary.detail.noFiles"),
 	];

@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -9,7 +9,7 @@ import { CONTENT_X, CONTENT_Y, emphasize, hitTest, layoutButtons, sameTarget, ta
 import { applyAdvisorReport, applyStepper, initStepper, type StepperCurrent } from "./setup-stepper.ts";
 import { initScreen, renderStepper, stepperInput, type StepperEffect, type StepperEvent, type StepperTone, stepperThemeColor } from "./setup-stepper-view.ts";
 import type { InstallerAction } from "./installer-model.ts";
-import { planUndo } from "./installer-plan.ts";
+import { nodeInstallFs, snapshotForInstall, undoInstall, type InstallSnapshot } from "./installer-plan.ts";
 import { hitInstaller, installerKey, renderInstaller, type InstallerHit } from "./installer-tui.ts";
 import { channelPromptInput, initChannelPrompt, renderChannelPrompt, type InstallChannel } from "./installer-channel.ts";
 import { initLangPrompt, langPromptInput, renderLangPrompt } from "./setup-lang-prompt.ts";
@@ -1930,13 +1930,13 @@ export default function aiBalancer(pi: ExtensionAPI) {
 	};
 
 	/** The effects of the installer (scan, install, analysis, undo) on this machine; the terminal and the web channel run the same ones. */
+	const installerSnapshots: InstallSnapshot[] = [];
 	const installerHost = (ctx: ExtensionContext): InstallerHostDeps => ({
 		detect: detectSystemProviders,
 		install: (draft, current) => {
-			// applyStepper only reports the pools/integrations backups; keep a plain .bak of profiles.json too so Undo restores all three.
-			const profilesBackup = `${DEFAULT_PROFILES_PATH}.bak`;
-			const hadProfiles = existsSync(DEFAULT_PROFILES_PATH);
-			if (hadProfiles) copyFileSync(DEFAULT_PROFILES_PATH, profilesBackup);
+			// Each install keeps its own copies (never overwriting an older one); applyStepper's plain `.bak` is shared with other setup flows and is not reported.
+			const snapshot = snapshotForInstall([join(ROOT, "pools.json"), join(ROOT, "integrations.json"), DEFAULT_PROFILES_PATH], nodeInstallFs);
+			installerSnapshots.push(snapshot);
 			const result = applyStepper(draft, {
 				root: ROOT,
 				current,
@@ -1944,13 +1944,12 @@ export default function aiBalancer(pi: ExtensionAPI) {
 				writeConfig: writeConfigSafely,
 				writeProfiles: (name, roles, workflow) => saveProfileRoles(DEFAULT_PROFILES_PATH, name, roles, (provider, model) => Boolean(ctx.modelRegistry.find(provider, model)), workflow),
 			});
-			const backups = hadProfiles && result.written.includes(DEFAULT_PROFILES_PATH) ? [...result.backups, profilesBackup] : result.backups;
-			return result.ok ? { ok: true, written: result.written, backups, profilesError: result.profilesError } : { ok: false, error: result.error ?? "" };
+			return result.ok ? { ok: true, written: result.written, backups: snapshot.backups, profilesError: result.profilesError } : { ok: false, error: result.error ?? "", backups: snapshot.backups };
 		},
 		undo: backups => {
-			const steps = planUndo(backups);
-			for (const step of steps) copyFileSync(step.backup, step.file);
-			return steps.length;
+			// The install's own record knows which files it created; a list without a record (older copies) still restores what it names.
+			const snapshot = [...installerSnapshots].reverse().find(s => s.backups.length === backups.length && s.backups.every((b, i) => b === backups[i])) ?? { backups, created: [] };
+			return undoInstall(snapshot, nodeInstallFs);
 		},
 		deepAnalysis: (providers, pools, model) => recommendRolesWithAdvisor({ providers, pools }, { aiRunner: createModelCliAiRunner(model, AGY_BIN), deep: true }),
 		notify: (message, level) => ctx.ui.notify(message, level),

@@ -17,7 +17,7 @@ import {
 	type InstallerOutcome,
 	type InstallerSession,
 } from "../src/web-installer.ts";
-import { applyStepper } from "../src/setup-stepper.ts";
+import { applyStepper, type StepperCurrent } from "../src/setup-stepper.ts";
 import { writeConfigSafely, type DetectedProvider } from "../src/setup.ts";
 
 setLang("en");
@@ -35,7 +35,7 @@ interface Harness {
 	cleanup(): Promise<void>;
 }
 
-async function harness(options: { active?: boolean; detect?: () => DetectedProvider[]; deepAnalysis?: InstallerHostDeps["deepAnalysis"]; install?: InstallerHostDeps["install"] } = {}): Promise<Harness> {
+async function harness(options: { active?: boolean; detect?: () => DetectedProvider[]; deepAnalysis?: InstallerHostDeps["deepAnalysis"]; install?: InstallerHostDeps["install"]; current?: StepperCurrent } = {}): Promise<Harness> {
 	const root = mkdtempSync(join(tmpdir(), "web-installer-"));
 	const tokenFile = join(root, "web-token");
 	writeFileSync(tokenFile, TOKEN, { mode: 0o600 });
@@ -51,7 +51,7 @@ async function harness(options: { active?: boolean; detect?: () => DetectedProvi
 		deepAnalysis: options.deepAnalysis ?? (async () => ({ recommendations: [] }) as never),
 		notify: message => notices.push(message),
 	};
-	const session = createInstallerSession({ detected: both }, deps);
+	const session = createInstallerSession({ detected: both, current: options.current, installed: options.current ? false : undefined }, deps);
 	session.onEnd(outcome => outcomes.push(outcome));
 	if (options.active !== false) setInstallerSession(session);
 	const server = await startWebServer({
@@ -462,4 +462,31 @@ test("an install that throws shows the install error with retry / back instead o
 test("the page may send the new backup actions and nothing else", () => {
 	for (const id of ["move-up", "move-down", "cycle-method"]) assert.deepEqual(parseInstallerAction({ type: "button", id }), { type: "button", id });
 	assert.equal(parseInstallerAction({ type: "button", id: "cycle-strategy" }), undefined);
+});
+
+test("the install effect receives the draft with the backups saved profiles still use", async () => {
+	let received: string[] = [];
+	const current = {
+		pools: { pools: [{ id: "orchestrator", name: "orchestrator", candidates: ["claude-bridge/claude-sonnet-5-5"], strategy: "hybrid" }] },
+		profiles: { active: "p", profiles: { p: { "legacy-role": { model: "pool/orchestrator" } } } },
+	};
+	const h = await harness({
+		current,
+		install: draft => {
+			received = draft.pools.map(pool => pool.id);
+			return { ok: true, written: [], backups: [] };
+		},
+	});
+	try {
+		await post(h, { type: "next" });
+		await post(h, { type: "next" });
+		await settle(h);
+		await post(h, { type: "next" }); // subscriptions
+		await post(h, { type: "next" }); // summary
+		await post(h, { type: "button", id: "install" });
+		await settle(h);
+		assert.ok(received.includes("orchestrator"), `pools written: ${received.join(",")}`);
+	} finally {
+		await h.cleanup();
+	}
 });

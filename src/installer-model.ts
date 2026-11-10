@@ -14,6 +14,7 @@ import {
 	refLabel as planRefLabel,
 	roleName,
 	summaryByFile,
+	installBlockers,
 	summaryStory,
 	suggestBackups,
 	targetLabel,
@@ -699,10 +700,11 @@ function content(state: InstallerState): Content {
 				help: help("main-agent"),
 			};
 		case "summary": {
-			const errors = validateStep(draft, "confirm");
+			const errors = [...validateStep(draft, "confirm"), ...installBlockers(draft, state.current)];
+			const shown = new Set(errors);
 			return {
 				title: t("installer.summary.title"),
-				body: [t("installer.summary.intro"), t("installer.summary.bak"), ...errors],
+				body: [t("installer.summary.intro"), t("installer.summary.bak"), ...errors, ...state.notice.filter(line => !shown.has(line))],
 				control: { kind: "summary", groups: summaryByFile(draft, state.current) },
 				buttons: [button("back"), button("install", errors.length === 0, true), button("cancel")],
 				help: help("summary"),
@@ -973,6 +975,10 @@ function onNext(state: InstallerState): Result {
 	if (state.taskPicker) return stay(state);
 	const path = pathOf(state);
 	const step = state.step;
+	if (step === "summary") {
+		const blockers = installBlockers(state.draft, state.current);
+		if (blockers.length > 0) return stay({ ...state, notice: blockers });
+	}
 	if (step === "summary") return { state: { ...go(state, "installing"), installError: undefined, progress: INSTALL_PROGRESS_STEPS.map(id => ({ id, status: "pending" as const })) }, effect: "install" };
 	if (step === "installing" || step === "done") return stay(state);
 	if (step === "welcome" && state.existing) {
