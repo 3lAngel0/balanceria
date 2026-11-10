@@ -324,9 +324,9 @@ export function installerPageScript(): string {
 	function renderCapybara(pose) {
 		var root = svg("svg", {
 			class: "cap",
-			viewBox: "0 0 22 25",
+			viewBox: "0 0 22 24",
 			width: "132",
-			height: "150",
+			height: "144",
 			role: "img",
 			"aria-label": view.text.mascot
 		});
@@ -335,28 +335,27 @@ export function installerPageScript(): string {
 					"............##.##.....",
 					"...........#G#P#G#....",
 					"..........#RPPRRPP#...",
-					".........#PdDdDDdRP##.",
-					".........#PDdRRdDRP##.",
-					".....#####PddDDdDP#S#.",
-					"...##MM##.##G##G##S##.",
-					"..#SSSS##MMMMHHHMMM#..",
-					"..#SSSS#MMHHHHHHMMM#..",
-					"..#S#SS#MHHHMM#MHMM#..",
-					"....#S#SMMHMMM#MHHM#..",
-					"....#S#SSMHHMMMH#BLB#.",
-					"..####SSSMMMMMMMbBLBb#",
-					".##SS#SSSMMMMMHMM#B#M#",
-					".#SMMSS#SMMHMHHMMHMMM#",
-					"##MMMMMSSSSMHHHHMMMMM#",
-					"#SMMMMMMMMMHHHHHHHMMM#",
-					"#MMHMMMMHHMHHHHHHHHMM#",
-					"#MHHHMSMMMMHHHHMHHMMM#",
-					"#MMMHHMSMHMMMHMMMMMHM#",
-					"#MMMMHHMSMMHMMMMMMMMM#",
-					".#MMMMMMSMMMMMMM#SMM#.",
-					"..##MMMS##MMS###SSS#..",
-					"...##MSSS#MSSS######..",
-					"....##########........"
+					".........#PdDdDDdRP#..",
+					".........#PDdRRdDRP#..",
+					"....##...#PddDDddP#...",
+					"..##SS##..##G##G##....",
+					".#SMHHMS####..........",
+					"#SMHHHHHMMMMMM##......",
+					"#SMHHHHHHHHMMMMN#.....",
+					"#SMHHHHHHMMMMMMN#.....",
+					"#SMHHHHHHMMMMw##......",
+					".#SSMMHHMM####........",
+					"..##BBLLBB#MMMM##.....",
+					".#BBLLWWLLBBMMMMM##...",
+					"#SSBBBBBBSSMMMMMMMM#..",
+					"#SSMMMMMSSMMMMMMMMMMS#",
+					"#MMMMMMMMMMHHHHHHMMMS#",
+					"#MMMMMMMMHHHHHHHHHMMS#",
+					"#MMMMMMMMMMMMMMMMMMMS#",
+					".#MMMMMMMSSMMMMMMMMM#.",
+					"..#SSSS##MM#SSSSMM##..",
+					"...####..##..####.....",
+					"......................"
 		];
 
 		var CLASS_MAP = {
@@ -365,9 +364,12 @@ export function installerPageScript(): string {
 			"O": "c-fur",
 			"H": "c-hi",
 			"S": "c-sh",
+			"N": "c-dark",
+			"w": "c-sh",
 			"E": "c-dark",
 			"B": "c-s-base",
 			"L": "c-s-hi",
+			"W": "c-glint",
 			"b": "c-s-sh",
 			"s": "c-s-sh",
 			"R": "c-r-neon",
@@ -397,15 +399,23 @@ export function installerPageScript(): string {
 
 		var eye = svg("g", { class: "eye" });
 		if (pose === "happy") {
-			eye.appendChild(rect("c-out", 14, 9, 1, 1));
-			eye.appendChild(rect("c-hi", 13, 9, 1, 1));
+			eye.appendChild(rect("c-dark", 12, 10, 1, 1));
+			eye.appendChild(rect("c-dark", 13, 9, 2, 1));
+			eye.appendChild(rect("c-dark", 15, 10, 1, 1));
+			eye.appendChild(rect("c-r-light", 13, 11, 2, 1));
 			eye.appendChild(rect("c-r-neon sparkle", 15, 2, 1, 1));
 			eye.appendChild(rect("c-r-neon sparkle", 6, 2, 1, 1));
+			eye.appendChild(rect("c-g-neon sparkle", 17, 4, 1, 1));
 		} else if (pose === "working") {
-			eye.appendChild(rect("c-out", 14, 9, 1, 1));
-			eye.appendChild(rect("c-glint", 14, 10, 1, 1));
+			eye.appendChild(rect("c-out", 13, 8, 2, 1));
+			eye.appendChild(rect("c-glint", 13, 9, 2, 2));
+			eye.appendChild(rect("c-dark", 14, 9, 1, 2));
+			eye.appendChild(rect("c-g-neon", 13, 9, 1, 1));
 		} else {
-			eye.appendChild(rect("c-out eye-blink", 14, 9, 1, 2));
+			eye.appendChild(rect("c-glint", 13, 9, 1, 1));
+			eye.appendChild(rect("c-dark", 14, 9, 1, 1));
+			eye.appendChild(rect("c-dark eye-blink", 13, 10, 2, 1));
+			eye.appendChild(rect("c-r-light", 13, 11, 2, 1));
 		}
 		body.appendChild(eye);
 		root.appendChild(body);
