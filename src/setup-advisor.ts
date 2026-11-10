@@ -127,6 +127,10 @@ export interface RoleRecommendation {
 export interface AdvisorReport {
 	source: "heuristic" | "ai+heuristic";
 	estimatedTokens: number;
+	/** True when `estimatedTokens` is the usage the CLI reported; otherwise it is an estimate. */
+	tokensExact?: boolean;
+	/** Set when the AI query failed (timeout, CLI error, unreadable answer); the recommendations are then the heuristic ones. */
+	error?: string;
 	summary: string;
 	recommendations: RoleRecommendation[];
 }
@@ -141,6 +145,8 @@ export interface AdvisorInput {
 export interface LightweightAiResponse {
 	text: string;
 	tokensUsed: number;
+	/** True when `tokensUsed` is the usage the CLI reported; otherwise it is an estimate. */
+	tokensExact?: boolean;
 }
 
 export type LightweightAiRunner = (prompt: string) => Promise<LightweightAiResponse>;
@@ -376,24 +382,75 @@ export function buildDeepAdvisorPrompt(input: AdvisorInput, availableTargets: re
 	].join(" ");
 }
 
+/** How long a deep analysis may take; `AI_BALANCER_DEEP_TIMEOUT_MS` overrides it. */
+export const DEEP_ANALYSIS_TIMEOUT_MS = 180_000;
+
+function deepTimeoutMs(): number {
+	const value = Number(process.env.AI_BALANCER_DEEP_TIMEOUT_MS);
+	return Number.isFinite(value) && value > 0 ? value : DEEP_ANALYSIS_TIMEOUT_MS;
+}
+
+const asNumber = (value: unknown): number => (typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : 0);
+
+/** Total tokens a CLI JSON answer reports (Claude `usage`, Gemini-style `usageMetadata`/`stats`), or undefined when it reports none. */
+function reportedTokens(json: Record<string, unknown>): number | undefined {
+	const usage = [json.usage, json.usageMetadata, json.stats].find((v): v is Record<string, unknown> => typeof v === "object" && v !== null);
+	if (!usage) return undefined;
+	const total = asNumber(usage.total_tokens) || asNumber(usage.totalTokenCount) || asNumber(usage.totalTokens);
+	if (total > 0) return total;
+	const sum =
+		asNumber(usage.input_tokens) +
+		asNumber(usage.output_tokens) +
+		asNumber(usage.cache_read_input_tokens) +
+		asNumber(usage.cache_creation_input_tokens) +
+		asNumber(usage.promptTokenCount) +
+		asNumber(usage.candidatesTokenCount) +
+		asNumber(usage.prompt_tokens) +
+		asNumber(usage.completion_tokens);
+	return sum > 0 ? sum : undefined;
+}
+
+/** The text and the reported usage of a `--output-format json` answer; plain text is returned as it is, without usage. */
+export function parseCliOutput(stdout: string): { text: string; tokens?: number } {
+	const raw = stdout.trim();
+	if (!raw.startsWith("{")) return { text: raw };
+	try {
+		const json = JSON.parse(raw) as Record<string, unknown>;
+		const text = [json.result, json.response, json.text, json.content].find((v): v is string => typeof v === "string");
+		if (text === undefined) return { text: raw };
+		const tokens = reportedTokens(json);
+		return { text: text.trim(), ...(tokens !== undefined ? { tokens } : {}) };
+	} catch {
+		return { text: raw };
+	}
+}
+
 /**
  * Runner for a user-picked model: the `provider/` prefix is stripped and the bare model goes to `agy --model`;
- * `claude-bridge/` refs try `claude -p` first and fall back to `agy`.
+ * `claude-bridge/` refs try `claude -p` first and fall back to `agy`. Both ask for `--output-format json` so the real usage
+ * can be read; without it the tokens are an estimate (`tokensExact` false). No shell is involved.
  */
-export function createModelCliAiRunner(modelRef: string, agyBin = "agy", timeoutMs = 15_000): LightweightAiRunner {
+export function createModelCliAiRunner(modelRef: string, agyBin = "agy", timeoutMs = deepTimeoutMs(), claudeBin = "claude"): LightweightAiRunner {
 	const slash = modelRef.indexOf("/");
 	const model = slash >= 0 ? modelRef.slice(slash + 1) : modelRef;
 	const run = (bin: string, args: string[], prompt: string) =>
 		new Promise<LightweightAiResponse>((resolve, reject) => {
-			execFile(bin, args, { timeout: timeoutMs }, (err, stdout) => {
-				if (err) return reject(err);
-				const text = String(stdout ?? "").trim();
+			execFile(bin, args, { timeout: timeoutMs, maxBuffer: 16 * 1024 * 1024 }, (err, stdout) => {
+				if (err) {
+					const timedOut = (err as { killed?: boolean }).killed === true || (err as { code?: unknown }).code === "ETIMEDOUT";
+					return reject(timedOut ? new Error(`timed out after ${Math.round(timeoutMs / 1000)} s`) : err);
+				}
+				const { text, tokens } = parseCliOutput(String(stdout ?? ""));
 				if (!text) return reject(new Error("empty output"));
-				resolve({ text, tokensUsed: Math.max(120, Math.round((prompt.length + text.length) / 4)) });
+				resolve(
+					tokens !== undefined
+						? { text, tokensUsed: tokens, tokensExact: true }
+						: { text, tokensUsed: Math.max(120, Math.round((prompt.length + text.length) / 4)), tokensExact: false },
+				);
 			});
 		});
-	const viaAgy = (prompt: string) => run(agyBin, ["--model", model, "--print", prompt], prompt);
-	if (modelRef.startsWith("claude-bridge/")) return prompt => run("claude", ["-p", prompt], prompt).catch(() => viaAgy(prompt));
+	const viaAgy = (prompt: string) => run(agyBin, ["--model", model, "--output-format", "json", "--print", prompt], prompt);
+	if (modelRef.startsWith("claude-bridge/")) return prompt => run(claudeBin, ["-p", prompt, "--output-format", "json"], prompt).catch(() => viaAgy(prompt));
 	return viaAgy;
 }
 
@@ -413,7 +470,7 @@ export async function recommendRolesWithAdvisor(
 	try {
 		const response = await options.aiRunner(prompt);
 		const jsonMatch = /\{[\s\S]*\}/.exec(response.text);
-		if (!jsonMatch) return baseline;
+		if (!jsonMatch) return { ...baseline, error: "the answer had no JSON" };
 		const parsed = JSON.parse(jsonMatch[0]) as {
 			summary?: unknown;
 			roles?: Record<string, { model?: unknown; thinking?: unknown; reason?: unknown }>;
@@ -441,16 +498,18 @@ export async function recommendRolesWithAdvisor(
 				? parsed.summary.trim()
 				: baseline.summary;
 
-		if (!appliedAny && summary === baseline.summary) return baseline;
+		// The query still cost tokens even when it changed nothing, so the report keeps the usage.
+		if (!appliedAny && summary === baseline.summary) return response.tokensUsed > 0 ? { ...baseline, estimatedTokens: response.tokensUsed, tokensExact: response.tokensExact === true } : baseline;
 
 		return {
 			source: "ai+heuristic",
 			estimatedTokens: response.tokensUsed > 0 ? response.tokensUsed : Math.round((prompt.length + response.text.length) / 4),
+			tokensExact: response.tokensExact === true && response.tokensUsed > 0,
 			summary,
 			recommendations: merged,
 		};
-	} catch {
-		return baseline;
+	} catch (error) {
+		return { ...baseline, error: error instanceof Error ? error.message : String(error) };
 	}
 }
 

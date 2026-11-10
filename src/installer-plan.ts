@@ -166,3 +166,52 @@ export interface UndoStep {
 export function planUndo(backups: readonly string[]): UndoStep[] {
 	return backups.filter(b => b.endsWith(".bak")).map(backup => ({ file: backup.slice(0, -".bak".length), backup }));
 }
+
+export interface SummaryStory {
+	/** One paragraph in plain words: what the balancer will do with the chosen configuration. */
+	narrative: string;
+	/** The configuration, line by line: subscriptions, each backup in order with how it chooses, each task, main agent, files. */
+	detail: string[];
+}
+
+const unique = <T>(items: readonly T[]): T[] => [...new Set(items)];
+
+/** The human summary of a draft (the narrative the user reads first and the detail they review). */
+export function summaryStory(draft: SetupStepperState, current: StepperCurrent): SummaryStory {
+	const on = new Set(draft.enabled);
+	const providers = draft.detected.filter(p => p.detected && on.has(p.id));
+	const live = draft.pools
+		.map(pool => ({ ...pool, candidates: pool.candidates.filter(ref => on.has(ref.slice(0, ref.indexOf("/")))) }))
+		.filter(pool => pool.candidates.length > 0);
+	const strategyOf = (pool: PoolConfig) => t(`installer.strategy.${pool.strategy ?? "hybrid"}.label`);
+	const subscriptions = (pool: PoolConfig) => unique(pool.candidates.map(ref => providers.find(p => p.id === ref.slice(0, ref.indexOf("/")))?.label ?? ref.slice(0, ref.indexOf("/"))));
+	const models = unique(live.length > 0 ? live.flatMap(pool => pool.candidates.map(ref => friendlyModel(ref.slice(ref.indexOf("/") + 1)))) : providers.flatMap(p => p.availableModels.map(friendlyModel)));
+	const mode = t(`installer.mode.${draft.orchestratorMode}.label`);
+	const names = providers.map(p => p.label).join(", ");
+	const narrative = [
+		t("installer.summary.narrative.balance", { providers: names }),
+		live.length > 0
+			? t("installer.summary.narrative.backups", { backups: live.map(pool => `${backupName(pool)} (${subscriptions(pool).join(", ")})`).join("; ") })
+			: t("installer.summary.narrative.noBackups"),
+		live.length > 0
+			? t("installer.summary.narrative.models", { models: models.join(", "), strategies: unique(live.map(strategyOf)).join(", ") })
+			: t("installer.summary.narrative.modelsOnly", { models: models.join(", ") }),
+		t("installer.summary.narrative.main", { mode }),
+	].join(" ");
+	const tasks = Object.entries(draft.roles).filter(([, route]) => typeof route?.model === "string" && route.model !== UNASSIGNED);
+	const files = summaryByFile(draft, current).filter(group => group.changed).map(group => group.file);
+	const detail = [
+		t("installer.summary.detail.subscriptions", { names }),
+		...live.map(pool =>
+			t("installer.summary.detail.backup", {
+				name: backupName(pool),
+				members: pool.candidates.map((ref, i) => t("installer.summary.detail.member", { n: i + 1, label: refLabel(ref, draft.detected) })).join(", "),
+				strategy: strategyOf(pool),
+			}),
+		),
+		...(tasks.length > 0 ? tasks.map(([role, route]) => t("installer.summary.detail.task", { task: roleName(role), model: targetLabel(route.model!, draft.detected) })) : [t("installer.summary.detail.noTasks")]),
+		t("installer.summary.detail.mainAgent", { mode }),
+		files.length > 0 ? t("installer.summary.detail.files", { files: files.join(", ") }) : t("installer.summary.detail.noFiles"),
+	];
+	return { narrative, detail };
+}

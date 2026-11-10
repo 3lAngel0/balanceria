@@ -14,6 +14,8 @@ import {
 	withInstallProgress,
 	withInstallResult,
 	withScanResult,
+	withError,
+	withAnalysisError,
 	type InstallerAction,
 	type InstallerEffect,
 	type InstallerScreen,
@@ -82,11 +84,11 @@ test("welcome explains in plain words: time, nothing changes until the end", () 
 	assert.deepEqual(screen.buttons.slice(0, 3).map(b => b.id), ["back", "next", "cancel"]);
 });
 
-test("sidebar of Recomendada skips subscriptions, backups, tasks and main agent", () => {
+test("sidebar of Recomendada skips backups, tasks and main agent but visits the subscriptions", () => {
 	const screen = installerScreen(fresh());
-	assert.deepEqual(ids(screen), ["welcome", "type", "scan", "summary", "installing", "done"]);
-	assert.equal(screen.stepCount, 6);
-	assert.deepEqual(screen.sidebar.map(i => i.status), ["current", "pending", "pending", "pending", "pending", "pending"]);
+	assert.deepEqual(ids(screen), ["welcome", "type", "scan", "subscriptions", "summary", "installing", "done"]);
+	assert.equal(screen.stepCount, 7);
+	assert.deepEqual(screen.sidebar.map(i => i.status), ["current", "pending", "pending", "pending", "pending", "pending", "pending"]);
 });
 
 test("sidebar of Personalizada visits every step and marks done / current / pending", () => {
@@ -129,7 +131,8 @@ test("Recomendada: next asks for a scan; the result builds the full draft and ne
 	const screen = installerScreen(scanned);
 	assert.equal(screen.control.kind, "progress");
 	if (screen.control.kind === "progress") assert.deepEqual(screen.control.items.map(i => i.status), ["done", "done"]);
-	const summary = act(scanned, next).state;
+	assert.equal(act(scanned, next).state.step, "subscriptions");
+	const summary = act(scanned, next, next).state;
 	assert.equal(summary.step, "summary");
 	assert.deepEqual(summary.draft.pools.map(p => p.id), ["claude-sonnet-5-5"]);
 	for (const entry of ROLE_CATALOG) assert.ok(summary.draft.roles[entry.role]?.model);
@@ -423,7 +426,7 @@ test("main agent: works alone (organic) or hands everything out (full-delegation
 
 test("summary groups changes by file, mentions the .bak copy; install starts the progress", () => {
 	let s = withScanResult(act(fresh(), next, next).state, { found: both });
-	s = act(s, next).state;
+	s = act(s, next, next).state;
 	const screen = installerScreen(s);
 	assert.equal(screen.control.kind, "summary");
 	if (screen.control.kind !== "summary") return;
@@ -440,7 +443,7 @@ test("summary groups changes by file, mentions the .bak copy; install starts the
 });
 
 test("installing: progress updates, success stores the backups and shows Listo with panel / exit / undo", () => {
-	let s = act(withScanResult(act(fresh(), next, next).state, { found: both }), next, next).state;
+	let s = act(withScanResult(act(fresh(), next, next).state, { found: both }), next, next, next).state;
 	assert.equal(s.step, "installing");
 	s = withInstallProgress(s, "copies", "done");
 	const c = installerScreen(s).control;
@@ -459,7 +462,7 @@ test("installing: progress updates, success stores the backups and shows Listo w
 });
 
 test("installing: a failed install keeps the screen with the error and offers retry", () => {
-	let s = act(withScanResult(act(fresh(), next, next).state, { found: both }), next, next).state;
+	let s = act(withScanResult(act(fresh(), next, next).state, { found: both }), next, next, next).state;
 	s = withInstallResult(s, { ok: false, written: [], backups: [], error: "disk full" });
 	assert.equal(s.step, "installing");
 	const screen = installerScreen(s);
@@ -469,7 +472,7 @@ test("installing: a failed install keeps the screen with the error and offers re
 });
 
 test("undo is disabled when the install made no backups", () => {
-	let s = act(withScanResult(act(fresh(), next, next).state, { found: both }), next, next).state;
+	let s = act(withScanResult(act(fresh(), next, next).state, { found: both }), next, next, next).state;
 	s = withInstallResult(s, { ok: true, written: [], backups: [] });
 	assert.equal(button(installerScreen(s), "undo")!.enabled, false);
 });
@@ -590,4 +593,241 @@ test("the installer renders in Spanish with no English key left behind", () => {
 	} finally {
 		setLang("en");
 	}
+});
+
+// ---------------------------------------------------------------------------------------------
+// Round 2 (T5): close notice, subscriptions, backups actions, detailed help, welcome, errors, summary, deep analysis
+// ---------------------------------------------------------------------------------------------
+
+const inLang = <T>(lang: "en" | "es", run: () => T): T => {
+	setLang(lang);
+	try {
+		return run();
+	} finally {
+		setLang("en");
+	}
+};
+const shortcut = (s: InstallerScreen, key: string) => s.shortcuts.find(sc => sc.key === key);
+
+test("S11: every screen before Install says that closing the setup applies nothing; installing and done do not", () => {
+	for (const lang of ["en", "es"] as const) {
+		inLang(lang, () => {
+			const phrase = lang === "en" ? /close the setup, nothing is applied/i : /si cerr[aá]s el setup no se aplica nada/i;
+			for (const step of ["subscriptions", "backups", "tasks", "main-agent", "summary"]) assert.match(installerScreen(customAt(step)).notice ?? "", phrase, `${lang} ${step}`);
+			assert.match(installerScreen(fresh()).notice ?? "", phrase);
+			assert.match(installerScreen(act(fresh(), next).state).notice ?? "", phrase);
+			const installing = act(customAt("summary"), press("install")).state;
+			assert.equal(installerScreen(installing).notice, undefined);
+			const done = withInstallResult(installing, { ok: true, written: [], backups: [] });
+			assert.equal(installerScreen(done).notice, undefined);
+		});
+	}
+});
+
+test("S12: Recommended visits the subscriptions step preselected and lets every subscription be toggled", () => {
+	let s = withScanResult(act(fresh(), next, next).state, { found: both });
+	s = act(s, next).state;
+	assert.equal(s.step, "subscriptions");
+	assert.deepEqual(ids(installerScreen(s)), ["welcome", "type", "scan", "subscriptions", "summary", "installing", "done"]);
+	const control = installerScreen(s).control;
+	assert.equal(control.kind, "checklist");
+	if (control.kind !== "checklist") return;
+	assert.deepEqual(control.items.map(i => i.checked), [true, true]);
+	for (let index = 0; index < control.items.length; index++) {
+		const off = act(s, { type: "toggle", index }).state;
+		const c = installerScreen(off).control;
+		if (c.kind === "checklist") assert.equal(c.items[index]!.checked, false, `item ${index}`);
+		assert.equal(installerScreen(act(off, { type: "toggle", index }).state).control.kind, "checklist");
+	}
+	// Leaving with one subscription rebuilds the recommended setup for it alone.
+	const solo = act(s, { type: "toggle", index: 1 }, next).state;
+	assert.equal(solo.step, "summary");
+	assert.deepEqual(solo.draft.enabled, ["claude-bridge"]);
+	assert.equal(solo.draft.pools.length, 0);
+	// Going back still lists both subscriptions.
+	const back = act(solo, { type: "back" }).state;
+	const list = installerScreen(back).control;
+	assert.equal(list.kind === "checklist" && list.items.length, 2);
+});
+
+test("S13: backups can toggle, move up/down, change the way to choose and create a backup, all through actions", () => {
+	const s = customAt("backups");
+	const screen = installerScreen(s);
+	assert.deepEqual(screen.shortcuts.map(sc => sc.key), [" ", "u", "j", "s", "c"]);
+	assert.ok(screen.shortcuts.every(sc => sc.label.length > 0));
+	const first = screen.control.kind === "checklist" ? screen.control.items[0]!.label : "";
+	// move down: the first member goes second and the cursor follows it
+	const moved = act(s, shortcut(screen, "j")!.action).state;
+	assert.deepEqual(moved.draft.pools[0]!.candidates, ["antigravity/claude-sonnet-5-5", "claude-bridge/claude-sonnet-5-5"]);
+	const after = installerScreen(moved);
+	assert.equal(after.cursor, 1);
+	assert.ok(after.control.kind === "checklist" && after.control.items[1]!.label === first);
+	// and back up
+	assert.deepEqual(act(moved, shortcut(after, "u")!.action).state.draft.pools[0]!.candidates, ["claude-bridge/claude-sonnet-5-5", "antigravity/claude-sonnet-5-5"]);
+	// moving the first up is a no-op, never an error
+	assert.deepEqual(act(s, shortcut(screen, "u")!.action).state.draft.pools[0]!.candidates, s.draft.pools[0]!.candidates);
+	// the way to choose cycles through the three options, each explained
+	assert.ok(screen.backupDetail && screen.backupDetail.methods.length === 3);
+	assert.ok(screen.backupDetail!.methods.every(o => o.description.length > 20));
+	assert.equal(screen.backupDetail!.method, "hybrid");
+	const waterfall = act(s, shortcut(screen, "s")!.action).state;
+	assert.equal(waterfall.draft.pools[0]!.strategy, "waterfall");
+	assert.equal(installerScreen(waterfall).backupDetail!.method, "waterfall");
+	assert.equal(act(waterfall, press("cycle-method"), press("cycle-method")).state.draft.pools[0]!.strategy, "hybrid");
+	// toggle a member
+	const toggled = act(s, shortcut(screen, " ")!.action).state;
+	assert.deepEqual(toggled.draft.pools[0]!.candidates, ["antigravity/claude-sonnet-5-5"]);
+	// create
+	const wizard = act(s, shortcut(screen, "c")!.action).state;
+	assert.equal(installerScreen(wizard).title, installerMessages.en["installer.wizard.template.title"]);
+});
+
+test("S14: the help is detailed per step and changes with the option under the cursor", () => {
+	const type0 = installerScreen(act(fresh(), next).state);
+	const f0 = type0.help.focus!;
+	assert.ok(type0.help.text.length > 60 && type0.help.purpose.length > 20);
+	for (const part of [f0.label, f0.what, f0.purpose, f0.ifPicked, f0.technicalName, f0.file]) assert.ok(part.length > 0);
+	const type1 = installerScreen(act(fresh(), next, { type: "select", index: 1 }).state);
+	assert.notEqual(type1.help.focus!.what, f0.what);
+	assert.notEqual(type1.help.focus!.label, f0.label);
+	const subs = (index: number) => installerScreen(act(customAt("subscriptions"), { type: "select", index }).state).help.focus!;
+	assert.notEqual(subs(0).label, subs(1).label);
+	const tasks = (index: number) => installerScreen(act(customAt("tasks"), { type: "select", index }).state).help.focus!;
+	assert.notEqual(tasks(0).what, tasks(1).what);
+	assert.equal(tasks(0).file, "profiles.json");
+	assert.equal(installerScreen(customAt("backups")).help.focus!.file, "pools.json");
+	assert.equal(installerScreen(customAt("summary")).help.focus, undefined);
+	inLang("es", () => assert.doesNotMatch(JSON.stringify(installerScreen(act(fresh(), next).state).help), /installer\./));
+});
+
+test("S15: the welcome explains the product, defines the concepts and links the GitHub star", () => {
+	for (const lang of ["en", "es"] as const) {
+		inLang(lang, () => {
+			const w = installerScreen(fresh()).welcome!;
+			assert.equal(w.definitions.length, 5);
+			assert.ok(w.definitions.every(d => d.term.length > 0 && d.text.length > 20));
+			assert.ok(w.willDo.length >= 3);
+			assert.equal(w.star.url, "https://github.com/3lAngel0/balanceria");
+			assert.match(w.star.text, lang === "en" ? /star/i : /estrella/i);
+			assert.equal(installerScreen(customAt("subscriptions")).welcome, undefined);
+		});
+	}
+});
+
+test("S16: a failed scan shows what happened, what to do, and retry / back", () => {
+	let s = act(fresh(), next, next).state;
+	s = withScanResult(s, { error: "boom" });
+	const screen = installerScreen(s);
+	assert.ok(screen.error && screen.error.what.includes("boom") && screen.error.todo.length > 0 && screen.error.title.length > 0);
+	assert.equal(button(screen, "retry")!.enabled, true);
+	assert.equal(button(screen, "back")!.enabled, true);
+	const r = act(s, press("retry"));
+	assert.deepEqual(r.effects, ["scan"]);
+	assert.equal(installerScreen(r.state).error, undefined);
+	assert.ok(installerScreen(withScanResult(act(fresh(), next, next).state, { found: [] })).error!.what.length > 0);
+});
+
+test("S16: a failed install after writing offers retry, back to the summary and undo", () => {
+	const installing = act(customAt("summary"), press("install")).state;
+	const failed = withInstallResult(installing, { ok: false, written: ["/a/pools.json"], backups: ["/a/pools.json.bak"], error: "disk full" });
+	const screen = installerScreen(failed);
+	assert.ok(screen.error?.what.includes("disk full"));
+	assert.equal(button(screen, "retry")!.enabled, true);
+	assert.equal(button(screen, "back")!.enabled, true);
+	assert.equal(button(screen, "undo")!.enabled, true);
+	assert.deepEqual(act(failed, press("undo")).effects, ["undo"]);
+	assert.equal(act(failed, press("back")).state.step, "summary");
+	assert.deepEqual(act(failed, press("retry")).effects, ["install"]);
+	// nothing written: no undo
+	const clean = withInstallResult(installing, { ok: false, written: [], backups: [], error: "nope" });
+	assert.equal(button(installerScreen(clean), "undo"), undefined);
+	assert.equal(installerScreen(clean).control.kind, "progress");
+});
+
+test("S16: withError shows a generic error with retry and back, and both clear it", () => {
+	const s = withError(customAt("backups"), "could not reach the server");
+	const screen = installerScreen(s);
+	assert.ok(screen.error?.what.includes("could not reach the server"));
+	assert.deepEqual(screen.buttons.map(b => b.id), ["retry", "back"]);
+	assert.equal(installerScreen(act(s, press("retry")).state).error, undefined);
+	const back = act(s, press("back")).state;
+	assert.equal(installerScreen(back).error, undefined);
+	assert.equal(back.step, "backups");
+});
+
+test("S18: the summary has the human narrative, the review line, the detail and the closing, in en and es", () => {
+	const s = act(customAt("tasks"), press("assign-recommended"), next, next).state;
+	assert.equal(s.step, "summary");
+	const en = installerScreen(s).summary!;
+	assert.match(en.narrative, /balance the load/i);
+	assert.ok(en.narrative.includes("claude-bridge") && en.narrative.includes("antigravity"));
+	assert.ok(en.narrative.includes("Claude Sonnet 5.5"));
+	assert.match(en.narrative, /Mixed/);
+	assert.equal(en.review, "So you can review it, here is a summary of the configuration you selected:");
+	assert.equal(en.closing, "If you agree, press Enter to install, or cancel, or go back using the menus.");
+	const detail = en.detail.join("\n");
+	for (const part of ["claude-bridge, antigravity", "Claude Sonnet 5.5", "Reading files", "Works on its own", "pools.json", ".bak"]) assert.ok(detail.includes(part), part);
+	assert.match(detail, /1\. .*2\. /);
+	inLang("es", () => {
+		const es = installerScreen(s).summary!;
+		assert.match(es.narrative, /^Vas a balancear la carga entre estos proveedores/);
+		assert.match(es.narrative, /estrategia/);
+		assert.equal(es.review, "Para que puedas revisarlo te dejo un resumen de la configuración que seleccionaste:");
+		assert.equal(es.closing, "Si estás de acuerdo apretá Enter o cancelalo, o volvé atrás con los menús.");
+		assert.doesNotMatch(JSON.stringify(es), /installer\./);
+	});
+	assert.equal(installerScreen(customAt("tasks")).summary, undefined);
+});
+
+const deepOpen = () => act(customAt("tasks"), shortcut(installerScreen(customAt("tasks")), "d")!.action).state;
+const deepRunning = () => act(act(deepOpen(), { type: "select", index: 0 }).state, press("deep-analysis"));
+
+test("S22: deep analysis is reachable in the tasks step through the `d` shortcut", () => {
+	const screen = installerScreen(customAt("tasks"));
+	assert.equal(shortcut(screen, "d")!.enabled, true);
+	assert.deepEqual(shortcut(screen, "d")!.action, { type: "button", id: "deep-analysis" });
+	assert.equal(installerScreen(deepOpen()).control.kind, "choice");
+});
+
+test("S20: while a deep analysis runs the screen is pending and a second request is ignored", () => {
+	const first = deepRunning();
+	assert.equal((first.effects[0] as { type: string }).type, "deep-analysis");
+	const screen = installerScreen(first.state);
+	assert.equal(screen.pending?.kind, "deep-analysis");
+	assert.equal(typeof screen.pending?.startedAt, "number");
+	assert.ok(screen.pending!.label.length > 0);
+	assert.equal(button(screen, "deep-analysis")!.enabled, false);
+	const second = act(first.state, press("deep-analysis"), press("deep-analysis"));
+	assert.deepEqual(second.effects, []);
+	assert.deepEqual(installerScreen(second.state).pending, screen.pending);
+});
+
+test("S21: the finished analysis confirms duration, tokens and subscription; estimates are marked approximate", () => {
+	const running = deepRunning().state;
+	const report = { source: "ai+heuristic", estimatedTokens: 1234, tokensExact: true, summary: "ok", recommendations: [] } as never;
+	const done = withAdvisorReport(running, report, { durationMs: 12_340 });
+	const screen = installerScreen(done);
+	assert.equal(screen.pending, undefined);
+	assert.equal(screen.confirmation, "Consulted in 12.3 s, used 1234 tokens of subscription claude-bridge");
+	assert.equal(screen.analysis?.durationMs, 12_340);
+	assert.equal(screen.analysis?.tokens, 1234);
+	assert.equal(screen.analysis?.exact, true);
+	assert.equal(screen.analysis?.subscription, "claude-bridge");
+	const approx = installerScreen(withAdvisorReport(running, { ...(report as object), tokensExact: false } as never, { durationMs: 2000 }));
+	assert.equal(approx.confirmation, "Consulted in 2.0 s, used ~1234 tokens of subscription claude-bridge");
+	inLang("es", () => assert.equal(installerScreen(done).confirmation, "Consultado: tardó 12.3 s, gastó 1234 tokens de la suscripción claude-bridge"));
+});
+
+test("S16/S21: a failed or timed out analysis shows an error with retry (same model) and back, and frees the button", () => {
+	const running = deepRunning().state;
+	const failed = withAnalysisError(running, "timed out after 180 s");
+	const screen = installerScreen(failed);
+	assert.equal(screen.pending, undefined);
+	assert.ok(screen.error?.what.includes("timed out after 180 s"));
+	const retry = act(failed, press("retry"));
+	assert.equal((retry.effects[0] as { type: string; model: string }).model, (running.deepAnalysis as { model: string }).model);
+	assert.equal(installerScreen(retry.state).pending?.kind, "deep-analysis");
+	const back = act(failed, press("back")).state;
+	assert.equal(installerScreen(back).error, undefined);
+	assert.equal(back.step, "tasks");
 });

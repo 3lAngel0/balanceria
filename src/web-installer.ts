@@ -8,6 +8,8 @@ import {
 	installerInput,
 	installerScreen,
 	withAdvisorReport,
+	withAnalysisError,
+	withError,
 	withInstallProgress,
 	withInstallResult,
 	withScanResult,
@@ -25,7 +27,8 @@ import type { DetectedProvider, PoolConfig } from "./setup.ts";
 
 export type InstallerOutcome = "panel" | "advanced" | "exit";
 
-export type InstallResult = { ok: true; written: string[]; backups: string[]; profilesError?: string } | { ok: false; error: string };
+/** A failed install may still report what it wrote or copied, so the screen can offer Undo. */
+export type InstallResult = { ok: true; written: string[]; backups: string[]; profilesError?: string } | { ok: false; error: string; written?: string[]; backups?: string[] };
 
 /** What the host (Pi, or a test) does for the model's effects. */
 export interface InstallerHostDeps {
@@ -58,6 +61,8 @@ export function createInstallerSession(init: InstallerInit, deps: InstallerHostD
 	let state = initInstaller(init);
 	let closed = false;
 	let jobs = 0;
+	/** One deep analysis at a time: a second request never reaches the CLI (it would spend tokens twice). */
+	let analysing = false;
 	let outcome: InstallerOutcome | undefined;
 	const changeListeners: (() => void)[] = [];
 	const endListeners: ((outcome: InstallerOutcome) => void)[] = [];
@@ -76,6 +81,7 @@ export function createInstallerSession(init: InstallerInit, deps: InstallerHostD
 				if (!closed) job();
 			} catch (error) {
 				deps.notify(`ai-balancer: ${message(error)}`, "error");
+				state = withError(state, message(error));
 			} finally {
 				jobs -= 1;
 				changed();
@@ -85,9 +91,14 @@ export function createInstallerSession(init: InstallerInit, deps: InstallerHostD
 	const install = () => {
 		state = withInstallProgress(state, "copies", "running");
 		later(() => {
-			const result = deps.install(state.draft, state.current);
+			let result: InstallResult;
+			try {
+				result = deps.install(state.draft, state.current);
+			} catch (error) {
+				result = { ok: false, error: message(error) };
+			}
 			if (!result.ok) {
-				state = withInstallResult(state, { ok: false, written: [], backups: [], error: result.error });
+				state = withInstallResult(state, { ok: false, written: result.written ?? [], backups: result.backups ?? [], error: result.error });
 				return;
 			}
 			for (const id of INSTALL_PROGRESS_STEPS) state = withInstallProgress(state, id, "done");
@@ -120,16 +131,25 @@ export function createInstallerSession(init: InstallerInit, deps: InstallerHostD
 		else if (effect === "advanced") end("advanced");
 		else if (effect === "exit") end("exit");
 		else {
+			if (analysing) return;
+			analysing = true;
 			deps.notify(`ai-balancer: ${t("installer.tui.deepRunning")}`, "info");
 			const providers = state.draft.detected.filter(p => p.detected && state.draft.enabled.includes(p.id));
+			const startedAt = Date.now();
 			jobs += 1;
-			deps
-				.deepAnalysis(providers, state.draft.pools, effect.model)
+			// `deepAnalysis` may throw synchronously or reject; both end in the error screen and free the button.
+			Promise.resolve()
+				.then(() => deps.deepAnalysis(providers, state.draft.pools, effect.model))
 				.then(report => {
-					if (!closed) state = withAdvisorReport(state, report);
+					if (closed) return;
+					state = report.error ? withAnalysisError(state, report.error) : withAdvisorReport(state, report, { durationMs: Date.now() - startedAt });
 				})
-				.catch(error => deps.notify(`ai-balancer: ${message(error)}`, "warning"))
+				.catch(error => {
+					deps.notify(`ai-balancer: ${message(error)}`, "warning");
+					if (!closed) state = withAnalysisError(state, message(error));
+				})
 				.finally(() => {
+					analysing = false;
 					jobs -= 1;
 					changed();
 				});
@@ -194,6 +214,9 @@ const BUTTONS: Record<ButtonId, true> = {
 	"assign-task": true,
 	"deep-analysis": true,
 	"create-backup": true,
+	"move-up": true,
+	"move-down": true,
+	"cycle-method": true,
 };
 const MAX_INDEX = 10_000;
 const MAX_MOVE = 100;

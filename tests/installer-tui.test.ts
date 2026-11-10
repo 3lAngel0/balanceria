@@ -42,6 +42,8 @@ function recommendedRun(): InstallerState[] {
 	s = withScanResult(s, { found: both });
 	states.push(s); // scan (done)
 	s = step(s, next);
+	states.push(s); // subscriptions
+	s = step(s, next);
 	states.push(s); // summary
 	s = step(s, next);
 	states.push(s); // installing
@@ -121,9 +123,9 @@ test("the sidebar shows done, current and pending; below 70 columns it collapses
 	assert.match(wide, /● Finding subscriptions/);
 	assert.match(wide, /○ Summary/);
 	const narrow = text(renderInstaller(screen, { width: 60, mode: "none" }).lines);
-	assert.match(narrow, /Step 3 of 6/);
+	assert.match(narrow, /Step 3 of 7/);
 	assert.doesNotMatch(narrow, /○ Summary/);
-	assert.doesNotMatch(wide, /Step 3 of 6/);
+	assert.doesNotMatch(wide, /Step 3 of 7/);
 });
 
 test("checklists show details and warnings; progress shows a check per item", () => {
@@ -138,7 +140,7 @@ test("checklists show details and warnings; progress shows a check per item", ()
 });
 
 test("the summary groups lines by file and the error message is shown", () => {
-	const out = text(renderInstaller(installerScreen(recommendedRun()[4]!), { width: 100, mode: "none" }).lines);
+	const out = text(renderInstaller(installerScreen(recommendedRun()[5]!), { width: 100, mode: "none" }).lines);
 	for (const file of ["integrations.json", "pools.json", "profiles.json"]) assert.ok(out.includes(file));
 	const failed = withScanResult(step(initInstaller({ detected: both }), next, next), { error: "boom" });
 	assert.match(text(renderInstaller(installerScreen(failed), { width: 80, mode: "none" }).lines), /boom/);
@@ -248,6 +250,8 @@ test("keys on a full run reach Done", () => {
 	press("\r"); // welcome -> type
 	press("\r"); // type -> scan
 	s = withScanResult(s, { found: both });
+	press("\r"); // -> subscriptions
+	assert.equal(s.step, "subscriptions");
 	press("\r"); // -> summary
 	assert.equal(s.step, "summary");
 	press("\r"); // install

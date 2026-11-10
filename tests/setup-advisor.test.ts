@@ -247,3 +247,105 @@ test("renderPanel and renderControlCenter display active profile, pool assignmen
 	assert.match(centerText, /gentle-ai-worker/);
 	assert.match(centerText, /write/i);
 });
+
+// ---------------------------------------------------------------------------------------------
+// T5 (S21): createModelCliAiRunner reads the real usage from `--output-format json`, estimates otherwise, and times out
+// ---------------------------------------------------------------------------------------------
+
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { createModelCliAiRunner, parseCliOutput } from "../src/setup-advisor.ts";
+
+/** A fake CLI: records its arguments next to itself, then runs `body` (a shell snippet). */
+function fakeCli(body: string): { bin: string; args(): string[]; cleanup(): void } {
+	const dir = mkdtempSync(join(tmpdir(), "fake-cli-"));
+	const bin = join(dir, "cli");
+	writeFileSync(bin, `#!/bin/sh\nfor a in "$@"; do printf '%s\\n' "$a" >> "${dir}/args"; done\n${body}\n`);
+	chmodSync(bin, 0o755);
+	return { bin, args: () => readFileSync(join(dir, "args"), "utf8").split("\n").filter(Boolean), cleanup: () => rmSync(dir, { recursive: true, force: true }) };
+}
+
+const ANSWER = '{"summary":"s","roles":{}}';
+
+test("the agy runner asks for JSON output and reports the exact usage the CLI gives", async () => {
+	const cli = fakeCli(`cat <<'EOF'\n${JSON.stringify({ response: ANSWER, usageMetadata: { promptTokenCount: 700, candidatesTokenCount: 142, totalTokenCount: 842 } })}\nEOF`);
+	try {
+		const out = await createModelCliAiRunner("antigravity/gemini-3-8-flash", cli.bin, 5000)("the prompt");
+		assert.deepEqual(out, { text: ANSWER, tokensUsed: 842, tokensExact: true });
+		const args = cli.args();
+		assert.deepEqual(args.slice(0, 4), ["--model", "gemini-3-8-flash", "--output-format", "json"]);
+		assert.ok(args.includes("--print") && args.includes("the prompt"));
+	} finally {
+		cli.cleanup();
+	}
+});
+
+test("the claude runner sums the usage fields of its JSON result", async () => {
+	const claude = fakeCli(`cat <<'EOF'\n${JSON.stringify({ type: "result", result: ANSWER, usage: { input_tokens: 10, output_tokens: 20, cache_read_input_tokens: 300, cache_creation_input_tokens: 5 } })}\nEOF`);
+	const agy = fakeCli("exit 9");
+	try {
+		const out = await createModelCliAiRunner("claude-bridge/claude-sonnet-5-5", agy.bin, 5000, claude.bin)("p");
+		assert.deepEqual(out, { text: ANSWER, tokensUsed: 335, tokensExact: true });
+		assert.deepEqual(claude.args(), ["-p", "p", "--output-format", "json"]);
+		assert.throws(() => agy.args(), /ENOENT/, "agy is only the fallback");
+	} finally {
+		claude.cleanup();
+		agy.cleanup();
+	}
+});
+
+test("without reported usage the tokens are an estimate flagged as approximate", async () => {
+	const plain = fakeCli(`printf '%s' '${ANSWER}'`);
+	const noUsage = fakeCli(`printf '%s' '{"result":"${"x".repeat(2000)}"}'`);
+	try {
+		const a = await createModelCliAiRunner("antigravity/gemini-3-8-flash", plain.bin, 5000)("p".repeat(2000));
+		assert.equal(a.text, ANSWER);
+		assert.equal(a.tokensExact, false);
+		assert.equal(a.tokensUsed, Math.round((2000 + ANSWER.length) / 4));
+		const b = await createModelCliAiRunner("antigravity/gemini-3-8-flash", noUsage.bin, 5000)("p");
+		assert.equal(b.tokensExact, false);
+		assert.ok(b.tokensUsed >= 500);
+	} finally {
+		plain.cleanup();
+		noUsage.cleanup();
+	}
+});
+
+test("parseCliOutput keeps plain text and reads text plus usage from JSON", () => {
+	assert.deepEqual(parseCliOutput("  hello \n"), { text: "hello" });
+	assert.deepEqual(parseCliOutput('{"result":" hi ","usage":{"total_tokens":77}}'), { text: "hi", tokens: 77 });
+	assert.deepEqual(parseCliOutput('{"foo":1}'), { text: '{"foo":1}' });
+});
+
+test("a CLI that outlives the time limit rejects with a timeout, and the advisor report carries the error", async () => {
+	const slow = fakeCli("sleep 5");
+	try {
+		const runner = createModelCliAiRunner("antigravity/gemini-3-8-flash", slow.bin, 150);
+		await assert.rejects(runner("p"), /timed out after \d+ s/);
+		const report = await recommendRolesWithAdvisor({ providers: DETECTED, pools: POOLS }, { aiRunner: runner, deep: true });
+		assert.equal(report.source, "heuristic");
+		assert.match(report.error ?? "", /timed out/);
+	} finally {
+		slow.cleanup();
+	}
+});
+
+test("the advisor report keeps exactness and still reports usage when the answer changed nothing", async () => {
+	const exact = await recommendRolesWithAdvisor(
+		{ providers: DETECTED, pools: POOLS },
+		{ aiRunner: async () => ({ text: JSON.stringify({ summary: "s", roles: { "gentle-ai-explore": { model: "antigravity/gemini-3-8-flash", reason: "cheap reading" } } }), tokensUsed: 500, tokensExact: true }) },
+	);
+	assert.equal(exact.tokensExact, true);
+	assert.equal(exact.estimatedTokens, 500);
+	const unchanged = await recommendRolesWithAdvisor({ providers: DETECTED, pools: POOLS }, { aiRunner: async () => ({ text: "{}", tokensUsed: 90, tokensExact: false }) });
+	assert.equal(unchanged.estimatedTokens, 90);
+	assert.equal(unchanged.tokensExact, false);
+	const garbage = await recommendRolesWithAdvisor({ providers: DETECTED, pools: POOLS }, { aiRunner: async () => ({ text: "no json", tokensUsed: 5 }) });
+	assert.ok(garbage.error);
+});
+
+test("the default deep-analysis time limit is realistic and configurable", async () => {
+	const { DEEP_ANALYSIS_TIMEOUT_MS } = await import("../src/setup-advisor.ts");
+	assert.ok(DEEP_ANALYSIS_TIMEOUT_MS >= 120_000);
+});

@@ -35,7 +35,7 @@ interface Harness {
 	cleanup(): Promise<void>;
 }
 
-async function harness(options: { active?: boolean; detect?: () => DetectedProvider[] } = {}): Promise<Harness> {
+async function harness(options: { active?: boolean; detect?: () => DetectedProvider[]; deepAnalysis?: InstallerHostDeps["deepAnalysis"]; install?: InstallerHostDeps["install"] } = {}): Promise<Harness> {
 	const root = mkdtempSync(join(tmpdir(), "web-installer-"));
 	const tokenFile = join(root, "web-token");
 	writeFileSync(tokenFile, TOKEN, { mode: 0o600 });
@@ -43,10 +43,12 @@ async function harness(options: { active?: boolean; detect?: () => DetectedProvi
 	const notices: string[] = [];
 	const deps: InstallerHostDeps = {
 		detect: options.detect ?? (() => both),
-		install: (draft, current) =>
-			applyStepper(draft, { root, current, profilesPath: join(root, "profiles.json"), writeConfig: writeConfigSafely, writeProfiles: () => {} }),
+		install:
+			options.install ??
+			((draft, current) =>
+			applyStepper(draft, { root, current, profilesPath: join(root, "profiles.json"), writeConfig: writeConfigSafely, writeProfiles: () => {} })),
 		undo: backups => backups.forEach(() => {}),
-		deepAnalysis: async () => ({ recommendations: [] }) as never,
+		deepAnalysis: options.deepAnalysis ?? (async () => ({ recommendations: [] }) as never),
 		notify: message => notices.push(message),
 	};
 	const session = createInstallerSession({ detected: both }, deps);
@@ -163,7 +165,7 @@ test("GET returns the screen of the shared model", async () => {
 		assert.equal(view.screen.title, h.session.screen().title);
 		assert.equal(view.pending, false);
 		assert.equal(view.finished, false);
-		assert.equal(view.text.stepOf, "Step 1 of 6");
+		assert.equal(view.text.stepOf, "Step 1 of 7");
 		assert.ok(view.text.help.length > 0);
 	} finally {
 		await h.cleanup();
@@ -247,6 +249,9 @@ test("a recommended install writes through the injected deps and finishes with t
 		let view = await settle(h);
 		assert.equal(view.screen.step, "scan");
 		assert.equal(view.screen.control.kind, "progress");
+		await post(h, { type: "next" });
+		view = (await get(h)).json();
+		assert.equal(view.screen.step, "subscriptions");
 		await post(h, { type: "next" });
 		view = (await get(h)).json();
 		assert.equal(view.screen.step, "summary");
@@ -342,4 +347,119 @@ test("the page is self-contained and fits the server CSP", async () => {
 	} finally {
 		await h.cleanup();
 	}
+});
+
+// ---------------------------------------------------------------------------------------------
+// T5: deep-analysis guard, timing and error propagation
+// ---------------------------------------------------------------------------------------------
+
+async function toDeepPicker(h: Harness): Promise<any> {
+	await post(h, { type: "next" });
+	await post(h, { type: "select", index: 1 });
+	await post(h, { type: "next" });
+	await settle(h);
+	let view: any;
+	for (let i = 0; i < 3; i++) view = (await post(h, { type: "next" })).json(); // subscriptions, backups, tasks
+	assert.equal(view.screen.step, "tasks");
+	view = (await post(h, { type: "button", id: "deep-analysis" })).json();
+	assert.equal(view.screen.control.kind, "choice");
+	return (await post(h, { type: "select", index: 0 })).json();
+}
+
+const REPORT = { source: "ai+heuristic", estimatedTokens: 900, tokensExact: true, summary: "ok", recommendations: [] } as never;
+
+test("two deep-analysis requests in a row call the runner once, show progress, then the confirmation", async () => {
+	let calls = 0;
+	let release!: () => void;
+	const gate = new Promise<void>(resolve => (release = resolve));
+	const h = await harness({
+		deepAnalysis: async () => {
+			calls += 1;
+			await gate;
+			return REPORT;
+		},
+	});
+	try {
+		await toDeepPicker(h);
+		const replies = await Promise.all([post(h, { type: "button", id: "deep-analysis" }), post(h, { type: "button", id: "deep-analysis" }), post(h, { type: "button", id: "deep-analysis" })]);
+		assert.ok(replies.every(r => r.status === 200));
+		const view = (await get(h)).json();
+		assert.equal(view.pending, true);
+		assert.equal(view.screen.pending.kind, "deep-analysis");
+		assert.equal(view.screen.buttons.find((b: any) => b.id === "deep-analysis").enabled, false);
+		release();
+		const done = await settle(h);
+		assert.equal(calls, 1);
+		assert.equal(done.screen.pending, undefined);
+		assert.equal(done.screen.analysis.tokens, 900);
+		assert.equal(done.screen.analysis.exact, true);
+		assert.ok(done.screen.analysis.durationMs >= 0);
+		assert.match(done.screen.confirmation, /^Consulted in \d+\.\d s, used 900 tokens of subscription claude-bridge$/);
+		// and a new analysis is possible once it finished
+		await post(h, { type: "button", id: "deep-analysis" });
+		assert.equal((await get(h)).json().screen.control.kind, "choice");
+	} finally {
+		release();
+		await h.cleanup();
+	}
+});
+
+test("a deep analysis that fails or times out ends in an error screen, frees the button and never breaks the session", async () => {
+	let calls = 0;
+	const h = await harness({
+		deepAnalysis: async () => {
+			calls += 1;
+			if (calls === 1) return { ...(REPORT as object), source: "heuristic", error: "timed out after 180 s" } as never;
+			if (calls === 2) throw new Error("agy exploded");
+			return REPORT;
+		},
+	});
+	try {
+		await toDeepPicker(h);
+		await post(h, { type: "button", id: "deep-analysis" });
+		let view = await settle(h);
+		assert.match(view.screen.error.what, /timed out after 180 s/);
+		assert.deepEqual(view.screen.buttons.map((b: any) => b.id), ["retry", "back"]);
+		assert.equal(view.screen.pending, undefined);
+		await post(h, { type: "button", id: "retry" });
+		view = await settle(h);
+		assert.match(view.screen.error.what, /agy exploded/);
+		await post(h, { type: "button", id: "retry" });
+		view = await settle(h);
+		assert.equal(view.screen.error, undefined);
+		assert.equal(calls, 3);
+		assert.ok(view.screen.confirmation);
+	} finally {
+		await h.cleanup();
+	}
+});
+
+test("an install that throws shows the install error with retry / back instead of hanging", async () => {
+	const h = await harness({
+		install: () => {
+			throw new Error("EACCES: cannot write pools.json");
+		},
+	});
+	try {
+		await post(h, { type: "next" });
+		await post(h, { type: "next" });
+		await settle(h);
+		await post(h, { type: "next" }); // subscriptions
+		await post(h, { type: "next" }); // summary
+		await post(h, { type: "button", id: "install" });
+		const view = await settle(h);
+		assert.equal(view.screen.step, "installing");
+		assert.match(view.screen.error.what, /EACCES/);
+		assert.ok(view.screen.buttons.some((b: any) => b.id === "retry" && b.enabled));
+		assert.ok(view.screen.buttons.some((b: any) => b.id === "back" && b.enabled));
+		const back = (await post(h, { type: "button", id: "back" })).json();
+		assert.equal(back.screen.step, "summary");
+	} finally {
+		await h.cleanup();
+	}
+});
+
+test("the page may send the new backup actions and nothing else", () => {
+	for (const id of ["move-up", "move-down", "cycle-method"]) assert.deepEqual(parseInstallerAction({ type: "button", id }), { type: "button", id });
+	assert.equal(parseInstallerAction({ type: "button", id: "cycle-strategy" }), undefined);
 });
