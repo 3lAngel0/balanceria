@@ -324,42 +324,44 @@ export function installerPageScript(): string {
 	function renderCapybara(pose) {
 		var root = svg("svg", {
 			class: "cap",
-			viewBox: "0 0 24 24",
-			width: "120",
-			height: "120",
+			viewBox: "0 0 22 25",
+			width: "132",
+			height: "150",
 			role: "img",
 			"aria-label": view.text.mascot
 		});
 
 		var SPRITE = [
-			".........PPRRP..........",
-			".......PPrRDDdRP........",
-			".....PRdDDdDdDDP........",
-			".....PRDdRRdDDDP........",
-			".......PDdDDddP.........",
-			"......G.GPRRP.G.G.......",
-			".......##...######......",
-			".....##OO###HHHHHH##....",
-			"....#OH..SHHHHHHHHH##...",
-			"...#OO...SHHHHHHHHHHHH#.",
-			"...#OOOO.EHHHHHHHHHHHHEE#",
-			"...#OOOOOHHHHHHHHHHHOOEE#",
-			"....##OOOSHHHHHHHHHOOO#.",
-			"..##BBBBBB#######OOOO#..",
-			".#HOOBBBLLBBbBBLBB####...",
-			"#HHHOOOBBoBBbBBLLBo#....",
-			"HHHHHOOOOOSsBBbBBOO#....",
-			"HHHHHOOOOOOSsBbB#OO#....",
-			"#HHHOOOOOOOOSsB#OOO#....",
-			".##OOOOOOOOOOSs#OOO#....",
-			"#OS#OOOOOOOOOOSs#OO#....",
-			"#OS#OOOOOOOOOOSs#EE#...",
-			"#OSSS#OOOOOOOOOSs#EEE#..",
-			".####.##########.#####.."
+					"............##.##.....",
+					"...........#G#P#G#....",
+					"..........#RPPRRPP#...",
+					".........#PdDdDDdRP##.",
+					".........#PDdRRdDRP##.",
+					".....#####PddDDdDP#S#.",
+					"...##MM##.##G##G##S##.",
+					"..#SSSS##MMMMHHHMMM#..",
+					"..#SSSS#MMHHHHHHMMM#..",
+					"..#S#SS#MHHHMM#MHMM#..",
+					"....#S#SMMHMMM#MHHM#..",
+					"....#S#SSMHHMMMH#BLB#.",
+					"..####SSSMMMMMMMbBLBb#",
+					".##SS#SSSMMMMMHMM#B#M#",
+					".#SMMSS#SMMHMHHMMHMMM#",
+					"##MMMMMSSSSMHHHHMMMMM#",
+					"#SMMMMMMMMMHHHHHHHMMM#",
+					"#MMHMMMMHHMHHHHHHHHMM#",
+					"#MHHHMSMMMMHHHHMHHMMM#",
+					"#MMMHHMSMHMMMHMMMMMHM#",
+					"#MMMMHHMSMMHMMMMMMMMM#",
+					".#MMMMMMSMMMMMMM#SMM#.",
+					"..##MMMS##MMS###SSS#..",
+					"...##MSSS#MSSS######..",
+					"....##########........"
 		];
 
 		var CLASS_MAP = {
 			"#": "c-out",
+			"M": "c-fur",
 			"O": "c-fur",
 			"H": "c-hi",
 			"S": "c-sh",
@@ -395,25 +397,15 @@ export function installerPageScript(): string {
 
 		var eye = svg("g", { class: "eye" });
 		if (pose === "happy") {
-			eye.appendChild(rect("c-out", 7, 8, 1, 1));
-			eye.appendChild(rect("c-hi", 8, 8, 1, 1));
-			eye.appendChild(rect("c-out", 9, 8, 1, 1));
-			eye.appendChild(rect("c-hi", 7, 9, 1, 1));
-			eye.appendChild(rect("c-out", 8, 9, 1, 1));
-			eye.appendChild(rect("c-hi", 9, 9, 1, 1));
-			eye.appendChild(rect("c-fur", 7, 10, 2, 1));
-			eye.appendChild(rect("c-r-neon sparkle", 6, 0, 1, 1));
-			eye.appendChild(rect("c-r-neon sparkle", 18, 1, 1, 1));
-			eye.appendChild(rect("c-r-neon sparkle", 4, 4, 1, 1));
+			eye.appendChild(rect("c-out", 14, 9, 1, 1));
+			eye.appendChild(rect("c-hi", 13, 9, 1, 1));
+			eye.appendChild(rect("c-r-neon sparkle", 15, 2, 1, 1));
+			eye.appendChild(rect("c-r-neon sparkle", 6, 2, 1, 1));
 		} else if (pose === "working") {
-			eye.appendChild(rect("c-out", 7, 8, 2, 1));
-			eye.appendChild(rect("c-out", 7, 9, 1, 1));
-			eye.appendChild(rect("c-glint", 8, 9, 1, 1));
-			eye.appendChild(rect("c-fur", 7, 10, 2, 1));
+			eye.appendChild(rect("c-out", 14, 9, 1, 1));
+			eye.appendChild(rect("c-glint", 14, 10, 1, 1));
 		} else {
-			eye.appendChild(rect("c-hi", 7, 8, 2, 1));
-			eye.appendChild(rect("c-out eye-blink", 7, 9, 3, 1));
-			eye.appendChild(rect("c-fur", 7, 10, 2, 1));
+			eye.appendChild(rect("c-out eye-blink", 14, 9, 1, 2));
 		}
 		body.appendChild(eye);
 		root.appendChild(body);

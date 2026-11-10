@@ -494,7 +494,7 @@ test("T7 (S11, S14, S15, S17, S19): /installer serves Design 3 conversational gu
 			assert.ok(style.includes(token), `missing style token: ${token}`);
 		}
 		const script = installerPageScript();
-		for (const part of ["0 0 24 24", "close-note", "bubble", "guide", "rail", "stage", "help", "defs", "narr", "steps-run"]) {
+		for (const part of ["0 0 22 25", "close-note", "bubble", "guide", "rail", "stage", "help", "defs", "narr", "steps-run"]) {
 			assert.ok(script.includes(part), `missing script part: ${part}`);
 		}
 		const view = (await get(h)).json();
