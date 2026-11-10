@@ -1,14 +1,17 @@
 import { execFile } from "node:child_process";
-import { mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { copyToClipboard, type ExtensionAPI, type ExtensionCommandContext, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Key, matchesKey, SelectList, truncateToWidth, visibleWidth, type TuiMouseEvent, type TuiMouseEventResult } from "@earendil-works/pi-tui";
-import { CONTENT_X, emphasize, hitTest, layoutButtons, sameTarget, tabHitAreas, wheelOffset, type ButtonCell, type HitLayout, type MouseTarget } from "./control-center-mouse.ts";
+import { CONTENT_X, CONTENT_Y, emphasize, hitTest, layoutButtons, sameTarget, tabHitAreas, wheelOffset, type ButtonCell, type HitLayout, type MouseTarget } from "./control-center-mouse.ts";
 import { applyAdvisorReport, applyStepper, initStepper, type StepperCurrent } from "./setup-stepper.ts";
 import { initScreen, renderStepper, stepperInput, type StepperEffect, type StepperEvent, type StepperTone, stepperThemeColor } from "./setup-stepper-view.ts";
-import { initDummyGuide, dummyGuideInput, initModePrompt, modePromptInput, renderDummyGuide, renderModePrompt, type SetupMode } from "./setup-dummy-guide.ts";
+import { INSTALL_PROGRESS_STEPS, initInstaller, installerInput, installerScreen, withAdvisorReport, withInstallProgress, withInstallResult, withScanResult, type InstallerAction, type InstallerEffect, type InstallerState } from "./installer-model.ts";
+import { planUndo } from "./installer-plan.ts";
+import { hitInstaller, installerKey, renderInstaller, type InstallerHit } from "./installer-tui.ts";
+import { channelPromptInput, initChannelPrompt, renderChannelPrompt, type InstallChannel } from "./installer-channel.ts";
 import { initLangPrompt, langPromptInput, renderLangPrompt } from "./setup-lang-prompt.ts";
 import { BALANCER_MENU, balancerMenu, glossaryText, resolveBalancerArgs } from "./balancer-menu.ts";
 import { initLang, getLang, setLang, saveLangSetting, t } from "./i18n/index.ts";
@@ -190,6 +193,11 @@ function readAgyUsage(onReport: (report: unknown) => void): Promise<boolean> {
 			}
 		});
 	});
+}
+
+/** Web install channel. Stub: the web installer comes with the web page (next task). */
+export async function runWebInstall(ctx: ExtensionContext): Promise<void> {
+	ctx.ui.notify(`ai-balancer: ${t("installer.tui.webSoon")}`, "info");
 }
 
 export default function aiBalancer(pi: ExtensionAPI) {
@@ -1294,7 +1302,7 @@ export default function aiBalancer(pi: ExtensionAPI) {
 						if (input === "D" || (input === "d" && tab === "overview")) {
 							done();
 							setTimeout(() => {
-								void runSetup(ctx, { mode: "guided" });
+								void runSetup(ctx, { dummy: true });
 							}, 50);
 							return;
 						}
@@ -1805,20 +1813,25 @@ export default function aiBalancer(pi: ExtensionAPI) {
 		});
 
 	/** `/balancer setup`: the stepper overlay, or the classic prompts when there is no UI or no custom overlay. */
-	const runSetup = async (ctx: ExtensionContext, options?: { classic?: boolean; mode?: SetupMode }): Promise<void> => {
+	const runSetup = async (ctx: ExtensionContext, options?: { classic?: boolean; dummy?: boolean; skip?: boolean }): Promise<void> => {
 		if (options?.classic || !ctx.hasUI || typeof ctx.ui?.custom !== "function") {
 			await runClassicSetup(ctx);
 			return;
 		}
 		await promptSetupLanguage(ctx);
-		const mode = options?.mode ?? (await promptSetupMode(ctx));
-		if (!mode) return;
-		if (mode === "guided") {
-			const detected = detectSystemProviders();
-			const ok = await openDummyGuide(ctx, detected.filter(d => d.detected).map(d => d.label));
-			if (!ok) return;
+		if (options?.skip) {
+			await openSetupStepper(ctx);
+			return;
 		}
-		await openSetupStepper(ctx, { guided: mode === "guided" });
+		if (!options?.dummy) {
+			const channel = await promptInstallChannel(ctx);
+			if (!channel) return;
+			if (channel === "web") {
+				await runWebInstall(ctx);
+				return;
+			}
+		}
+		await openInstaller(ctx);
 	};
 
 	/** Overlay frame shared by the setup prompts: a bordered box around the view's lines. */
@@ -1829,55 +1842,36 @@ export default function aiBalancer(pi: ExtensionAPI) {
 		return [border(`╭${"─".repeat(inner + 2)}╮`), ...lines.map(row), border(`╰${"─".repeat(inner + 2)}╯`)];
 	};
 
-	const promptSetupMode = async (ctx: ExtensionContext): Promise<SetupMode | undefined> => {
-		let state = initModePrompt("guided");
+	const promptInstallChannel = async (ctx: ExtensionContext): Promise<InstallChannel | undefined> => {
+		let state = initChannelPrompt();
 		const mode = colorMode();
-		return ctx.ui.custom<SetupMode | undefined>(
-			(tui, theme, _keybindings, done) => ({
-				render(width: number): string[] {
-					return framed(theme, width, renderModePrompt(state, Math.max(20, width - 4), mode));
-				},
-				handleInput(data: string) {
-					state = modePromptInput(state, { type: "key", data: canonicalKey(data) });
+		return ctx.ui.custom<InstallChannel | undefined>(
+			(tui, theme, _keybindings, done) => {
+				const finish = () => {
 					if (state.cancelled) done(undefined);
 					else if (state.done) done(state.selected);
 					else tui.requestRender();
-				},
-				invalidate() {},
-				dispose() {},
-			}),
-			{ overlay: true, overlayOptions: { width: "70%", minWidth: 44, anchor: "center" } },
-		);
-	};
-
-	/** The pedagogical guide; resolves true when the user reaches the end or skips to the stepper. */
-	const openDummyGuide = async (ctx: ExtensionContext, detectedIds: readonly string[]): Promise<boolean> => {
-		let state = initDummyGuide(detectedIds);
-		const mode = colorMode();
-		const result = await ctx.ui.custom<boolean>(
-			(tui, theme, _keybindings, done) => {
-				const animate = motionEnabled();
-				const motion = animate ? setInterval(() => tui.requestRender(), FRAME_MS) : undefined;
-				motion?.unref?.();
+				};
 				return {
 					render(width: number): string[] {
-						return framed(theme, width, renderDummyGuide(state, Math.max(20, width - 4), mode, frameOf(Date.now()), animate));
+						return framed(theme, width, renderChannelPrompt(state, Math.max(20, width - 4), mode));
 					},
 					handleInput(data: string) {
-						state = dummyGuideInput(state, { type: "key", data: canonicalKey(data) });
-						if (state.cancelled) done(false);
-						else if (state.done) done(true);
-						else tui.requestRender();
+						state = channelPromptInput(state, { type: "key", data: canonicalKey(data) });
+						finish();
+					},
+					handleMouse(event: TuiMouseEvent): TuiMouseEventResult | undefined {
+						if (event.type !== "click" || event.button !== "left") return undefined;
+						state = channelPromptInput(state, { type: "mouse", kind: "click", x: event.x - CONTENT_X, y: event.y - CONTENT_Y });
+						finish();
+						return { handled: true, render: true };
 					},
 					invalidate() {},
-					dispose() {
-						if (motion) clearInterval(motion);
-					},
+					dispose() {},
 				};
 			},
-			{ overlay: true, overlayOptions: { width: "80%", minWidth: 60, anchor: "center" } },
+			{ overlay: true, overlayOptions: { width: "70%", minWidth: 44, anchor: "center" } },
 		);
-		return result === true;
 	};
 
 	const promptSetupLanguage = async (ctx: ExtensionContext): Promise<void> => {
@@ -1939,7 +1933,140 @@ export default function aiBalancer(pi: ExtensionAPI) {
 		return data;
 	};
 
-	const openSetupStepper = async (ctx: ExtensionContext, options?: { guided?: boolean }): Promise<void> => {
+	/** The installer overlay: the shared model drawn in the terminal; hosts the scan, install, analysis and undo effects. */
+	const openInstaller = async (ctx: ExtensionContext): Promise<void> => {
+		const readJson = (file: string): unknown => {
+			try {
+				return JSON.parse(readFileSync(join(ROOT, file), "utf8"));
+			} catch {
+				return null;
+			}
+		};
+		const store = loadProfilesStore();
+		const current: StepperCurrent = { pools: readJson("pools.json"), integrations: readJson("integrations.json"), profiles: store };
+		let state: InstallerState = initInstaller({ detected: detectSystemProviders(), current, workflow: store?.workflow?.[store.active ?? ""] });
+
+		const outcome = await ctx.ui.custom<"panel" | "advanced" | "exit">(
+			(tui, theme, _keybindings, done) => {
+				const mode = colorMode();
+				let focus: number | undefined;
+				let hits: InstallerHit[] = [];
+				let closed = false;
+				const redraw = () => {
+					if (!closed) tui.requestRender();
+				};
+				const later = (job: () => void | Promise<void>) => {
+					setTimeout(() => {
+						if (!closed) void Promise.resolve(job()).catch(error => ctx.ui.notify(`ai-balancer: ${error instanceof Error ? error.message : String(error)}`, "error"));
+					}, 0);
+				};
+				const install = () => {
+					state = withInstallProgress(state, "copies", "running");
+					redraw();
+					later(() => {
+						const result = applyStepper(state.draft, {
+							root: ROOT,
+							current,
+							profilesPath: DEFAULT_PROFILES_PATH,
+							writeConfig: writeConfigSafely,
+							writeProfiles: (name, roles, workflow) => saveProfileRoles(DEFAULT_PROFILES_PATH, name, roles, (provider, model) => Boolean(ctx.modelRegistry.find(provider, model)), workflow),
+						});
+						if (!result.ok) {
+							state = withInstallResult(state, { ok: false, written: [], backups: [], error: result.error });
+							redraw();
+							return;
+						}
+						for (const id of INSTALL_PROGRESS_STEPS) state = withInstallProgress(state, id, "done");
+						if (result.profilesError) ctx.ui.notify(`ai-balancer: ${t("setup.stepper.profilesFailed", { error: result.profilesError })}`, "warning");
+						state = withInstallResult(state, { ok: true, written: result.written, backups: result.backups });
+						refreshStatus(ctx);
+						redraw();
+					});
+				};
+				const undo = () => {
+					const steps = planUndo(state.backups);
+					try {
+						for (const step of steps) copyFileSync(step.backup, step.file);
+						ctx.ui.notify(`ai-balancer: ${t("installer.tui.undone", { count: steps.length })}`, "info");
+						refreshStatus(ctx);
+					} catch (error) {
+						ctx.ui.notify(`ai-balancer: ${t("installer.tui.undoFailed", { error: error instanceof Error ? error.message : String(error) })}`, "error");
+					}
+				};
+				const runEffect = (effect: InstallerEffect) => {
+					if (effect === "scan") {
+						later(() => {
+							try {
+								state = withScanResult(state, { found: detectSystemProviders() });
+							} catch (error) {
+								state = withScanResult(state, { error: error instanceof Error ? error.message : String(error) });
+							}
+							redraw();
+						});
+					} else if (effect === "install") install();
+					else if (effect === "undo") undo();
+					else if (effect === "open-panel") done("panel");
+					else if (effect === "advanced") done("advanced");
+					else if (effect === "exit") done("exit");
+					else {
+						ctx.ui.notify(`ai-balancer: ${t("installer.tui.deepRunning")}`, "info");
+						const providers = state.draft.detected.filter(p => p.detected && state.draft.enabled.includes(p.id));
+						void recommendRolesWithAdvisor({ providers, pools: state.draft.pools }, { aiRunner: createModelCliAiRunner(effect.model, AGY_BIN), deep: true })
+							.then(report => {
+								state = withAdvisorReport(state, report);
+								redraw();
+							})
+							.catch(error => ctx.ui.notify(`ai-balancer: ${error instanceof Error ? error.message : String(error)}`, "warning"));
+					}
+				};
+				const apply = (action: InstallerAction) => {
+					const result = installerInput(state, action);
+					if (result.state.step !== state.step) focus = undefined;
+					state = result.state;
+					if (result.effect) runEffect(result.effect);
+				};
+				return {
+					render(width: number): string[] {
+						const inner = Math.max(20, width - 4);
+						const rows = Math.max(14, ((tui as { terminal?: { rows?: number } }).terminal?.rows ?? 40) - 6);
+						const view = renderInstaller(installerScreen(state), { width: inner, mode, focus, rows });
+						hits = view.hits;
+						const border = (text: string) => theme.fg("border", text);
+						const row = (text: string) => `${border("│")} ${truncateToWidth(text, inner, "…", true)} ${border("│")}`;
+						const painted = view.lines.map(line => paintTones(line, (name, text) => theme.fg(name, text)));
+						return [border(`╭${"─".repeat(inner + 2)}╮`), ...painted.map(row), border(`╰${"─".repeat(inner + 2)}╯`)];
+					},
+					handleInput(data: string) {
+						const result = installerKey(installerScreen(state), focus, canonicalKey(data));
+						focus = result.focus;
+						for (const action of result.actions) apply(action);
+						redraw();
+					},
+					// Pointer events only reach overlays under TuiAltScreen; without it the keys still work.
+					handleMouse(event: TuiMouseEvent): TuiMouseEventResult | undefined {
+						if (event.type !== "click" || event.button !== "left") return undefined;
+						const action = hitInstaller(hits, event.x - CONTENT_X, event.y - CONTENT_Y);
+						if (!action) return undefined;
+						focus = undefined;
+						apply(action);
+						redraw();
+						return { handled: true, render: false };
+					},
+					invalidate() {},
+					dispose() {
+						closed = true;
+					},
+				};
+			},
+			{ overlay: true, overlayOptions: { width: "90%", minWidth: 72, anchor: "center" } },
+		);
+
+		if (outcome === "panel") await openControlCenter(ctx);
+		else if (outcome === "advanced") await openSetupStepper(ctx);
+		else if (!state.finished) ctx.ui.notify(`ai-balancer: ${t("setup.stepper.cancelled")}`, "info");
+	};
+
+	const openSetupStepper = async (ctx: ExtensionContext): Promise<void> => {
 		const detected = detectSystemProviders();
 		if (!detected.some(p => p.detected && p.kind === "subscription")) {
 			ctx.ui.notify(`ai-balancer: ${t("setup.stepper.noProviders")}`, "warning");
@@ -1955,7 +2082,7 @@ export default function aiBalancer(pi: ExtensionAPI) {
 		const store = loadProfilesStore();
 		const current: StepperCurrent = { pools: readJson("pools.json"), integrations: readJson("integrations.json"), profiles: store };
 		const recommended = generateRecommendedConfig(detected.filter(p => p.detected), { hasModel: (provider, model) => Boolean(ctx.modelRegistry.find(provider, model)) }).pools;
-		let screen = initScreen(initStepper(detected, recommended, store?.profiles?.[store.active ?? ""] ?? {}, store?.workflow?.[store.active ?? ""], options), current);
+		let screen = initScreen(initStepper(detected, recommended, store?.profiles?.[store.active ?? ""] ?? {}, store?.workflow?.[store.active ?? ""]), current);
 
 		const effect = await ctx.ui.custom<"save" | "cancel" | "discard" | "none">(
 			(tui, theme, _keybindings, done) => {
@@ -2382,11 +2509,11 @@ export default function aiBalancer(pi: ExtensionAPI) {
 				return;
 			}
 			if (command === "setup --dummy" || command === "setup -d") {
-				await runSetup(ctx, { mode: "guided" });
+				await runSetup(ctx, { dummy: true });
 				return;
 			}
 			if (command === "setup --skip" || command === "setup -s") {
-				await runSetup(ctx, { mode: "advanced" });
+				await runSetup(ctx, { skip: true });
 				return;
 			}
 			if (command === "setup classic") {
