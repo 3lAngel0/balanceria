@@ -152,10 +152,11 @@ table.tasks tr:hover td, table.tasks tr:focus-within td { background: var(--surf
 .dg-d { fill: var(--dim); font: 12px ui-monospace, Menlo, Consolas, monospace; }
 
 .cap { display: block; shape-rendering: crispEdges; image-rendering: pixelated; }
-.cap .c-out { fill: #2b170f; }
-.cap .c-fur { fill: #ba7636; }
-.cap .c-hi { fill: #dc9852; }
-.cap .c-sh { fill: #8c4e20; }
+.cap .c-out { fill: #221612; }
+	.cap .c-fur { fill: #e49958; }
+	.cap .c-hi { fill: #f7bb7d; }
+	.cap .c-sh { fill: #a55d2c; }
+	.cap .c-snout { fill: #80583e; }
 .cap .c-dark { fill: #1a0b06; }
 .cap .c-glint { fill: #ffffff; }
 .cap .c-s-base { fill: #2f69e6; }
@@ -332,30 +333,30 @@ export function installerPageScript(): string {
 		});
 
 		var SPRITE = [
-					"............PRP.......",
-					"...........PRDRP......",
-					"..........GPdDdPG.....",
-					".........GG#RdR#GG....",
-					".......##...#dd#......",
-					"......#SS##HHHHH##....",
-					".....#SMHHHHHHHHHHH#..",
-					".....#SMMHHH##HHMMMM#.",
-					"....#SMMMMMME*MMMMMMM#",
-					"....#SSMMMMMEEMMMMM#M#",
-					"...#SSMMMMMMMMMMMMMMS#",
-					"...#SSSMMMMMMMMMMM##S#",
-					"..#SSSMMLLLLL#######..",
-					"..#HHMBBLLLLWWB#......",
-					".#HHMMMMSBLLLLLB#.....",
-					".#SHMMMMMMSBLLLBM#....",
-					"#SHMMMMMMMMMSBLBMM#...",
-					"#SMMMMMMMMMMMMBMMMS#..",
-					"#SMMMMMMMMMMMS#MMMMS#.",
-					"#SMMMMMMMMMMS#SMMMMS#.",
-					"#SSMMMMMMMMMS##MMMS#..",
-					"#SSSMMMMMMSSS#.#SMMS#.",
-					".#SSSSSSSSMMMMS##SMMS#",
-					"..####################"
+					"...............#RR#...",
+					".............G#RPPR#..",
+					"..............#RDdP#..",
+					"..............#dRRd#G.",
+					"............##.#GG#...",
+					"............#S######..",
+					"...........#MHHHMMMM#.",
+					"...........#MMMME*NNN#",
+					"..........#SMMMMEENNE#",
+					"..........#SMMMMMMNNE#",
+					".........#HSSMMMMSNNN#",
+					"........#MHMBLBBLBW###",
+					".......#HMMMBBLBWWB#..",
+					".....##MHMMHMMMSLB#...",
+					"....#MHMMMHMMMMSSB#...",
+					"...#HMMHMMMMSMMMMS#...",
+					"..#MHMMMMMSSSMMMMS#...",
+					"..#HMMHMMSMMS#SMMM#...",
+					".#MMHMMSMMMS#SSMMM#...",
+					".#MMMMSMMMMS#SSMMM#...",
+					".#SMMMSMMMMS#SSMMM#...",
+					".#SSMMMSSSSSS#SSHHM#..",
+					"..################E#..",
+					"......................"
 		];
 
 		var CLASS_MAP = {
@@ -364,6 +365,7 @@ export function installerPageScript(): string {
 			"O": "c-fur",
 			"H": "c-hi",
 			"S": "c-sh",
+			"N": "c-snout",
 			"E": "c-dark",
 			"*": "c-glint",
 			"b": "c-r-light",
@@ -398,22 +400,20 @@ export function installerPageScript(): string {
 
 		var eye = svg("g", { class: "eye" });
 		if (pose === "happy") {
-			eye.appendChild(rect("c-dark", 12, 8, 2, 1));
-			eye.appendChild(rect("c-dark", 11, 9, 1, 1));
-			eye.appendChild(rect("c-dark", 14, 9, 1, 1));
-			eye.appendChild(rect("c-r-light", 13, 10, 2, 1));
-			eye.appendChild(rect("c-dark", 17, 10, 1, 1));
-			eye.appendChild(rect("c-r-neon sparkle", 16, 2, 1, 1));
-			eye.appendChild(rect("c-g-neon sparkle", 8, 3, 1, 1));
+			eye.appendChild(rect("c-dark", 16, 7, 2, 1));
+			eye.appendChild(rect("c-dark", 15, 8, 1, 1));
+			eye.appendChild(rect("c-r-light", 14, 9, 2, 1));
+			eye.appendChild(rect("c-g-neon sparkle", 12, 2, 1, 1));
+			eye.appendChild(rect("c-r-neon sparkle", 21, 1, 1, 1));
 		} else if (pose === "working") {
-			eye.appendChild(rect("c-out", 12, 6, 2, 1));
-			eye.appendChild(rect("c-glint", 13, 7, 1, 1));
-			eye.appendChild(rect("c-dark", 12, 7, 1, 1));
-			eye.appendChild(rect("c-dark", 12, 8, 2, 2));
+			eye.appendChild(rect("c-sh", 16, 7, 2, 1));
+			eye.appendChild(rect("c-dark", 16, 8, 1, 1));
+			eye.appendChild(rect("c-glint", 17, 8, 1, 1));
+			eye.appendChild(rect("c-g-neon sparkle", 21, 3, 1, 1));
 		} else {
-			eye.appendChild(rect("c-dark eye-blink", 12, 8, 1, 2));
-			eye.appendChild(rect("c-glint", 13, 8, 1, 1));
-			eye.appendChild(rect("c-dark", 13, 9, 1, 1));
+			eye.appendChild(rect("c-dark eye-blink", 16, 7, 1, 1));
+			eye.appendChild(rect("c-glint eye-blink", 17, 7, 1, 1));
+			eye.appendChild(rect("c-dark", 16, 8, 2, 1));
 		}
 		body.appendChild(eye);
 		root.appendChild(body);
