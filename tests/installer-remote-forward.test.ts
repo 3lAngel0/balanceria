@@ -10,6 +10,10 @@ import {
 	renderRemoteForwardPrompt,
 	startLanForwarder,
 	applyLanFirewall,
+	getFirewallDetails,
+	initFirewallPromptState,
+	firewallPromptInput,
+	renderFirewallPrompt,
 } from "../src/installer-remote-forward.ts";
 
 const key = (data: string) => ({ type: "key" as const, data });
@@ -106,3 +110,65 @@ test("applyLanFirewall returns safe result without crashing", async () => {
 	assert.equal(typeof res.success, "boolean");
 	assert.ok(res.message.length > 0);
 });
+
+test("firewall prompt state navigation and confirmation", () => {
+	const details = {
+		kind: "firewalld" as const,
+		network: "192.168.1.0/24",
+		commands: ["sudo firewall-cmd ..."],
+		commandString: "sudo firewall-cmd ...",
+	};
+	let s = initFirewallPromptState(details);
+	assert.equal(s.selected, "run");
+	assert.equal(s.done, false);
+
+	// Toggle down
+	s = firewallPromptInput(s, key("\x1b[B"));
+	assert.equal(s.selected, "back");
+
+	// Key 1 selects run and marks done
+	s = firewallPromptInput(s, key("1"));
+	assert.equal(s.selected, "run");
+	assert.equal(s.done, true);
+
+	// Key 2 selects back and marks done
+	s = initFirewallPromptState(details);
+	s = firewallPromptInput(s, key("2"));
+	assert.equal(s.selected, "back");
+	assert.equal(s.done, true);
+
+	// Esc cancels
+	s = initFirewallPromptState(details);
+	s = firewallPromptInput(s, key("\x1b"));
+	assert.equal(s.cancelled, true);
+});
+
+test("firewall prompt renders commands and options in EN and ES", () => {
+	const details = {
+		kind: "firewalld" as const,
+		network: "192.168.68.0/24",
+		commands: ["sudo firewall-cmd --permanent --add-port=8787/tcp", "sudo firewall-cmd --reload"],
+		commandString: "sudo firewall-cmd --permanent --add-port=8787/tcp && sudo firewall-cmd --reload",
+	};
+	for (const [lang, title, runLabel] of [
+		["en", "Linux Firewall Configuration", "Run command now"],
+		["es", "Configuración de Firewall Linux", "Ejecutar comando ahora"],
+	] as const) {
+		setLang(lang);
+		const lines = renderFirewallPrompt(initFirewallPromptState(details), 72, "none");
+		const text = lines.map(strip).join("\n");
+		assert.ok(text.includes(title), `missing title in ${lang}`);
+		assert.ok(text.includes(runLabel), `missing run label in ${lang}`);
+		assert.ok(text.includes("sudo firewall-cmd --reload"));
+		for (const l of lines) assert.equal(cellWidth(l), 72);
+	}
+	setLang("en");
+});
+
+test("getFirewallDetails returns valid network and command string", async () => {
+	const details = await getFirewallDetails(8787);
+	assert.ok(details.kind);
+	assert.ok(details.network.includes("/"));
+	assert.equal(typeof details.commandString, "string");
+});
+

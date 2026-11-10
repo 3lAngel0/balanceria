@@ -12,7 +12,20 @@ import type { InstallerAction } from "./installer-model.ts";
 import { nodeInstallFs, snapshotForInstall, undoInstall, type InstallSnapshot } from "./installer-plan.ts";
 import { canonicalKey as installerCanonicalKey, hitInstaller, installerKey, renderInstaller, type InstallerHit } from "./installer-tui.ts";
 import { channelPromptInput, initChannelPrompt, renderChannelPrompt, type InstallChannel } from "./installer-channel.ts";
-import { applyLanFirewall, initRemoteForwardState, remoteForwardInput, renderRemoteForwardPrompt, startLanForwarder, type RemoteForwardOption } from "./installer-remote-forward.ts";
+import {
+	applyLanFirewall,
+	getFirewallDetails,
+	initFirewallPromptState,
+	firewallPromptInput,
+	renderFirewallPrompt,
+	runInteractiveCommand,
+	initRemoteForwardState,
+	remoteForwardInput,
+	renderRemoteForwardPrompt,
+	startLanForwarder,
+	type RemoteForwardOption,
+	type FirewallDetails,
+} from "./installer-remote-forward.ts";
 import { initLangPrompt, langPromptInput, renderLangPrompt } from "./setup-lang-prompt.ts";
 import { BALANCER_MENU, balancerMenu, glossaryText, resolveBalancerArgs } from "./balancer-menu.ts";
 import { initLang, getLang, setLang, saveLangSetting, t } from "./i18n/index.ts";
@@ -1871,6 +1884,36 @@ export default function aiBalancer(pi: ExtensionAPI) {
 		);
 	};
 
+	const promptFirewallAction = async (ctx: ExtensionContext, details: FirewallDetails): Promise<"run" | "back" | undefined> => {
+		let state = initFirewallPromptState(details);
+		const mode = colorMode();
+		return ctx.ui.custom<"run" | "back" | undefined>(
+			(tui, theme, _keybindings, done) => {
+				const finish = () => {
+					if (state.cancelled) done(undefined);
+					else if (state.done) done(state.selected);
+					else tui.requestRender();
+				};
+				return {
+					render(width: number): string[] {
+						return framed(theme, width, renderFirewallPrompt(state, Math.max(20, width - 4), mode));
+					},
+					handleInput(data: string) {
+						state = firewallPromptInput(state, { type: "key", data: canonicalKey(data) });
+						finish();
+					},
+					handleMouse(event: TuiMouseEvent): TuiMouseEventResult | undefined {
+						if (event.type !== "click" || event.button !== "left") return undefined;
+						return { handled: true, render: true };
+					},
+					invalidate() {},
+					dispose() {},
+				};
+			},
+			{ overlay: true, overlayOptions: { width: "80%", minWidth: 56, anchor: "center" } },
+		);
+	};
+
 	const promptInstallChannel = async (ctx: ExtensionContext): Promise<InstallChannel | undefined> => {
 		let state = initChannelPrompt();
 		const mode = colorMode();
@@ -2096,24 +2139,35 @@ export default function aiBalancer(pi: ExtensionAPI) {
 
 		let lanForwarder: { port: number; lanUrls: (token: string) => string[]; close: () => Promise<void> } | undefined;
 		if (remote && ctx.hasUI && typeof ctx.ui?.custom === "function") {
-			const choice = await promptRemoteForward(ctx);
-			if (choice === undefined) {
-				session.close();
-				if (started) await stopServing();
-				return;
-			}
-			if (choice === "lan") {
-				try {
-					lanForwarder = await startLanForwarder(server.port);
-				} catch (err) {
-					ctx.ui.notify(`ai-balancer: ${err instanceof Error ? err.message : String(err)}`, "warning");
+			let forwardChoice: RemoteForwardOption | undefined;
+			while (!forwardChoice) {
+				const choice = await promptRemoteForward(ctx);
+				if (choice === undefined) {
+					session.close();
+					if (started) await stopServing();
+					return;
 				}
-			} else if (choice === "firewall") {
-				const fw = await applyLanFirewall(server.port);
-				if (fw.success) {
-					ctx.ui.notify(`ai-balancer: ${t("installer.remote.firewallSuccess")}${fw.command ? ` (${fw.command})` : ""}`, "info");
+				if (choice === "lan") {
+					try {
+						lanForwarder = await startLanForwarder(server.port);
+					} catch (err) {
+						ctx.ui.notify(`ai-balancer: ${err instanceof Error ? err.message : String(err)}`, "warning");
+					}
+					forwardChoice = "lan";
+				} else if (choice === "firewall") {
+					const details = await getFirewallDetails(server.port);
+					const action = await promptFirewallAction(ctx, details);
+					if (action === "run" && details.commandString) {
+						const res = await runInteractiveCommand(details.commandString);
+						if (res.success) {
+							ctx.ui.notify(`ai-balancer: ${t("installer.remote.firewallSuccess")}`, "info");
+						} else {
+							ctx.ui.notify(`ai-balancer: ${t("installer.remote.firewallFailed", { error: `Exit code ${res.code}` })}`, "warning");
+						}
+						forwardChoice = "firewall";
+					}
 				} else {
-					ctx.ui.notify(`ai-balancer: ${t("installer.remote.firewallFailed", { error: fw.message })}`, "warning");
+					forwardChoice = choice;
 				}
 			}
 		}
