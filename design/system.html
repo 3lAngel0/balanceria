@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Sistema de diseño de ai-balancer</title>
+<meta name="viewport" content="width=1440">
+<style>
+:root{--bg:#181425;--surface:#262b44;--border:#3a4466;--shadow:#0e0b16;--light:#5a6988;--text:#e4e6ee;--dim:#8b9bb4;--accent:#feae34;--hp:#38b764;--mp:#3b5dc9;--xp:#a363d9;--bad:#e43b44}
+*{box-sizing:border-box}
+body{margin:0;padding:16px;width:1440px;background:var(--bg);color:var(--text);font:14px/20px ui-monospace,"Cascadia Code","Source Code Pro",Menlo,Consolas,monospace;image-rendering:pixelated}
+h1{font-size:16px;margin:0}
+h2{font-size:14px;margin:0 0 8px;color:var(--accent);text-transform:uppercase;letter-spacing:1px}
+a{color:var(--accent)}
+.dim{color:var(--dim)}
+.pixel-card{background:var(--surface);border:4px solid var(--border);box-shadow:inset -4px -4px 0 0 var(--shadow),inset 4px 4px 0 0 var(--light);padding:12px 16px}
+button{font:inherit;color:var(--text);background:var(--border);border:0;padding:4px 12px;box-shadow:inset -4px -4px 0 0 var(--shadow),inset 4px 4px 0 0 var(--light);cursor:pointer}
+button:hover:not(:disabled){background:var(--light)}
+button:disabled{opacity:.4;cursor:default}
+button:focus-visible,a:focus-visible{outline:4px solid var(--accent);outline-offset:0}
+button[aria-pressed="true"]{background:var(--accent);color:var(--bg)}
+.btn-primary{background:var(--accent);color:var(--bg);font-weight:700;padding:4px 10px}
+.btn-small{background:transparent;border:2px solid var(--border);box-shadow:none;font-size:.85em;padding:2px 6px}
+.notice{border:4px solid var(--bad);padding:8px 12px}
+.pill{display:inline-block;padding:2px 8px;border:2px solid var(--border);font-size:.85em;font-weight:700}
+.pill-active{background:#22c55e22;border-color:#22c55e;color:#22c55e}
+.badge{display:inline-block;padding:1px 6px;font-size:.8em;font-weight:700;border:1px solid currentColor}
+select,input[type=text]{font:inherit;background:var(--bg);color:inherit;border:4px solid var(--border);padding:2px 4px}
+table{border-collapse:collapse;width:100%}
+th,td{text-align:left;padding:4px 8px;border-bottom:4px solid var(--bg)}
+th{color:var(--accent)}
+.grid{display:grid;gap:16px}
+.g6{grid-template-columns:repeat(6,1fr)}
+.g3{grid-template-columns:repeat(3,1fr)}
+.g2{grid-template-columns:1fr 1fr}
+.sw{border:4px solid var(--border);display:flex;flex-direction:column}
+.sw i{display:block;height:48px}
+.sw b,.sw span{padding:2px 8px;font-weight:400}
+.sw b{font-weight:700}
+.meter-track{display:block;width:100%;height:16px;background:var(--shadow);box-shadow:inset 4px 4px 0 0 #000}
+.meter-track span{display:block;height:100%}
+.hp span{background:repeating-linear-gradient(90deg,var(--hp) 0 8px,var(--shadow) 8px 12px)}
+.mp span{background:repeating-linear-gradient(90deg,var(--mp) 0 8px,var(--shadow) 8px 12px)}
+.xp span{background:repeating-linear-gradient(90deg,var(--xp) 0 8px,var(--shadow) 8px 12px)}
+.count-bar{display:block;height:12px;background:var(--bg);border:2px solid var(--border)}
+.count-fill{display:block;height:100%;background:var(--accent);width:60%}
+.alert-item{display:flex;gap:8px;align-items:center;padding:6px 8px;border:2px solid #ef4444;background:var(--bg)}
+.space{display:flex;align-items:flex-end;gap:16px}
+.space i{display:block;background:var(--accent)}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.shadow-demo{height:64px;display:flex;align-items:center;justify-content:center}
+.pool{border:4px solid var(--border);background:var(--surface);padding:8px 10px;display:flex;flex-direction:column;gap:4px}
+code{color:var(--accent)}
+</style>
+</head>
+<body>
+<header class="row" style="justify-content:space-between;margin-bottom:16px">
+  <h1>Sistema de diseño de ai-balancer</h1>
+  <span class="dim">Fuente: packages/panel/ui/style.css · solo lectura · no es un sistema inventado</span>
+</header>
+
+<main class="grid">
+  <section class="pixel-card" aria-labelledby="c">
+    <h2 id="c">Colores (tokens :root)</h2>
+    <div class="grid g6">
+      <div class="sw"><i style="background:var(--bg)"></i><b>--bg</b><span class="dim">#181425 fondo</span></div>
+      <div class="sw"><i style="background:var(--surface)"></i><b>--surface</b><span class="dim">#262b44 tarjetas</span></div>
+      <div class="sw"><i style="background:var(--border)"></i><b>--border</b><span class="dim">#3a4466 bordes</span></div>
+      <div class="sw"><i style="background:var(--shadow)"></i><b>--shadow</b><span class="dim">#0e0b16 sombra</span></div>
+      <div class="sw"><i style="background:var(--light)"></i><b>--light</b><span class="dim">#5a6988 luz, hover</span></div>
+      <div class="sw"><i style="background:var(--text)"></i><b>--text</b><span class="dim">#e4e6ee texto</span></div>
+      <div class="sw"><i style="background:var(--dim)"></i><b>--dim</b><span class="dim">#8b9bb4 secundario</span></div>
+      <div class="sw"><i style="background:var(--accent)"></i><b>--accent</b><span class="dim">#feae34 acento, foco</span></div>
+      <div class="sw"><i style="background:var(--hp)"></i><b>--hp</b><span class="dim">#38b764 serie 0</span></div>
+      <div class="sw"><i style="background:var(--mp)"></i><b>--mp</b><span class="dim">#3b5dc9 serie 1</span></div>
+      <div class="sw"><i style="background:var(--xp)"></i><b>--xp</b><span class="dim">#a363d9 serie 2</span></div>
+      <div class="sw"><i style="background:var(--bad)"></i><b>--bad</b><span class="dim">#e43b44 aviso, serie 4</span></div>
+    </div>
+    <p class="dim" style="margin:12px 0 4px">Literales de componentes (mismo archivo):</p>
+    <div class="row">
+      <span class="pill pill-active">#22c55e ok</span>
+      <span class="pill" style="color:#ef4444;border-color:#ef4444">#ef4444 error</span>
+      <span class="pill" style="color:#eab308;border-color:#eab308">#eab308 aviso</span>
+      <span class="pill" style="color:#3b82f6;border-color:#3b82f6">#3b82f6 info</span>
+      <span class="badge" style="color:#38bdf8">#38bdf8</span><span class="badge" style="color:#a855f7">#a855f7</span><span class="badge" style="color:#f59e0b">#f59e0b</span><span class="badge" style="color:#10b981">#10b981</span>
+    </div>
+  </section>
+
+  <div class="grid g2">
+    <section class="pixel-card" aria-labelledby="t">
+      <h2 id="t">Tipografía</h2>
+      <p class="dim" style="margin:0 0 8px">ui-monospace, "Cascadia Code", "Source Code Pro", Menlo, Consolas, monospace</p>
+      <h1>h1 · 16px · Instalador de ai-balancer</h1>
+      <h2 style="margin-top:8px">h2 · 14px · acento, mayúsculas</h2>
+      <p style="margin:0">Cuerpo · 14px/20px · Tus agentes no se frenan.</p>
+      <p class="dim" style="margin:0;font-size:.85em">Pequeño · 0.85em · texto secundario</p>
+    </section>
+    <section class="pixel-card" aria-labelledby="s">
+      <h2 id="s">Espaciado, radio, bordes y sombras</h2>
+      <div class="space">
+        <div><i style="width:4px;height:4px"></i><div class="dim">4</div></div>
+        <div><i style="width:8px;height:8px"></i><div class="dim">8</div></div>
+        <div><i style="width:12px;height:12px"></i><div class="dim">12</div></div>
+        <div><i style="width:16px;height:16px"></i><div class="dim">16</div></div>
+        <div><i style="width:24px;height:24px"></i><div class="dim">24</div></div>
+        <span class="dim">grilla de 4 px · radio 0 en todo</span>
+      </div>
+      <div class="grid g3" style="margin-top:12px">
+        <div class="shadow-demo" style="border:4px solid var(--border);background:var(--surface)">borde 4px</div>
+        <div class="shadow-demo" style="background:var(--surface);box-shadow:inset -4px -4px 0 0 var(--shadow),inset 4px 4px 0 0 var(--light)">bisel</div>
+        <div class="shadow-demo" style="border:4px dashed var(--border);background:var(--surface)">punteado</div>
+      </div>
+    </section>
+  </div>
+
+  <section class="pixel-card" aria-labelledby="k">
+    <h2 id="k">Componentes</h2>
+    <div class="grid g3">
+      <div>
+        <p class="dim" style="margin:0 0 4px">Botones</p>
+        <div class="row">
+          <button type="button">Atrás</button>
+          <button type="button" class="btn-primary">Siguiente</button>
+          <button type="button" aria-pressed="true">Marcado</button>
+          <button type="button" disabled>Deshabilitado</button>
+          <button type="button" class="btn-small">Chico</button>
+        </div>
+        <p class="dim" style="margin:12px 0 4px">Campos</p>
+        <div class="row"><input type="text" value="Respaldo propio 1" aria-label="Nombre"><select aria-label="Modelo"><option>Claude Pro</option></select></div>
+        <p class="dim" style="margin:12px 0 4px">Aviso y pastillas</p>
+        <div class="notice">Aviso con borde --bad</div>
+        <div class="row" style="margin-top:8px"><span class="pill pill-active">activo</span><span class="pill">inactivo</span><span class="badge" style="color:#38bdf8">leer</span></div>
+      </div>
+      <div>
+        <p class="dim" style="margin:0 0 4px">Medidores (hp, mp, xp)</p>
+        <div class="meter-track hp" role="img" aria-label="hp 70%"><span style="width:70%"></span></div>
+        <div class="meter-track mp" role="img" aria-label="mp 45%" style="margin-top:8px"><span style="width:45%"></span></div>
+        <div class="meter-track xp" role="img" aria-label="xp 90%" style="margin-top:8px"><span style="width:90%"></span></div>
+        <p class="dim" style="margin:12px 0 4px">Barra de conteo</p>
+        <span class="count-bar"><span class="count-fill"></span></span>
+        <p class="dim" style="margin:12px 0 4px">Alerta</p>
+        <div class="alert-item"><span class="badge" style="color:#ef4444">error</span><span>Falló la búsqueda</span></div>
+      </div>
+      <div>
+        <p class="dim" style="margin:0 0 4px">Tabla</p>
+        <table><thead><tr><th>Tarea</th><th>Modelo</th></tr></thead><tbody><tr><td>Leer archivos</td><td>Gemini 3.8 Flash</td></tr><tr><td>Escribir código</td><td>Claude Sonnet 5.5</td></tr></tbody></table>
+        <p class="dim" style="margin:12px 0 4px">Tarjeta de respaldo (pool-card)</p>
+        <div class="pool"><b>Claude Sonnet 5.5</b><span class="dim">1. Claude Pro, después 2. Google AI Pro</span></div>
+      </div>
+    </div>
+  </section>
+</main>
+</body>
+</html>
