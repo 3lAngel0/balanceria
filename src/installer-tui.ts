@@ -94,9 +94,10 @@ function controlRows(control: InstallerControl, cursor: number, width: number, m
 		case "checklist":
 			control.items.forEach((item, i) => {
 				const hit: InstallerAction = { type: "toggle", index: i };
+				const detailHit: InstallerAction = control.openable ? { type: "open", index: i } : hit;
 				rows.push({ item: i, text: `${pointer(i === cursor)} ${item.checked ? "[x]" : "[ ]"} ${item.label}`, hits: [{ start: 0, end: width, action: hit }] });
-				details(i, wrap(item.detail, Math.max(10, width - INDENT.length)), hit);
-				if (item.warning) details(i, wrap(`⚠ ${item.warning}`, Math.max(10, width - INDENT.length)), hit, "gold");
+				if (item.detail) details(i, wrap(item.detail, Math.max(10, width - INDENT.length)), detailHit);
+				if (item.warning) details(i, wrap(`⚠ ${item.warning}`, Math.max(10, width - INDENT.length)), detailHit, "gold");
 			});
 			break;
 		case "progress":
@@ -258,6 +259,7 @@ export function installerKey(screen: InstallerScreen, focus: number | undefined,
 		if (focused) return { actions: [pressed(focused.id)], focus: undefined };
 		const choose: InstallerAction[] = control.kind === "choice" ? [{ type: "select", index: screen.cursor }] : [];
 		if (SPACE.has(data)) return stay(control.kind === "checklist" ? [{ type: "toggle", index: screen.cursor }] : choose);
+		if (control.kind === "checklist" && control.openable && ENTER.has(data)) return stay([{ type: "open", index: screen.cursor }]);
 		const primary = screen.buttons.find(b => b.primary && b.enabled);
 		return stay(primary ? [...choose, pressed(primary.id)] : choose);
 	}

@@ -4,11 +4,14 @@
 import { t } from "./i18n/index.ts";
 import type { OrchestratorMode, ProfileWorkflow } from "./profiles.ts";
 import type { RoutingStrategy } from "./router.ts";
-import { buildAvailableModelTargets, recommendRolesHeuristic, ROLE_CATALOG, type AdvisorReport, type RoleRecommendation } from "./setup-advisor.ts";
+import { buildAvailableModelTargets, recommendRolesHeuristic, ROLE_CATALOG, UNASSIGNED, type AdvisorReport, type RoleRecommendation } from "./setup-advisor.ts";
 import {
+	backupName,
 	buildRecommendedDraft,
 	activeRoles,
 	findRepairs,
+	friendlyModel,
+	refLabel as planRefLabel,
 	roleName,
 	summaryByFile,
 	suggestBackups,
@@ -31,6 +34,8 @@ import {
 	type StepperCurrent,
 } from "./setup-stepper.ts";
 import { moveCandidateInList, toggleCandidateInList, type DetectedProvider, type PoolConfig } from "./setup.ts";
+
+export { friendlyModel };
 
 export const INSTALLER_STEPS = ["welcome", "type", "scan", "subscriptions", "backups", "tasks", "main-agent", "summary", "installing", "done"] as const;
 export type InstallerStep = (typeof INSTALLER_STEPS)[number];
@@ -78,6 +83,8 @@ export interface InstallerState {
 	wizard?: BackupWizard;
 	/** The deep-analysis model picker; `model` is the chosen one. */
 	deepAnalysis?: { model?: string };
+	/** The picker that chooses the model of one agent task (the highlighted row is `cursor`). */
+	taskPicker?: { role: string };
 	scan: ScanState;
 	progress: { id: string; status: ProgressStatus }[];
 	installError?: string;
@@ -100,7 +107,7 @@ export interface InstallerInit {
 	installed?: boolean;
 }
 
-export type ButtonId = "back" | "next" | "cancel" | "retry" | "install" | "open-panel" | "exit" | "undo" | "assign-recommended" | "deep-analysis" | "create-backup";
+export type ButtonId = "back" | "next" | "cancel" | "retry" | "install" | "open-panel" | "exit" | "undo" | "assign-recommended" | "assign-task" | "deep-analysis" | "create-backup";
 
 export interface ChoiceItem {
 	id: string;
@@ -118,7 +125,8 @@ export interface ChecklistItem {
 }
 export type InstallerControl =
 	| { kind: "choice"; items: ChoiceItem[]; selected: number }
-	| { kind: "checklist"; items: ChecklistItem[] }
+	/** `openable`: Enter (or a click on the details) opens a picker for the row instead of going on. */
+	| { kind: "checklist"; items: ChecklistItem[]; openable?: boolean }
 	| { kind: "progress"; items: { label: string; status: ProgressStatus }[] }
 	| { kind: "summary"; groups: FileSummary[] }
 	| { kind: "message"; tone: "info" | "error"; text: string; hint?: string };
@@ -151,6 +159,7 @@ export type InstallerAction =
 	| { type: "move"; delta: number }
 	| { type: "toggle"; index: number }
 	| { type: "select"; index: number }
+	| { type: "open"; index: number }
 	| { type: "button"; id: ButtonId }
 	| { type: "help" };
 
@@ -172,9 +181,13 @@ const enabledRefs = (draft: SetupStepperState) => enabledProviders(draft).flatMa
 const providerOf = (ref: string) => ref.slice(0, ref.indexOf("/"));
 const modelOf = (ref: string) => ref.slice(ref.indexOf("/") + 1);
 
-function refLabel(draft: SetupStepperState, ref: string): string {
-	const provider = draft.detected.find(p => p.id === providerOf(ref));
-	return `${provider?.label ?? providerOf(ref)} (${modelOf(ref)})`;
+const refLabel = (draft: SetupStepperState, ref: string) => planRefLabel(ref, draft.detected);
+const poolName = (pool: { id: string; name?: string }) => backupName(pool);
+
+/** A backup member: just the subscription when the backup is for one model, "model · subscription" when it mixes several. */
+function memberLabel(draft: SetupStepperState, pool: PoolConfig, ref: string): string {
+	const single = new Set(pool.candidates.map(modelOf)).size <= 1;
+	return single ? (draft.detected.find(p => p.id === providerOf(ref))?.label ?? providerOf(ref)) : refLabel(draft, ref);
 }
 
 /** Pools with at least one member in an enabled subscription (the ones Install would write). */
@@ -239,7 +252,7 @@ function pathOf(state: InstallerState): InstallerStep[] {
 	}
 }
 
-const go = (state: InstallerState, step: InstallerStep): InstallerState => ({ ...state, step, cursor: 0, notice: [], helpOpen: false });
+const go = (state: InstallerState, step: InstallerStep): InstallerState => ({ ...state, step, cursor: 0, notice: [], helpOpen: false, taskPicker: undefined });
 
 // ---------------------------------------------------------------------------------------------
 // Reducers the host calls after running an effect
@@ -280,7 +293,7 @@ export function withAdvisorReport(state: InstallerState, report: AdvisorReport):
 
 /** The stepper's cost warning, worded with installer vocabulary (backup, not pool). */
 const costWarning = (pool: { id: string; name?: string; candidates: readonly string[] }) =>
-	poolCostWarning(pool as Parameters<typeof poolCostWarning>[0]) ? t("installer.costWarning", { backup: pool.name ?? pool.id }) : undefined;
+	poolCostWarning(pool as Parameters<typeof poolCostWarning>[0]) ? t("installer.costWarning", { backup: poolName(pool) }) : undefined;
 const help = (key: string) => ({ text: t(`installer.help.${key}.text`), technicalName: t(`installer.help.${key}.tech`), file: t(`installer.help.${key}.file`) });
 const button = (id: ButtonId, enabled = true, primary = false, label = t(`installer.button.${id}`)) => ({ id, label, enabled, ...(primary ? { primary: true } : {}) });
 const standardButtons = (state: InstallerState, nextEnabled = true) => [
@@ -312,18 +325,18 @@ function backupItems(draft: SetupStepperState): BackupItem[] {
 	});
 }
 
-function diagramOf(draft: SetupStepperState, name: string, members: readonly string[]): InstallerDiagram {
+function diagramOf(draft: SetupStepperState, pool: { id: string; name?: string }, members: readonly string[]): InstallerDiagram {
 	const live = members.filter(ref => draft.enabled.includes(providerOf(ref)));
 	return {
 		agent: t("installer.diagram.agent"),
-		backup: name,
+		backup: poolName(pool),
 		members: live.map((ref, i) => ({ label: refLabel(draft, ref), order: i + 1, state: i === 0 ? "active" : "standby" })),
 	};
 }
 
 function ownLimit(models: readonly string[]): string {
 	return models.length > 0
-		? t("installer.subscriptions.detail", { models: models.join(", ") })
+		? t("installer.subscriptions.detail", { models: models.map(friendlyModel).join(", ") })
 		: t("installer.subscriptions.detailNoModels");
 }
 
@@ -337,7 +350,7 @@ function wizardContent(state: InstallerState, wizard: BackupWizard): Content {
 	const draft = state.draft;
 	const phaseIndex = WIZARD_PHASES.indexOf(wizard.phase);
 	const sub = Math.min(phaseIndex + 1, 3);
-	const body = [t("installer.wizard.progress", { n: sub, total: 3 }), t(`installer.wizard.${wizard.phase}.body`)];
+	const body = [t("installer.wizard.progress", { n: sub, total: 3 }), t(`installer.wizard.${wizard.phase}.body`), ...(wizard.phase === "members" ? [t("installer.backups.limitNote")] : [])];
 	const last = wizard.phase === "strategy";
 	const buttons = [
 		button("back"),
@@ -357,10 +370,10 @@ function wizardContent(state: InstallerState, wizard: BackupWizard): Content {
 					kind: "checklist",
 					items: enabledRefs(draft).map(ref => {
 						const checked = wizard.members.includes(ref);
-						return { id: ref, label: refLabel(draft, ref), detail: t("installer.subscriptions.ownLimit"), checked, ...(checked && warning && /flash|claude/i.test(ref) ? { warning } : {}) };
+						return { id: ref, label: refLabel(draft, ref), detail: "", checked, ...(checked && warning && /flash|claude/i.test(ref) ? { warning } : {}) };
 					}),
 				},
-				diagram: diagramOf(draft, wizard.id, wizard.members),
+				diagram: diagramOf(draft, pool, wizard.members),
 				help: help("backups"),
 			};
 		}
@@ -368,20 +381,23 @@ function wizardContent(state: InstallerState, wizard: BackupWizard): Content {
 			return {
 				...base,
 				control: { kind: "checklist", items: wizard.members.map((ref, i) => ({ id: ref, label: refLabel(draft, ref), detail: t("installer.wizard.order.position", { n: i + 1 }), checked: true })) },
-				diagram: diagramOf(draft, wizard.id, wizard.members),
+				diagram: diagramOf(draft, pool, wizard.members),
 				help: help("backups"),
 			};
 		case "strategy":
 			return {
 				...base,
 				control: choice("installer.strategy", STRATEGIES, STRATEGIES.indexOf(wizard.strategy), "hybrid"),
-				diagram: diagramOf(draft, wizard.id, wizard.members),
+				diagram: diagramOf(draft, pool, wizard.members),
 				help: help("strategy"),
 			};
 	}
 }
 
 const wizardTemplates = (draft: SetupStepperState): string[] => [...BACKUP_TEMPLATES.filter(id => !draft.pools.some(p => p.id === id)), "custom"];
+
+/** What a task can point to: the enabled backups first (they never stop), then the models of the enabled subscriptions. */
+const pickerTargets = (draft: SetupStepperState): string[] => [...livePools(draft).map(p => `pool/${p.id}`), ...enabledRefs(draft)];
 
 function tasksContent(state: InstallerState): Content {
 	const draft = state.draft;
@@ -403,7 +419,7 @@ function tasksContent(state: InstallerState): Content {
 				items: state.repairs.map(r => ({
 					id: r.role,
 					label: roleName(r.role),
-					detail: t("installer.repair.detail", { from: targetLabel(r.model), to: r.fix ? targetLabel(r.fix) : t("installer.repair.noFix") }),
+					detail: t("installer.repair.detail", { from: targetLabel(r.model, draft.detected), to: r.fix ? targetLabel(r.fix, draft.detected) : t("installer.repair.noFix") }),
 					checked: r.checked,
 				})),
 			},
@@ -424,22 +440,47 @@ function tasksContent(state: InstallerState): Content {
 		};
 	}
 	const recommended = new Map(advisorFor(draft).recommendations.map(r => [r.role, r] as const));
+	if (state.taskPicker) {
+		const role = state.taskPicker.role;
+		const rec = recommended.get(role)?.recommendedModel;
+		return {
+			title: t("installer.tasks.title"),
+			body: [t("installer.tasks.pickerIntro", { task: roleName(role) })],
+			control: {
+				kind: "choice",
+				selected: Math.max(0, Math.min(state.cursor, pickerTargets(draft).length - 1)),
+				items: pickerTargets(draft).map(target => ({
+					id: target,
+					label: targetLabel(target, draft.detected),
+					description: t(target.startsWith("pool/") ? "installer.tasks.backupDesc" : "installer.tasks.directDesc"),
+					...(target === rec ? { recommended: true } : {}),
+				})),
+			},
+			buttons: [button("back"), button("assign-task", true, true), button("cancel")],
+			help: help("tasks"),
+		};
+	}
 	return {
 		title: t("installer.tasks.title"),
 		body: [t("installer.tasks.body")],
 		control: {
 			kind: "checklist",
+			openable: true,
 			items: ROLE_CATALOG.map(entry => {
 				const rec = recommended.get(entry.role);
+				const now = draft.roles[entry.role]?.model;
 				return {
 					id: entry.role,
 					label: roleName(entry.role),
 					detail: [
 						t(`installer.role.${entry.role}.does`),
 						t("installer.tasks.uses", { level: t(`installer.consumption.${entry.category}`) }),
-						t("installer.tasks.recommended", { model: rec ? targetLabel(rec.recommendedModel) : "-" }),
+						t("installer.tasks.state", {
+							now: now && now !== UNASSIGNED ? targetLabel(now, draft.detected) : t("installer.tasks.notAssigned"),
+							model: rec ? targetLabel(rec.recommendedModel, draft.detected) : "-",
+						}),
 					].join(" "),
-					checked: Boolean(draft.roles[entry.role]?.model),
+					checked: Boolean(rec) && now === rec!.recommendedModel,
 					recommended: true,
 				};
 			}),
@@ -516,8 +557,9 @@ function content(state: InstallerState): Content {
 				title: t("installer.backups.title"),
 				body: [
 					t("installer.backups.body"),
+					t("installer.backups.limitNote"),
 					...(items.length === 0 ? [t("installer.backups.none")] : []),
-					...single.map(s => t("installer.backups.single", { model: s.model, subscription: owner(s.provider) })),
+					...single.map(s => t("installer.backups.single", { model: friendlyModel(s.model), subscription: owner(s.provider) })),
 				],
 				control: {
 					kind: "checklist",
@@ -526,15 +568,15 @@ function content(state: InstallerState): Content {
 						const warning = costWarning(pool);
 						return {
 							id: `${pool.id}:${ref}`,
-							label: t("installer.backups.item", { backup: pool.name, member: refLabel(draft, ref) }),
-							detail: t("installer.subscriptions.ownLimit"),
+							label: t("installer.backups.item", { backup: poolName(pool), member: memberLabel(draft, pool, ref) }),
+							detail: "",
 							checked,
 							recommended: true,
 							...(checked && warning ? { warning } : {}),
 						};
 					}),
 				},
-				...(focus ? { diagram: diagramOf(draft, focus.name, focus.candidates) } : {}),
+				...(focus ? { diagram: diagramOf(draft, focus, focus.candidates) } : {}),
 				buttons: [...standardButtons(state), button("create-backup")],
 				help: help("backups"),
 			};
@@ -638,6 +680,7 @@ function leave(state: InstallerState): InstallerState {
 
 function onNext(state: InstallerState): Result {
 	if (state.wizard) return wizardNext(state, state.wizard);
+	if (state.taskPicker) return stay(state);
 	const path = pathOf(state);
 	const step = state.step;
 	if (step === "summary") return { state: { ...go(state, "installing"), installError: undefined, progress: INSTALL_PROGRESS_STEPS.map(id => ({ id, status: "pending" as const })) }, effect: "install" };
@@ -658,8 +701,15 @@ function onNext(state: InstallerState): Result {
 	return after ? enter(leave(state), after) : stay(state);
 }
 
+/** Closes the task picker and puts the cursor back on the task it was opened for. */
+function closePicker(state: InstallerState): InstallerState {
+	const { taskPicker, ...rest } = state;
+	return { ...rest, cursor: Math.max(0, ROLE_CATALOG.findIndex(e => e.role === taskPicker?.role)) };
+}
+
 function onBack(state: InstallerState): Result {
 	if (state.wizard) return wizardBack(state, state.wizard);
+	if (state.taskPicker) return stay(closePicker(state));
 	if (state.deepAnalysis) {
 		const { deepAnalysis: _closed, ...rest } = state;
 		return stay(rest);
@@ -672,6 +722,7 @@ function onBack(state: InstallerState): Result {
 
 function onCancel(state: InstallerState): Result {
 	if (state.wizard) return stay({ ...state, wizard: undefined, cursor: 0 });
+	if (state.taskPicker) return stay(closePicker(state));
 	if (state.deepAnalysis) {
 		const { deepAnalysis: _closed, ...rest } = state;
 		return stay(rest);
@@ -775,7 +826,7 @@ function onToggle(state: InstallerState, index: number): InstallerState {
 			}
 			const entry = ROLE_CATALOG[index];
 			const rec: RoleRecommendation | undefined = entry && advisorFor(draft).recommendations.find(r => r.role === entry.role);
-			return entry && rec && !draft.roles[entry.role]?.model ? { ...at, draft: setRole(draft, entry.role, rec.recommendedModel, rec.thinking) } : at;
+			return entry && rec ? { ...at, draft: setRole(draft, entry.role, rec.recommendedModel, rec.thinking) } : at;
 		}
 		default:
 			return state;
@@ -788,6 +839,24 @@ function onMove(state: InstallerState, delta: number): InstallerState {
 	if (c.kind !== "choice" && c.kind !== "checklist") return state;
 	const target = Math.max(0, Math.min(c.items.length - 1, state.cursor + delta));
 	return c.kind === "choice" ? onSelect(state, target) : { ...state, cursor: target };
+}
+
+function onOpen(state: InstallerState, index: number): InstallerState {
+	const entry = ROLE_CATALOG[index];
+	if (state.step !== "tasks" || state.wizard || state.deepAnalysis || state.taskPicker || state.existing?.mode === "repair" || !entry) return state;
+	const targets = pickerTargets(state.draft);
+	const rec = advisorFor(state.draft).recommendations.find(r => r.role === entry.role)?.recommendedModel;
+	const start = targets.indexOf(state.draft.roles[entry.role]?.model ?? rec ?? "");
+	return { ...state, taskPicker: { role: entry.role }, cursor: Math.max(0, start) };
+}
+
+function assignTask(state: InstallerState): InstallerState {
+	if (!state.taskPicker) return state;
+	const role = state.taskPicker.role;
+	const target = pickerTargets(state.draft)[state.cursor];
+	if (!target) return closePicker(state);
+	const thinking = state.draft.roles[role]?.thinking ?? advisorFor(state.draft).recommendations.find(r => r.role === role)?.thinking;
+	return closePicker({ ...state, draft: setRole(state.draft, role, target, thinking) });
 }
 
 // -- buttons ----------------------------------------------------------------------------------------
@@ -812,6 +881,8 @@ function onButton(state: InstallerState, id: ButtonId): Result {
 		case "exit":
 		case "undo":
 			return { state: id === "exit" ? { ...state, cancelled: !state.finished } : state, effect: id };
+		case "assign-task":
+			return stay(assignTask(state));
 		case "assign-recommended":
 			return stay({ ...state, draft: applyAutoAssignRoles(state.draft) });
 		case "create-backup":
@@ -838,6 +909,8 @@ export function installerInput(state: InstallerState, action: InstallerAction): 
 			return stay(onToggle(state, action.index));
 		case "select":
 			return stay(onSelect(state, action.index));
+		case "open":
+			return stay(onOpen(state, action.index));
 		case "button":
 			return onButton(state, action.id);
 		case "help":

@@ -288,3 +288,39 @@ test("all tui chrome keys exist in en and es", () => {
 	}
 	assert.equal(INSTALLER_STEPS.length, 10);
 });
+
+test("the tasks picker renders at the exact width, tags the recommendation and maps keys and clicks", () => {
+	const tasks = customRun().find(s => s.step === "tasks")!;
+	const open = step(tasks, { type: "open", index: 0 });
+	const screen = installerScreen(open);
+	for (const mode of MODES) {
+		for (const width of WIDTHS) for (const line of renderInstaller(screen, { width, mode }).lines) assert.equal(cellWidth(line), width);
+	}
+	const out = text(renderInstaller(screen, { width: 100, mode: "none" }).lines);
+	assert.match(out, /Backup Claude Sonnet 5\.5/);
+	assert.match(out, /\[Recommended\]/);
+	// the task list: Enter opens the picker, a click on the detail opens it too, a click on the label ticks it
+	const list = installerScreen(tasks);
+	assert.deepEqual(installerKey(list, undefined, "\r").actions, [{ type: "open", index: list.cursor }]);
+	assert.deepEqual(installerKey(list, undefined, " ").actions, [{ type: "toggle", index: list.cursor }]);
+	const view = renderInstaller(list, { width: 100, mode: "none" });
+	const labelY = view.lines.findIndex(l => strip(l).includes("[ ] Coordinating the work"));
+	assert.ok(labelY >= 0);
+	const x = strip(view.lines[labelY]!).indexOf("[ ]");
+	assert.deepEqual(hitInstaller(view.hits, x, labelY), { type: "toggle", index: 0 });
+	assert.deepEqual(hitInstaller(view.hits, x, labelY + 1), { type: "open", index: 0 });
+	// inside the picker Enter assigns (select + primary), Esc closes
+	assert.deepEqual(installerKey(screen, undefined, "\r").actions, [{ type: "select", index: screen.cursor }, { type: "button", id: "assign-task" }]);
+	assert.deepEqual(installerKey(screen, undefined, "\x1b").actions, [{ type: "cancel" }]);
+	// other checklists keep Enter = Next
+	const subs = installerScreen(customRun().find(s => s.step === "subscriptions")!);
+	assert.deepEqual(installerKey(subs, undefined, "\r").actions, [{ type: "button", id: "next" }]);
+});
+
+test("no screen text of the Recommended and Custom runs shows a raw model id or ref", () => {
+	for (const state of [...recommendedRun(), ...customRun()]) {
+		const screen = installerScreen(state);
+		const out = text(renderInstaller({ ...screen, helpOpen: false }, { width: 120, mode: "none" }).lines);
+		assert.doesNotMatch(out, /(claude|gemini)-[a-z0-9-]*\d|(claude-bridge|antigravity)\/|pool\//, screen.step);
+	}
+});

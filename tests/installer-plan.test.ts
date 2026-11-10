@@ -2,7 +2,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { DetectedProvider } from "../src/setup.ts";
 import { ROLE_CATALOG } from "../src/setup-advisor.ts";
-import { buildRecommendedDraft, findRepairs, planUndo, suggestBackups, summaryByFile } from "../src/installer-plan.ts";
+import { buildRecommendedDraft, findRepairs, friendlyModel, planUndo, suggestBackups, summaryByFile, targetLabel } from "../src/installer-plan.ts";
+import { setLang } from "../src/i18n/index.ts";
 import { initStepper } from "../src/setup-stepper.ts";
 
 const provider = (id: string, availableModels: string[], detected = true): DetectedProvider => ({
@@ -77,7 +78,7 @@ test("summaryByFile groups plain-language lines per file and says which files ch
 	assert.deepEqual(groups.map(g => g.file), ["integrations.json", "pools.json", "profiles.json"]);
 	assert.ok(groups.every(g => g.changed));
 	const pools = groups.find(g => g.file === "pools.json")!;
-	assert.ok(pools.lines.some(l => l.includes("claude-sonnet-5-5") && l.includes("claude-bridge")));
+	assert.ok(pools.lines.some(l => l.includes("Claude Sonnet 5.5") && l.includes("claude-bridge") && !l.includes("claude-sonnet-5-5")));
 	assert.ok(groups.find(g => g.file === "profiles.json")!.lines.length >= ROLE_CATALOG.length);
 	assert.ok(groups.every(g => !/^installer\./.test(g.lines.join("\n"))));
 });
@@ -94,4 +95,27 @@ test("planUndo maps each .bak to the file it restores and ignores anything else"
 		{ file: "/a/integrations.json", backup: "/a/integrations.json.bak" },
 	]);
 	assert.deepEqual(planUndo([]), []);
+});
+
+setLang("en");
+
+test("friendlyModel: capitalizes words and joins adjacent numbers with a dot", () => {
+	assert.equal(friendlyModel("claude-sonnet-5-5"), "Claude Sonnet 5.5");
+	assert.equal(friendlyModel("claude-opus-5-5"), "Claude Opus 5.5");
+	assert.equal(friendlyModel("gemini-3-8-flash"), "Gemini 3.8 Flash");
+	assert.equal(friendlyModel("gemini-4-argon"), "Gemini 4 Argon");
+	assert.equal(friendlyModel("old-model"), "Old Model");
+});
+
+test("targetLabel: backups and direct models in plain words, never ids", () => {
+	const providers = [{ id: "antigravity", label: "Google AI Pro" }];
+	assert.equal(targetLabel("pool/claude-sonnet-5-5"), "Backup Claude Sonnet 5.5");
+	assert.equal(targetLabel("antigravity/gemini-3-8-flash", providers), "Gemini 3.8 Flash · Google AI Pro");
+	assert.equal(targetLabel("antigravity/gemini-3-8-flash"), "Gemini 3.8 Flash · antigravity");
+	setLang("es");
+	try {
+		assert.equal(targetLabel("pool/claude-sonnet-5-5"), "Respaldo Claude Sonnet 5.5");
+	} finally {
+		setLang("en");
+	}
 });

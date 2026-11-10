@@ -4,6 +4,7 @@ import type { DetectedProvider } from "../src/setup.ts";
 import { ROLE_CATALOG } from "../src/setup-advisor.ts";
 import { setLang } from "../src/i18n/index.ts";
 import { installerMessages } from "../src/i18n/messages/installer.ts";
+import { friendlyModel } from "../src/installer-plan.ts";
 import {
 	INSTALLER_STEPS,
 	initInstaller,
@@ -166,7 +167,7 @@ test("subscriptions: checklist with models and the own-limit note; none left blo
 	if (screen.control.kind !== "checklist") return;
 	assert.equal(screen.control.items.length, 2);
 	assert.ok(screen.control.items.every(i => i.checked && i.detail.includes("own usage limit")));
-	assert.ok(screen.control.items[0]!.detail.includes("claude-opus-5-5"));
+	assert.ok(screen.control.items[0]!.detail.includes("Claude Opus 5.5"));
 	s = act(s, { type: "toggle", index: 0 }, { type: "toggle", index: 1 }).state;
 	assert.equal(act(s, next).state.step, "subscriptions");
 	assert.ok(installerScreen(act(s, next).state).body.length > 0);
@@ -183,9 +184,9 @@ test("backups: suggestion for the shared model, diagram with order and states, s
 			[2, "standby"],
 		],
 	);
-	assert.equal(screen.diagram!.backup, "claude-sonnet-5-5");
+	assert.equal(screen.diagram!.backup, "Claude Sonnet 5.5");
 	assert.ok(screen.diagram!.agent);
-	assert.ok(screen.body.some(l => l.includes("claude-opus-5-5") && l.includes("needs no backup")));
+	assert.ok(screen.body.some(l => l.includes("Claude Opus 5.5") && l.includes("needs no backup")));
 	assert.equal(button(screen, "create-backup")!.enabled, true);
 });
 
@@ -229,7 +230,7 @@ test("create-backup sub-wizard: template -> subscriptions (with cost warning) ->
 	const all = screen.control.items.map((_, i) => i);
 	for (const i of all) if (!(installerScreen(w).control as { items: { checked: boolean }[] }).items[i]!.checked) w = act(w, { type: "toggle", index: i }).state;
 	const warned = installerScreen(w).control as { items: { warning?: string }[] };
-	assert.ok(warned.items.some(i => i.warning?.includes("claude-opus-5-5")));
+	assert.ok(warned.items.some(i => i.warning?.includes("Claude Opus 5.5")));
 	w = act(w, next).state;
 	assert.equal(w.wizard?.phase, "order");
 	const firstBefore = members(w)[0]!.label;
@@ -270,6 +271,111 @@ test("tasks: every task has a plain name, what it does, how much it uses and a r
 	assert.equal(button(screen, "assign-recommended")!.enabled, true);
 	assert.equal(button(screen, "deep-analysis")!.enabled, true);
 	assert.match(button(screen, "deep-analysis")!.label, /uses quota|costs/i);
+});
+
+test("tasks: every row shows the current model and the recommendation in plain names", () => {
+	let s = customAt("tasks");
+	const rows = () => (installerScreen(s).control as { items: { detail: string }[] }).items;
+	assert.ok(rows().every(i => i.detail.includes("Now: not assigned · Recommended: ")));
+	s = act(s, press("assign-recommended")).state;
+	assert.ok(rows().every(i => !i.detail.includes("not assigned")));
+});
+
+test("tasks: Space uses the recommendation even when the task already has another model", () => {
+	let s = customAt("tasks");
+	const rec = act(s, press("assign-recommended")).state.draft.roles.orchestrator!.model;
+	s = { ...s, draft: { ...s.draft, roles: { ...s.draft.roles, orchestrator: { model: "claude-bridge/claude-opus-5-5" } } } };
+	assert.notEqual(s.draft.roles.orchestrator!.model, rec);
+	s = act(s, { type: "toggle", index: 0 }).state;
+	assert.equal(s.draft.roles.orchestrator!.model, rec);
+});
+
+test("tasks: open shows a picker with the backups first, then the direct models; the recommended one is tagged", () => {
+	const s = act(customAt("tasks"), { type: "open", index: 0 }).state;
+	const screen = installerScreen(s);
+	assert.equal(screen.control.kind, "choice");
+	if (screen.control.kind !== "choice") return;
+	const ids = screen.control.items.map(i => i.id);
+	assert.deepEqual(ids, ["pool/claude-sonnet-5-5", "claude-bridge/claude-opus-5-5", "claude-bridge/claude-sonnet-5-5", "antigravity/claude-sonnet-5-5", "antigravity/gemini-3-8-flash"]);
+	assert.equal(screen.control.items[0]!.label, "Backup Claude Sonnet 5.5");
+	assert.match(screen.control.items[0]!.description, /never stops if one subscription runs out/i);
+	assert.equal(screen.control.items[4]!.label, "Gemini 3.8 Flash · antigravity");
+	const rec = act(customAt("tasks"), press("assign-recommended")).state.draft.roles.orchestrator!.model;
+	assert.deepEqual(screen.control.items.filter(i => i.recommended).map(i => i.id), [rec]);
+	assert.ok(screen.body.join(" ").includes("Coordinating the work"));
+	assert.deepEqual(screen.buttons.map(b => b.id), ["back", "assign-task", "cancel"]);
+});
+
+test("tasks picker: Enter assigns the highlighted model; back and cancel close it without changes", () => {
+	const open = act(customAt("tasks"), { type: "open", index: 1 }).state;
+	const picked = act(open, { type: "select", index: 0 }, press("assign-task")).state;
+	assert.equal(picked.taskPicker, undefined);
+	assert.equal(picked.draft.roles["gentle-ai-explore"]!.model, "pool/claude-sonnet-5-5");
+	assert.equal(installerScreen(picked).control.kind, "checklist");
+	assert.equal(installerScreen(picked).cursor, 1);
+	for (const close of [{ type: "back" }, { type: "cancel" }, press("back"), press("cancel")] as InstallerAction[]) {
+		const r = act(open, { type: "select", index: 2 }, close);
+		assert.equal(r.state.taskPicker, undefined);
+		assert.equal(r.state.cancelled, false);
+		assert.deepEqual(r.state.draft.roles, {});
+		assert.equal(r.state.step, "tasks");
+	}
+	assert.equal(act(open, next).state.taskPicker !== undefined, true);
+	assert.equal(act(customAt("tasks"), { type: "open", index: 99 }).state.taskPicker, undefined);
+});
+
+test("backups: the usage-limit note appears once in the body, not on every member line", () => {
+	const screen = installerScreen(customAt("backups"));
+	assert.equal(screen.body.filter(l => /usage limit/.test(l)).length, 1);
+	if (screen.control.kind !== "checklist") return assert.fail("checklist");
+	assert.ok(screen.control.items.length >= 2);
+	assert.ok(screen.control.items.every(i => !/usage limit/.test(i.detail)));
+	assert.deepEqual(screen.control.items.map(i => i.label), ["Claude Sonnet 5.5: claude-bridge", "Claude Sonnet 5.5: antigravity"]);
+});
+
+test("friendlyModel is exported by the model too", () => {
+	assert.equal(friendlyModel("gemini-3-8-flash"), "Gemini 3.8 Flash");
+});
+
+test("S7: no screen text of any step shows a raw model id or provider/model ref (help excluded)", () => {
+	const recommended = (): InstallerState[] => {
+		let s = act(fresh(), next).state;
+		const out = [fresh(), s];
+		s = withScanResult(act(s, next).state, { found: both });
+		out.push(s);
+		s = act(s, next).state;
+		out.push(s, act(s, press("install")).state);
+		out.push(withInstallResult(act(s, press("install")).state, { ok: true, written: [], backups: ["/a/b.bak"] }));
+		return out;
+	};
+	const custom: InstallerState[] = [];
+	let walk = withScanResult(act(fresh(), next, { type: "select", index: 1 }, next).state, { found: both });
+	while (walk.step !== "done") {
+		custom.push(walk);
+		if (walk.step === "tasks") {
+			custom.push(act(walk, { type: "open", index: 0 }).state, act(walk, press("deep-analysis")).state, act(walk, press("assign-recommended")).state);
+		}
+		if (walk.step === "backups") {
+			let w = act(walk, press("create-backup")).state;
+			for (let i = 0; i < 4; i++) {
+				custom.push(w);
+				w = act(w, next).state;
+			}
+		}
+		walk = act(walk, next).state;
+		if (walk.step === "installing") break;
+	}
+	const repair = initInstaller({
+		detected: both,
+		current: { pools: { pools: [] }, profiles: { active: "p", profiles: { p: { orchestrator: { model: "pool/gone" }, "gentle-ai-worker": { model: "claude-bridge/old-model" } } } } },
+		installed: true,
+	});
+	custom.push(act(repair, { type: "select", index: 1 }, next).state);
+	for (const s of [...recommended(), ...custom]) {
+		const { help: _h, sidebar: _s, ...rest } = installerScreen(s);
+		const text = JSON.stringify(rest, (key, value) => (key === "id" ? undefined : value)); // ids are for the host, not shown
+		assert.doesNotMatch(text, /(claude|gemini)-[a-z0-9-]*\d|(claude-bridge|antigravity)\/|pool\/|old-model/, `${s.step}: ${text.slice(0, 300)}`);
+	}
 });
 
 test("tasks: assign-recommended fills the draft without any effect", () => {
