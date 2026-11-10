@@ -156,7 +156,21 @@ table.tasks tr:hover td, table.tasks tr:focus-within td { background: var(--surf
 	.cap .c-fur { fill: #e49958; }
 	.cap .c-hi { fill: #f7bb7d; }
 	.cap .c-sh { fill: #a55d2c; }
+	.cap .c-deep { fill: #753818; }
 	.cap .c-snout { fill: #80583e; }
+	.cap .c-s-hi { fill: #9d6f50; }
+	.cap .c-dark { fill: #1a0b06; }
+	.cap .c-glint { fill: #ffffff; }
+	.cap .c-s-base { fill: #2f69e6; }
+	.cap .c-s-light { fill: #6ea4ff; }
+	.cap .c-s-sh { fill: #1a429e; }
+	.cap .c-r-neon { fill: #ff2d87; }
+	.cap .c-r-light { fill: #ff79b0; }
+	.cap .c-r-core { fill: #34071f; }
+	.cap .c-r-crim { fill: #6d0d3c; }
+	.cap .c-g-neon { fill: #00f5a0; }
+	.cap .c-g-dark { fill: #1e5e3a; }
+	.cap .c-k-deep { fill: #102d1c; }
 .cap .c-dark { fill: #1a0b06; }
 .cap .c-glint { fill: #ffffff; }
 .cap .c-s-base { fill: #2f69e6; }
@@ -325,38 +339,46 @@ export function installerPageScript(): string {
 	function renderCapybara(pose) {
 		var root = svg("svg", {
 			class: "cap",
-			viewBox: "0 0 22 24",
-			width: "132",
-			height: "144",
+			viewBox: "0 0 32 32",
+			width: "160",
+			height: "160",
 			role: "img",
 			"aria-label": view.text.mascot
 		});
 
 		var SPRITE = [
-					"...............#RR#...",
-					".............G#RPPR#..",
-					"..............#RDdP#..",
-					"..............#dRRd#G.",
-					"............##.#GG#...",
-					"............#S#####...",
-					"...........#MHHHM#....",
-					"...........#ME*MM#NN#.",
-					"..........#SMEEMM#NNE#",
-					"..........#SMMMMM#NNE#",
-					".........#HSSMMMM#NN##",
-					"........#MHMBLBBLB####",
-					".......#HMMMBBLBWWB#..",
-					".....##MHMMHMMMSLB#...",
-					"....#MHMMMHMMMMSSB#...",
-					"...#HMMHMMMMSMMMMS#...",
-					"..#MHMMMMMSSSMMMMS#...",
-					"..#HMMHMMSMMS#SMMM#...",
-					".#MMHMMSMMMS#SSMMM#...",
-					".#MMMMSMMMMS#SSMMM#...",
-					".#SMMMSMMMMS#SSMMM#...",
-					".#SSMMMSSSSSS#SSHHM#..",
-					"..################E#..",
-					"......................"
+					"....G...........#PP#PP#.....G...",
+					"...............#PRRPRRP#........",
+					"..G...........#PRdDDdRRP#....G..",
+					"..............#RdDdRRDdRP#......",
+					"..........##..#RdDRPPdDdR###....",
+					".........#GG#.#PdDDDDDdRP##GG#..",
+					".........#Ggg#.#dRddddRd##gG#...",
+					"..........###Ss##dRRRRd###......",
+					"...........#sSs#SMdddddSHH#.....",
+					".........##sSMMMMMMMMMHHHHH#....",
+					"........#sSMMHMMMMMHHHMH#####...",
+					".......#sSMMMMMMMMME*MMM#nnnN#..",
+					"......#sSMMMHMMMMMMEEMMS#nNNE#..",
+					"......#sSMMMMMMMMMMSMMSS#NNNE#..",
+					".....#sSMMHMMMMMMMMMSSSs#NNNN#..",
+					".....#sSMMMMMMMMMMMMMMsS#ENN#...",
+					"....#sSMMHMMMMMLLLBBBBBBZ####...",
+					"....#sSMMMMMHMLBBBBWWBBBZSM#....",
+					"...#sSMMMHMMMZBBBZWWZZZSMHM#....",
+					"...#sSMMMMMMZBLBZ#ZZsSMMHMS#....",
+					"..#sSMMHMMMZBBZ#SsSSs#MMHMS#....",
+					"..#sSMMMMMHHZZ#SssSss#SMHMS#....",
+					"..#sMMHMHHHHHMSsHHMMs#SMHMS#....",
+					"..#sSMMHHHMHHMSssHMMM#SMHMS#....",
+					"..#sSMMHMHHHMSSssHMMS#SMMMS#....",
+					"..#ssSMMMMMMSSssSHMMS#SMMSs#....",
+					"g..#ssSSMMMSSsssSHMMS#SMHMS#..g.",
+					"gG.#sssSSSSsss#SHMMHM#SMMMSS#Gg.",
+					"gG.#ssssssss#EsEsEsEs#EsEsEsE#Gg",
+					"Kgg##########################gGK",
+					"KKgGgKKgKKKgKKGKKKgKKgKKKgGgKKgK",
+					"KKKgKKKKKgKKKKKKKKKKgKKKKKKKKKKK"
 		];
 
 		var CLASS_MAP = {
@@ -365,19 +387,23 @@ export function installerPageScript(): string {
 			"O": "c-fur",
 			"H": "c-hi",
 			"S": "c-sh",
+			"s": "c-deep",
 			"N": "c-snout",
+			"n": "c-s-hi",
 			"E": "c-dark",
 			"*": "c-glint",
 			"b": "c-r-light",
 			"B": "c-s-base",
-			"L": "c-s-hi",
+			"L": "c-s-light",
+			"Z": "c-s-sh",
 			"W": "c-glint",
-			"s": "c-s-sh",
 			"R": "c-r-neon",
 			"P": "c-r-light",
 			"D": "c-r-core",
 			"d": "c-r-crim",
-			"G": "c-g-neon"
+			"G": "c-g-neon",
+			"g": "c-g-dark",
+			"K": "c-k-deep"
 		};
 
 		var body = svg("g", { class: "body" });
@@ -400,20 +426,20 @@ export function installerPageScript(): string {
 
 		var eye = svg("g", { class: "eye" });
 		if (pose === "happy") {
-			eye.appendChild(rect("c-dark", 13, 7, 2, 1));
-			eye.appendChild(rect("c-fur", 13, 8, 2, 1));
-			eye.appendChild(rect("c-r-light", 12, 9, 3, 1));
-			eye.appendChild(rect("c-g-neon sparkle", 12, 2, 1, 1));
-			eye.appendChild(rect("c-r-neon sparkle", 21, 1, 1, 1));
+			eye.appendChild(rect("c-dark", 19, 11, 2, 1));
+			eye.appendChild(rect("c-fur", 19, 12, 2, 1));
+			eye.appendChild(rect("c-r-light", 17, 13, 3, 1));
+			eye.appendChild(rect("c-g-neon sparkle", 28, 3, 2, 2));
+			eye.appendChild(rect("c-r-neon sparkle", 5, 2, 1, 1));
 		} else if (pose === "working") {
-			eye.appendChild(rect("c-sh", 13, 6, 2, 1));
-			eye.appendChild(rect("c-dark", 13, 7, 1, 2));
-			eye.appendChild(rect("c-glint", 14, 7, 1, 1));
-			eye.appendChild(rect("c-g-neon sparkle", 21, 3, 1, 1));
+			eye.appendChild(rect("c-sh", 19, 10, 2, 1));
+			eye.appendChild(rect("c-dark", 19, 11, 1, 2));
+			eye.appendChild(rect("c-glint", 20, 11, 1, 1));
+			eye.appendChild(rect("c-g-neon sparkle", 29, 5, 1, 1));
 		} else {
-			eye.appendChild(rect("c-dark eye-blink", 13, 7, 1, 1));
-			eye.appendChild(rect("c-glint eye-blink", 14, 7, 1, 1));
-			eye.appendChild(rect("c-dark", 13, 8, 2, 1));
+			eye.appendChild(rect("c-dark eye-blink", 19, 11, 1, 1));
+			eye.appendChild(rect("c-glint eye-blink", 20, 11, 1, 1));
+			eye.appendChild(rect("c-dark", 19, 12, 2, 1));
 		}
 		body.appendChild(eye);
 		root.appendChild(body);

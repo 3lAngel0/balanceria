@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gentle-Shell Capybara Mascot - Sitting Pose (Opus 5.5)</title>
+<style>
+  :root {
+    --bg: #0d0a14;
+    --card: #171322;
+    --card-border: #2c253d;
+    --text: #f0e6f6;
+    --text-dim: #988ca8;
+    --accent: #ff2d87;
+    --accent-glow: rgba(255, 45, 135, 0.3);
+    --green: #00f5a0;
+    --blue: #2f69e6;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  body {
+    background: radial-gradient(circle at 50% 20%, #1e162f 0%, var(--bg) 80%);
+    color: var(--text);
+    min-height: 100vh;
+    padding: 2.5rem 1.5rem;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+  h1 { font-size: 1.8rem; margin-bottom: 0.5rem; color: #fff; text-shadow: 0 0 20px var(--accent-glow); }
+  .subtitle { color: var(--text-dim); margin-bottom: 2rem; max-width: 650px; text-align: center; line-height: 1.5; }
+  .badge { display: inline-block; padding: 0.2rem 0.6rem; border-radius: 999px; background: rgba(0, 245, 160, 0.15); color: var(--green); border: 1px solid rgba(0, 245, 160, 0.4); font-size: 0.75rem; font-weight: bold; margin-bottom: 1rem; }
+  
+  .showcase {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 1.8rem;
+    max-width: 1050px;
+    width: 100%;
+  }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--card-border);
+    border-radius: 12px;
+    padding: 1.5rem;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+    transition: transform 0.2s, border-color 0.2s;
+  }
+  .card:hover {
+    transform: translateY(-4px);
+    border-color: var(--accent);
+  }
+  .card-title {
+    font-size: 1.1rem;
+    font-weight: bold;
+    color: #fff;
+    margin-bottom: 0.3rem;
+  }
+  .card-desc {
+    font-size: 0.8rem;
+    color: var(--text-dim);
+    margin-bottom: 1.2rem;
+    text-align: center;
+  }
+  .preview-stage {
+    background: #09070e;
+    border: 1px solid #231c33;
+    border-radius: 8px;
+    padding: 1.5rem;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    width: 100%;
+    min-height: 220px;
+    margin-bottom: 1rem;
+  }
+  svg.cap {
+    width: 160px;
+    height: 175px;
+    image-rendering: pixelated;
+    shape-rendering: crispEdges;
+  }
+  .cap .c-out { fill: #221612; }
+	.cap .c-fur { fill: #e49958; }
+	.cap .c-hi { fill: #f7bb7d; }
+	.cap .c-sh { fill: #a55d2c; }
+	.cap .c-deep { fill: #753818; }
+	.cap .c-snout { fill: #80583e; }
+	.cap .c-s-hi { fill: #9d6f50; }
+	.cap .c-dark { fill: #1a0b06; }
+	.cap .c-glint { fill: #ffffff; }
+	.cap .c-s-base { fill: #2f69e6; }
+	.cap .c-s-light { fill: #6ea4ff; }
+	.cap .c-s-sh { fill: #1a429e; }
+	.cap .c-r-neon { fill: #ff2d87; }
+	.cap .c-r-light { fill: #ff79b0; }
+	.cap .c-r-core { fill: #34071f; }
+	.cap .c-r-crim { fill: #6d0d3c; }
+	.cap .c-g-neon { fill: #00f5a0; }
+	.cap .c-g-dark { fill: #1e5e3a; }
+	.cap .c-k-deep { fill: #102d1c; }
+  .cap .c-s-base { fill: #2f69e6; }
+  .cap .c-s-light { fill: #6ea4ff; }
+  .cap .c-s-sh { fill: #1a429e; }
+  .cap .c-s-hi { fill: #9d6f50; }
+  .cap .c-deep { fill: #753818; }
+  .cap .c-g-dark { fill: #1e5e3a; }
+  .cap .c-k-deep { fill: #102d1c; }
+
+  @keyframes blink {
+    0%, 90%, 100% { opacity: 1; }
+    95% { opacity: 0; }
+  }
+  .eye-blink { animation: blink 4s infinite; }
+
+  @keyframes float {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-3px); }
+  }
+  .sparkle { animation: float 2s ease-in-out infinite alternate; }
+
+  .palette-bar {
+    display: flex;
+    gap: 4px;
+    margin-top: 0.5rem;
+    width: 100%;
+    justify-content: center;
+  }
+  .chip { width: 14px; height: 14px; border-radius: 3px; border: 1px solid rgba(255,255,255,0.1); }
+
+  .specs-panel {
+    max-width: 1050px;
+    width: 100%;
+    margin-top: 2rem;
+    background: var(--card);
+    border: 1px solid var(--card-border);
+    border-radius: 12px;
+    padding: 1.5rem;
+  }
+  .specs-panel h3 { color: #fff; margin-bottom: 0.8rem; font-size: 1rem; }
+  .specs-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 1rem;
+    font-size: 0.85rem;
+    color: var(--text-dim);
+  }
+  .spec-item strong { color: var(--text); display: block; margin-bottom: 0.2rem; }
+</style>
+</head>
+<body>
+
+  <div class="badge">CLAUDE OPUS 5.5 ARCHITECTURE</div>
+  <h1>Carpincho Sentado (Pose Reposada)</h1>
+  <p class="subtitle">
+    Rediseño anatómico basado en las referencias de pixel art 2D (bloque de hocico chocolate oscuro + fosa vertical) y voxel 3D (sentado sobre las ancas). Grilla estricta 22×24.
+  </p>
+
+  <div class="showcase">
+    <!-- Serene / Default -->
+    <div class="card">
+      <div class="card-title">Serene / Idle</div>
+      <div class="card-desc">Ojo sereno con specular blanco puro, parpadeo periódico y postura noble.</div>
+      <div class="preview-stage">
+        <svg class="cap" viewBox="0 0 32 32" id="svg-serene"></svg>
+      </div>
+      <div class="palette-bar">
+        <div class="chip" style="background:#221612" title="Outline"></div>
+        <div class="chip" style="background:#80583e" title="Hocico Chocolate"></div>
+        <div class="chip" style="background:#e49958" title="Pelaje Caramelo"></div>
+        <div class="chip" style="background:#f7bb7d" title="Motas Lomo"></div>
+        <div class="chip" style="background:#2f69e6" title="Pañuelo Celeste"></div>
+        <div class="chip" style="background:#ff2d87" title="Cyber Rose"></div>
+      </div>
+    </div>
+
+    <!-- Happy / Success -->
+    <div class="card">
+      <div class="card-title">Happy / Success</div>
+      <div class="card-desc">Arco sonriente en el ojo, mejillas rosadas y destellos cyber en la rosa.</div>
+      <div class="preview-stage">
+        <svg class="cap" viewBox="0 0 32 32" id="svg-happy"></svg>
+      </div>
+      <div class="palette-bar">
+        <div class="chip" style="background:#ff79b0" title="Rubor Rosado"></div>
+        <div class="chip" style="background:#00f5a0" title="Destello Verde"></div>
+      </div>
+    </div>
+
+    <!-- Working / Compiling -->
+    <div class="card">
+      <div class="card-title">Working / Hacker</div>
+      <div class="card-desc">Mirada concentrada con ceño de sombra y brillo focalizado en el instalador.</div>
+      <div class="preview-stage">
+        <svg class="cap" viewBox="0 0 32 32" id="svg-working"></svg>
+      </div>
+      <div class="palette-bar">
+        <div class="chip" style="background:#a55d2c" title="Sombra Enfoque"></div>
+        <div class="chip" style="background:#ffffff" title="Glint"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="specs-panel">
+    <h3>Detalles Anatómicos Resueltos por Opus 5.5</h3>
+    <div class="specs-grid">
+      <div class="spec-item">
+        <strong>Bloque de Hocico (Cols 18–20)</strong>
+        Marrón chocolate oscuro (#80583e) continuo con fosas verticales (#1a0b06) en el borde frontal, evitando cualquier empaste con la cara.
+      </div>
+      <div class="spec-item">
+        <strong>Postura Sentada (Cols 1–18)</strong>
+        Muslo trasero plegado en sombra diagonal sobre el flanco izquierdo y patas delanteras derechas plantadas firmes en el suelo.
+      </div>
+      <div class="spec-item">
+        <strong>Pañuelo Gaucho (Filas 11–14)</strong>
+        Franjas celestes (#2f69e6/#6ea4ff) con nudo central blanco puro bajo la garganta.
+      </div>
+      <div class="spec-item">
+        <strong>Rosa Cyberpunk (Filas 0–4)</strong>
+        Corona equilibrada sobre el cráneo (#ff2d87/#ff79b0) con tallo y destello verde neón (#00f5a0).
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const SPRITE = ["....G...........#PP#PP#.....G...","...............#PRRPRRP#........","..G...........#PRdDDdRRP#....G..","..............#RdDdRRDdRP#......","..........##..#RdDRPPdDdR###....",".........#GG#.#PdDDDDDdRP##GG#..",".........#Ggg#.#dRddddRd##gG#...","..........###Ss##dRRRRd###......","...........#sSs#SMdddddSHH#.....",".........##sSMMMMMMMMMHHHHH#....","........#sSMMHMMMMMHHHMH#####...",".......#sSMMMMMMMMME*MMM#nnnN#..","......#sSMMMHMMMMMMEEMMS#nNNE#..","......#sSMMMMMMMMMMSMMSS#NNNE#..",".....#sSMMHMMMMMMMMMSSSs#NNNN#..",".....#sSMMMMMMMMMMMMMMsS#ENN#...","....#sSMMHMMMMMLLLBBBBBBZ####...","....#sSMMMMMHMLBBBBWWBBBZSM#....","...#sSMMMHMMMZBBBZWWZZZSMHM#....","...#sSMMMMMMZBLBZ#ZZsSMMHMS#....","..#sSMMHMMMZBBZ#SsSSs#MMHMS#....","..#sSMMMMMHHZZ#SssSss#SMHMS#....","..#sMMHMHHHHHMSsHHMMs#SMHMS#....","..#sSMMHHHMHHMSssHMMM#SMHMS#....","..#sSMMHMHHHMSSssHMMS#SMMMS#....","..#ssSMMMMMMSSssSHMMS#SMMSs#....","g..#ssSSMMMSSsssSHMMS#SMHMS#..g.","gG.#sssSSSSsss#SHMMHM#SMMMSS#Gg.","gG.#ssssssss#EsEsEsEs#EsEsEsE#Gg","Kgg##########################gGK","KKgGgKKgKKKgKKGKKKgKKgKKKgGgKKgK","KKKgKKKKKgKKKKKKKKKKgKKKKKKKKKKK"];
+    const CLASS_MAP = {
+      "#": "c-out", "M": "c-fur", "H": "c-hi", "S": "c-sh", "s": "c-deep", "N": "c-snout", "n": "c-s-hi",
+      "E": "c-dark", "*": "c-glint", "B": "c-s-base", "L": "c-s-light", "Z": "c-s-sh", "W": "c-glint",
+      "R": "c-r-neon", "P": "c-r-light", "D": "c-r-core", "d": "c-r-crim", "G": "c-g-neon",
+      "g": "c-g-dark", "K": "c-k-deep"
+    };
+
+    function buildBaseSVG(svgEl) {
+      for (let y = 0; y < SPRITE.length; y++) {
+        const row = SPRITE[y];
+        let x = 0;
+        while (x < row.length) {
+          const ch = row[x];
+          if (ch === '.' || !CLASS_MAP[ch]) { x++; continue; }
+          let len = 1;
+          while (x + len < row.length && row[x + len] === ch) len++;
+          const r = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+          r.setAttribute("class", CLASS_MAP[ch]);
+          r.setAttribute("x", x);
+          r.setAttribute("y", y);
+          r.setAttribute("width", len);
+          r.setAttribute("height", 1);
+          svgEl.appendChild(r);
+          x += len;
+        }
+      }
+    }
+
+    function rect(cls, x, y, w, h) {
+      const r = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+      r.setAttribute("class", cls);
+      r.setAttribute("x", x);
+      r.setAttribute("y", y);
+      r.setAttribute("width", w);
+      r.setAttribute("height", h);
+      return r;
+    }
+
+            // Build Serene
+    const svgSerene = document.getElementById("svg-serene");
+    buildBaseSVG(svgSerene);
+    svgSerene.appendChild(rect("c-dark eye-blink", 19, 11, 1, 1));
+    svgSerene.appendChild(rect("c-glint eye-blink", 20, 11, 1, 1));
+    svgSerene.appendChild(rect("c-dark", 19, 12, 2, 1));
+
+    // Build Happy
+    const svgHappy = document.getElementById("svg-happy");
+    buildBaseSVG(svgHappy);
+    svgHappy.appendChild(rect("c-dark", 19, 11, 2, 1));
+    svgHappy.appendChild(rect("c-fur", 19, 12, 2, 1));
+    svgHappy.appendChild(rect("c-r-light", 17, 13, 3, 1));
+    svgHappy.appendChild(rect("c-g-neon sparkle", 28, 3, 2, 2));
+    svgHappy.appendChild(rect("c-r-neon sparkle", 5, 2, 1, 1));
+
+    // Build Working
+    const svgWorking = document.getElementById("svg-working");
+    buildBaseSVG(svgWorking);
+    svgWorking.appendChild(rect("c-sh", 19, 10, 2, 1));
+    svgWorking.appendChild(rect("c-dark", 19, 11, 1, 2));
+    svgWorking.appendChild(rect("c-glint", 20, 11, 1, 1));
+    svgWorking.appendChild(rect("c-g-neon sparkle", 29, 5, 1, 1));
+  </script>
+</body>
+</html>
