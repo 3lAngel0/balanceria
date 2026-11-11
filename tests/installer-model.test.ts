@@ -507,12 +507,12 @@ test("Modificar is Personalizada with the current config loaded", () => {
 	assert.deepEqual(ids(installerScreen(s)), ["welcome", "scan", "subscriptions", "backups", "tasks", "main-agent", "summary", "installing", "done"]);
 });
 
-test("Empezar de cero rebuilds the recommended draft and ignores what was there", () => {
+test("Empezar de cero rebuilds the clean draft and walks through subscriptions, backups and tasks", () => {
 	let s = act(installed(), { type: "select", index: 2 }, next).state;
-	assert.deepEqual(installerScreen(s).sidebar.map(i => i.id), ["welcome", "scan", "summary", "installing", "done"]);
+	assert.deepEqual(installerScreen(s).sidebar.map(i => i.id), ["welcome", "scan", "subscriptions", "backups", "tasks", "main-agent", "summary", "installing", "done"]);
 	s = withScanResult(s, { found: both });
 	assert.equal(s.draft.roles.orchestrator?.model !== "pool/gone", true);
-	assert.equal(act(s, next).state.step, "summary");
+	assert.equal(act(s, next).state.step, "subscriptions");
 });
 
 test("Reparar lists tasks pointing at missing backups, applies the fixes and goes to the summary", () => {

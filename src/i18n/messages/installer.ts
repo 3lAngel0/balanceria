@@ -40,7 +40,7 @@ export const installerMessages = {
 		"installer.existing.repair.label": "Repair",
 		"installer.existing.repair.desc": "Find agent tasks that point to backups or models that no longer exist, and fix them.",
 		"installer.existing.fresh.label": "Start from scratch",
-		"installer.existing.fresh.desc": "Save a copy of your files (.bak) and set up the recommended configuration again.",
+		"installer.existing.fresh.desc": "Save a copy of your files (.bak) and configure subscriptions, backups and tasks from scratch.",
 
 		"installer.type.title": "How do you want to install?",
 		"installer.type.body": "Pick one. You can go back and change it before anything is written.",
@@ -434,7 +434,7 @@ export const installerMessages = {
 		"installer.existing.repair.label": "Reparar",
 		"installer.existing.repair.desc": "Encuentra tareas de agentes que apuntan a respaldos o modelos que ya no existen y las arregla.",
 		"installer.existing.fresh.label": "Empezar de cero",
-		"installer.existing.fresh.desc": "Guarda una copia de tus archivos (.bak) y arma de nuevo lo recomendado.",
+		"installer.existing.fresh.desc": "Guarda una copia de tus archivos (.bak) y configurá suscripciones, respaldos y tareas desde cero.",
 
 		"installer.type.title": "¿Cómo querés instalar?",
 		"installer.type.body": "Elegí una. Podés volver atrás y cambiarla antes de que se escriba nada.",

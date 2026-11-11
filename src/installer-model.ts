@@ -308,7 +308,7 @@ function pathOf(state: InstallerState): InstallerStep[] {
 			case "repair":
 				return ["welcome", "tasks", "summary", "installing", "done"];
 			case "fresh":
-				return ["welcome", "scan", "summary", "installing", "done"];
+				return INSTALLER_STEPS.filter(s => s !== "type");
 		}
 	}
 	switch (state.installType) {
@@ -333,7 +333,7 @@ export function withScanResult(state: InstallerState, result: { found: DetectedP
 	const found = detectedOnly(result.found);
 	if (found.length === 0) return { ...state, scan: { status: "error" } };
 	const workflow = state.draft.orchestratorMode;
-	const asCustom = state.installType === "custom" || state.existing?.mode === "modify";
+	const asCustom = state.installType === "custom" || state.existing?.mode === "modify" || state.existing?.mode === "fresh";
 	let draft: SetupStepperState;
 	if (state.existing?.mode === "modify") draft = draftFromCurrent(result.found, state.current, workflow);
 	else if (asCustom) draft = initStepper(result.found, suggestBackups(found).backups, {}, workflow);
@@ -806,6 +806,11 @@ function shortcutsOf(state: InstallerState, cursor: number): InstallerShortcut[]
 	if (state.wizard || state.error || state.analysis?.status === "error") return [];
 	const sc = (key: string, label: string, action: InstallerAction, enabled = true): InstallerShortcut => ({ key, label: t(`installer.shortcut.${label}`), action, enabled });
 	const press = (id: ButtonId): InstallerAction => ({ type: "button", id });
+	if (state.step === "subscriptions") {
+		const items = state.draft.detected.filter(p => p.detected);
+		const item = items[cursor];
+		return [sc(" ", "toggle", { type: "toggle", index: cursor }, item !== undefined)];
+	}
 	if (state.step === "backups") {
 		const items = backupItems(state.draft);
 		const item = items[cursor];
@@ -963,7 +968,7 @@ function leave(state: InstallerState): InstallerState {
 		const rebuilt = buildRecommendedDraft({ detected: state.draft.detected.filter(p => p.detected && on.has(p.id)), workflow: state.draft.orchestratorMode });
 		return { ...state, draft: { ...rebuilt, detected: state.draft.detected } };
 	}
-	if (state.step === "subscriptions" && !state.backupsTouched && !state.existing && state.installType === "custom") {
+	if (state.step === "subscriptions" && !state.backupsTouched && (!state.existing || state.existing.mode === "fresh") && state.installType === "custom") {
 		return { ...state, draft: { ...state.draft, pools: suggestBackups(enabledProviders(state.draft)).backups } };
 	}
 	if (state.step === "tasks" && state.existing?.mode === "repair") return applyRepairs(state);
@@ -983,7 +988,7 @@ function onNext(state: InstallerState): Result {
 	if (step === "installing" || step === "done") return stay(state);
 	if (step === "welcome" && state.existing) {
 		const mode = state.existing.mode;
-		const installType: InstallType = mode === "fresh" ? "recommended" : "custom";
+		const installType: InstallType = mode === "repair" ? "recommended" : "custom";
 		const set = { ...state, installType };
 		return enter(set, pathOf(set)[1]!);
 	}
