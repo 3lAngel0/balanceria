@@ -624,3 +624,17 @@ test("round 2 i18n keys exist in en and es", () => {
 		}
 	}
 });
+
+test("only the focused button is filled; the primary one is not blue at rest", () => {
+	const screen = installerScreen(customRun().find(s => s.step === "tasks")!);
+	const line = (focus: number | undefined, label: string) =>
+		renderInstaller(screen, { width: 140, mode: "truecolor", focus }).lines.find(l => strip(l).includes(label))!;
+	const next = screen.buttons.findIndex(b => b.id === "next");
+	const back = screen.buttons.findIndex(b => b.id === "back");
+	assert.doesNotMatch(line(undefined, "Next ▶"), /\x1b\[48;2;/);
+	assert.match(line(next, "Next ▶"), /\x1b\[48;2;[^m]*m Next ▶ /);
+	const backFocused = line(back, "◀ Back");
+	assert.match(backFocused, /\x1b\[48;2;[^m]*m ◀ Back /);
+	assert.doesNotMatch(backFocused, /\x1b\[48;2;[^m]*m Next ▶ /);
+	assert.match(text(renderInstaller(screen, { width: 100, mode: "none" }).lines), /\[ Next ▶ \]/);
+});

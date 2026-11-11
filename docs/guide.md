@@ -535,7 +535,7 @@ The installer layout is organized into 3 columns designed to eliminate cognitive
   - **Conversational Guide**: Features the pixel-art Capybara mascot and an animated mechanical balance scale alongside a speech bubble explaining the step in plain language.
   - **Stage Area**: Renders interactive controls, options lists, candidate ordering widgets, and dynamic ASCII / SVG routing diagrams.
   - **Closing Reassurance Notice**: Displays an explicit notice at the base of every stage: "*Nothing is applied until you confirm*" (`No se aplica nada hasta que confirmes`).
-  - **Action Navigation**: Standard action buttons (`[Back]`, `[Next]`, `[Cancel]`, `[Install]`) protected by a single-flight double-click guard that locks UI dispatch until current processing concludes.
+  - **Action Navigation**: Standard action buttons (`[Back]`, `[Next]`, `[Cancel]`, `[Install]`) protected by a single-flight double-click guard that locks UI dispatch until current processing concludes. In the terminal, buttons are plain at rest (`[ Next ▶ ]`); `Tab` moves focus between them and only the focused one is filled (marked with `▸`). `Enter` with no focused button presses **Next**.
 - **Right Rail (Dedicated Help Panel)**:
   - An always-visible context panel that updates synchronously with the focused item:
     - **What it is**: High-level definition of the selected choice.

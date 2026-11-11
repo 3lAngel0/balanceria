@@ -535,7 +535,7 @@ La interfaz del instalador se organiza en 3 columnas pensadas para eliminar la s
   - **Guía conversacional**: Presenta a la mascota Carpincho en pixel art con su balanza mecánica animada y un bocadillo de diálogo que explica el paso en lenguaje llano.
   - **Escenario interactivo**: Despliega controles específicos del paso, listas de opciones, controles de reordenamiento de candidatos y diagramas de enrutamiento dinámicos en ASCII y SVG.
   - **Aviso de tranquilidad al cierre**: Muestra de forma destacada en la base del escenario: "*No se aplica nada hasta que confirmes*" (`Nothing is applied until you confirm`).
-  - **Botones de navegación**: Botones estándar (`[Atrás]`, `[Siguiente]`, `[Cancelar]`, `[Instalar]`) equipados con un bloqueo de concurrencia anti-doble clic (*single-flight guard*) que congela eventos repetidos mientras se procesa la acción.
+  - **Botones de navegación**: Botones estándar (`[Atrás]`, `[Siguiente]`, `[Cancelar]`, `[Instalar]`) equipados con un bloqueo de concurrencia anti-doble clic (*single-flight guard*) que congela eventos repetidos mientras se procesa la acción. En la terminal los botones se ven sin resaltar en reposo (`[ Siguiente ▶ ]`); `Tab` mueve el foco entre ellos y solo el que tiene el foco se rellena (marcado con `▸`). `Enter` sin ningún botón con foco aprieta **Siguiente**.
 - **Panel derecho (Ayuda detallada fija)**:
   - Un panel de contexto visible en todo momento que se actualiza sincrónicamente con el elemento en foco:
     - **Qué es**: Definición clara y concisa de la opción seleccionada.

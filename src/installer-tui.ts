@@ -135,9 +135,10 @@ function controlRows(control: InstallerControl, cursor: number, width: number, m
 // Buttons
 // ---------------------------------------------------------------------------------------------
 
-function buttonBody(label: string, primary: boolean, enabled: boolean, mode: ColorMode): string {
+/** Only the focused button is highlighted; at rest every enabled button, the primary one included, is plain. */
+function buttonBody(label: string, focused: boolean, enabled: boolean, mode: ColorMode): string {
 	if (!enabled) return pixelText("steel", `( ${label} )`, mode);
-	if (!primary) return `[ ${label} ]`;
+	if (!focused) return `[ ${label} ]`;
 	if (mode === "truecolor") return `[\x1b[48;2;${PALETTE.sky.join(";")};38;2;${PALETTE.ink.join(";")}m ${label} \x1b[39;49m]`;
 	return pixelText("sky", `[*${label}*]`, mode);
 }
@@ -149,7 +150,7 @@ function buttonRows(screen: InstallerScreen, width: number, mode: ColorMode, foc
 	let row: Row = { text: "", hits: [] };
 	let used = 0;
 	screen.buttons.forEach((b, i) => {
-		const body = buttonBody(decorate(b.id, b.label), Boolean(b.primary), b.enabled, mode);
+		const body = buttonBody(decorate(b.id, b.label), i === focus, b.enabled, mode);
 		const cell = `${i === focus ? pixelText("sky", "▸", mode) : " "}${body}`;
 		const cells = cellWidth(cell);
 		if (used > 0 && used + cells > width) {
