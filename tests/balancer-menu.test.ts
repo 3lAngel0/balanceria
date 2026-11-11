@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { BALANCER_MENU, balancerMenu, glossaryText, resolveBalancerArgs } from "../src/balancer-menu.ts";
+import { BALANCER_MENU, balancerMenu, glossaryText, parseQuotaArgs, resolveBalancerArgs } from "../src/balancer-menu.ts";
 import { setLang } from "../src/i18n/index.ts";
 
 test("the menu offers every action with a label and a description, in a stable order", () => {
@@ -118,4 +118,19 @@ test("the menu lists the dummy setup right after setup in both languages", () =>
 		assert.ok(!(items[i + 1]!.description ?? "menu.").startsWith("menu."));
 	}
 	setLang("en");
+});
+
+test("quota accepts only its exact flags", () => {
+	assert.deepEqual(parseQuotaArgs("quota"), { copy: false, raw: false });
+	for (const flag of ["--copy", "-c", "copy"]) assert.deepEqual(parseQuotaArgs(`quota ${flag}`), { copy: true, raw: false }, flag);
+	for (const flag of ["--raw", "-r"]) assert.deepEqual(parseQuotaArgs(`quota ${flag}`), { copy: false, raw: true }, flag);
+	assert.deepEqual(parseQuotaArgs("quota  --raw   -c"), { copy: true, raw: true });
+	for (const bad of ["quota -raw", "quota --copyx", "quota -cr", "quota foo", "quotas"]) assert.equal(parseQuotaArgs(bad), undefined, bad);
+});
+
+test("quota with unknown flags is rejected instead of guessed", () => {
+	assert.deepEqual(resolveBalancerArgs("quota --copy"), { kind: "command", command: "quota --copy" });
+	assert.deepEqual(resolveBalancerArgs("quota -r"), { kind: "command", command: "quota -r" });
+	assert.equal(resolveBalancerArgs("quota -raw").kind, "unknown");
+	assert.equal(resolveBalancerArgs("quota foo").kind, "unknown");
 });

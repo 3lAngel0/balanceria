@@ -72,6 +72,21 @@ const TAB_COMMANDS: readonly ControlCenterTab[] = ["overview", "roles", "pools",
 
 const SIMPLE = new Set(["panel", "usage", "refresh", "setup", "setup classic", "setup --dummy", "setup -d", "setup --skip", "setup -s", "report", "simulate", "switch-cost", "loans", "quota", "help"]);
 
+const QUOTA_FLAGS: Readonly<Record<string, "copy" | "raw">> = { "--copy": "copy", "-c": "copy", copy: "copy", "--raw": "raw", "-r": "raw" };
+
+/** Parses `quota [--copy|-c|copy] [--raw|-r]` token by token; any other token makes it invalid. */
+export function parseQuotaArgs(command: string): { copy: boolean; raw: boolean } | undefined {
+	const [head, ...rest] = command.trim().split(/\s+/);
+	if (head !== "quota") return undefined;
+	const options = { copy: false, raw: false };
+	for (const token of rest) {
+		const flag = QUOTA_FLAGS[token];
+		if (!flag) return undefined;
+		options[flag] = true;
+	}
+	return options;
+}
+
 export function resolveBalancerArgs(args: string): BalancerArgs {
 	const command = args.trim();
 	if (command === "") return { kind: "overlay" };
@@ -81,7 +96,8 @@ export function resolveBalancerArgs(args: string): BalancerArgs {
 	if (tab) return { kind: "overlay", tab };
 	if (
 		SIMPLE.has(command) ||
-		/^(serve|open|simulate|quota)(\s|$)/.test(command) ||
+		/^(serve|open|simulate)(\s|$)/.test(command) ||
+		parseQuotaArgs(command) !== undefined ||
 		/^permissions( grant| revoke( \S+)?)?$/.test(command) ||
 		/^lab( new| diff| simulate| apply| undo| discard)?$/.test(command) ||
 		/^lang(\s+(es|en|auto))?$/.test(command)

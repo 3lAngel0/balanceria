@@ -259,7 +259,7 @@ Select a pool model directly in chat via `/model pool/claude-sonnet-5-5` or conf
 | `/balancer` | Opens the Control Center overlay (click or use the keys). `/balancer roles\|pools\|advisor` jumps to a tab; `/balancer menu` (or `/` inside the overlay) lists every action. |
 | `/balancer panel` or `Ctrl+Alt+B` | Toggle live sidebar overlay and 4-tab Control Center. |
 | `/balancer usage` or `Ctrl+Alt+U` | Open full 5-tab Usage Console (Now, Quotas, Days, Sessions, HUD). |
-| `/balancer quota` | Show a compact live quota summary (per-window usage % and reset time). `--copy` / `-c` (or `quota copy`) copies it to the clipboard; `--raw` / `-r` prints it as plain text. |
+| `/balancer quota` | Show a compact live quota summary (per-window usage % and reset time). `--copy` / `-c` (or `quota copy`) copies it to the clipboard; `--raw` / `-r` prints it as plain text. Flags can be combined; any other argument is rejected. |
 | `/balancer setup` | Open the installer: language, then **Install via terminal** or **Install via web**. |
 | `/balancer setup --dummy` / `-d`, `/balancer dummy`, or `D` in the Control Center | Open the installer in the terminal (language first, no terminal/web question). |
 | `/balancer setup --skip` / `-s` | Go straight to the technical stepper (Providers → Strategy → Roles → Confirm), after the language prompt. |

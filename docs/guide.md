@@ -728,7 +728,7 @@ Operational overlay showing real-time subscription burn velocity (`+X%/h`), rese
 | `/balancer` | *(none)* | Opens the Control Center overlay; `roles`, `pools`, `advisor` jump to a tab, `menu` lists every action. Mouse works under the alternate screen only. |
 | `/balancer panel` | *(none)* | Toggles sidebar overlay and Control Center (`Ctrl+Alt+B`). |
 | `/balancer usage` | *(none)* | Opens 5-tab usage and quota console (`Ctrl+Alt+U`). |
-| `/balancer quota` | `--copy` / `-c` (or `copy`), `--raw` / `-r` | Shows a compact live quota summary (per-window usage % and reset time). `--copy` copies it to the clipboard; `--raw` prints it as plain text. |
+| `/balancer quota` | `--copy` / `-c` (or `copy`), `--raw` / `-r` | Shows a compact live quota summary (per-window usage % and reset time). `--copy` copies it to the clipboard; `--raw` prints it as plain text. Flags can be combined; any other argument is rejected. |
 | `/balancer setup` | *(none)* | Opens the installer: language, then **Install via terminal** or **Install via web**. |
 | `/balancer setup --dummy` / `-d`, `/balancer dummy`, or `D` in the Control Center | *(none)* | Opens the installer in the terminal (language first, no terminal/web question). |
 | `/balancer setup --skip` / `-s` | *(none)* | Goes straight to the technical stepper (Providers → Strategy → Roles → Confirm), after the language prompt. |

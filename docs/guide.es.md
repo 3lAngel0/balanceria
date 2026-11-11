@@ -728,7 +728,7 @@ Superposición operativa en terminal que muestra la velocidad de consumo de susc
 | `/balancer` | *(ninguno)* | Abre el Centro de control; `roles`, `pools`, `advisor` saltan a una pestaña, `menu` lista todas las acciones. El ratón solo funciona en pantalla alterna. |
 | `/balancer panel` | *(ninguno)* | Muestra u oculta el panel lateral y el Control Center (`Ctrl+Alt+B`). |
 | `/balancer usage` | *(ninguno)* | Abre la consola de uso y cuotas en 5 pestañas (`Ctrl+Alt+U`). |
-| `/balancer quota` | `--copy` / `-c` (o `copy`), `--raw` / `-r` | Muestra un resumen compacto de la cuota en vivo (% usado por ventana y hora de reinicio). `--copy` lo copia al portapapeles; `--raw` lo imprime como texto plano. |
+| `/balancer quota` | `--copy` / `-c` (o `copy`), `--raw` / `-r` | Muestra un resumen compacto de la cuota en vivo (% usado por ventana y hora de reinicio). `--copy` lo copia al portapapeles; `--raw` lo imprime como texto plano. Los flags se pueden combinar; cualquier otro argumento se rechaza. |
 | `/balancer setup` | *(ninguno)* | Abre el instalador: idioma y luego **Instalación vía terminal** o **Instalación vía web**. |
 | `/balancer setup --dummy` / `-d`, `/balancer dummy`, o `D` en el Centro de control | *(ninguno)* | Abre el instalador en la terminal (primero el idioma, sin la pregunta terminal/web). |
 | `/balancer setup --skip` / `-s` | *(ninguno)* | Va directo al stepper técnico (Providers → Estrategia → Roles → Confirmar), después del idioma. |

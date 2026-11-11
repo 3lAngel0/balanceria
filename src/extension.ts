@@ -27,7 +27,7 @@ import {
 	type FirewallDetails,
 } from "./installer-remote-forward.ts";
 import { initLangPrompt, langPromptInput, renderLangPrompt } from "./setup-lang-prompt.ts";
-import { BALANCER_MENU, balancerMenu, glossaryText, resolveBalancerArgs } from "./balancer-menu.ts";
+import { BALANCER_MENU, balancerMenu, glossaryText, parseQuotaArgs, resolveBalancerArgs } from "./balancer-menu.ts";
 import { initLang, getLang, setLang, saveLangSetting, t } from "./i18n/index.ts";
 import { detectFirewall, privateIPv4Networks, readAutostart, readTls, runLanSetup, writeAutostart, writeTls, type Runner } from "./lan-setup.ts";
 import { createCertificate, inspectCertificate, type TlsConfig } from "./tls-setup.ts";
@@ -2663,8 +2663,7 @@ export default function aiBalancer(pi: ExtensionAPI) {
 				return;
 			}
 			if (command === "quota" || command.startsWith("quota ")) {
-				const isCopy = command.includes("--copy") || command.includes("-c") || command.trim() === "quota copy";
-				const isRaw = command.includes("--raw") || command.includes("-r");
+				const { copy: isCopy, raw: isRaw } = parseQuotaArgs(command) ?? { copy: false, raw: false };
 				const usage = await poolUsageSource.fetch(undefined, fetch, Date.now());
 				if (!usage) {
 					ctx.ui.notify("ai-balancer: usage data unavailable", "warning");
@@ -2935,7 +2934,7 @@ export default function aiBalancer(pi: ExtensionAPI) {
 	};
 
 	pi.registerCommand("balancer", {
-		description: "ai-balancer: `/balancer` opens the Control Center (`/balancer roles|pools|advisor` jumps to a tab, `/balancer menu` lists every action); or run one directly: `/balancer panel|usage|refresh|quota [--copy|--raw]|setup [classic]|report|simulate|switch-cost|loans|lab|permissions`, `/balancer serve [lan] [port|stop|status]`, `/balancer open <id>`, `/balancer lang [es|en|auto]`",
+		description: "ai-balancer: `/balancer` opens the Control Center (`/balancer roles|pools|advisor` jumps to a tab, `/balancer menu` or `/balancer skip` lists every action); or run one directly: `/balancer panel|usage|refresh|quota [--copy|-c] [--raw|-r]|setup [--dummy|-d|--skip|-s|classic]|report|simulate|switch-cost|loans|lab|permissions`, `/balancer serve [lan] [port|stop|status]`, `/balancer open <id>`, `/balancer lang [es|en|auto]`; `/balancer dummy` is short for `setup --dummy`",
 		handler: async (args, ctx) => {
 			const resolved = resolveBalancerArgs(args);
 			if (resolved.kind === "unknown") {
