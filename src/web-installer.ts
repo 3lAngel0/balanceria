@@ -217,6 +217,7 @@ const BUTTONS: Record<ButtonId, true> = {
 	"assign-task": true,
 	"deep-analysis": true,
 	"create-backup": true,
+	"last-resort": true,
 	"move-up": true,
 	"move-down": true,
 	"cycle-method": true,

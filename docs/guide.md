@@ -362,8 +362,12 @@ Here is a complete, production-tested configuration separating an agent team int
 - **Reviewers & Judges** (`review-risk`, `jd-judge-a`, `gentle-ai-verify`): High-reasoning models with higher thinking levels.
 
 ### `pools.json`
+
+`lastResort` (optional, top level): a `provider/model` that answers first, automatically, when every candidate of a pool is exhausted (main session and subagents). Set it in `/installer` → Backups → "Last-resort model" (key `l`); installer saves and other tools that edit pools preserve it.
+
 ```json
 {
+  "lastResort": "antigravity/gemini-3-8-flash",
   "pools": [
     {
       "id": "orchestrator-pool",

@@ -592,3 +592,35 @@ test("the install effect receives the draft with the backups saved profiles stil
 		await h.cleanup();
 	}
 });
+
+test("S1: the web installer exposes the last-resort control and an install writes it to pools.json", async () => {
+	const h = await harness();
+	try {
+		await post(h, { type: "next" });
+		await post(h, { type: "select", index: 1 });
+		await post(h, { type: "next" });
+		await settle(h);
+		await post(h, { type: "next" }); // subscriptions
+		await post(h, { type: "next" }); // backups
+		let view = (await get(h)).json();
+		assert.equal(view.screen.step, "backups");
+		assert.ok(view.screen.buttons.some((b: { id: string; enabled: boolean }) => b.id === "last-resort" && b.enabled));
+		view = (await post(h, { type: "button", id: "last-resort" })).json();
+		assert.equal(view.screen.title, "Last-resort model");
+		assert.match(view.screen.body.join(" "), /Pick a cheap one/);
+		const index = view.screen.control.items.findIndex((i: { id: string }) => i.id === "antigravity/gemini-3-8-flash");
+		assert.ok(index > 0);
+		view = (await post(h, { type: "select", index })).json();
+		assert.equal(view.screen.control.selected, index);
+		await post(h, { type: "button", id: "last-resort" }); // back to the list
+		while ((await get(h)).json().screen.step !== "summary") await post(h, { type: "next" });
+		view = (await get(h)).json();
+		assert.ok(view.screen.summary.detail.some((line: string) => line.includes("Last-resort model: Gemini 3.8 Flash")));
+		await post(h, { type: "button", id: "install" });
+		await settle(h);
+		assert.equal(JSON.parse(readFileSync(join(h.root, "pools.json"), "utf8")).lastResort, "antigravity/gemini-3-8-flash");
+		assert.equal(parseInstallerAction({ type: "button", id: "last-resort" })?.type, "button");
+	} finally {
+		await h.cleanup();
+	}
+});

@@ -197,6 +197,7 @@ Launch the configuration hub to auto-detect installed providers, configure pools
     - **Mixed (`hybrid`)**: Currently routes exactly like `highest-quota` (sticky on continuation turns, otherwise the candidate with the most quota left). It has no "running low" threshold yet.
     - **In order (`waterfall`)**: Strictly uses the primary candidate until exhausted before rolling over to the second.
     - **Most room left (`highest-quota`)**: Dynamically queries quota headroom and selects the candidate with the highest remaining capacity.
+  - **Last-resort model**: in **Backups** press `l` (or the **Last-resort model** button) to pick a cheap model, or **None**. It is saved as `lastResort` in `pools.json`, shown in the summary, and dropped if its subscription is disabled.
 - **Agent Tasks & AI Deep Analysis ("Búsqueda profunda")**:
   - Assign roles instantly with zero quota consumption via **Assign recommended**, or trigger **Deep analysis** (`Realizar búsqueda profunda`).
   - Deep analysis consults an AI advisor model to evaluate task allocations against real model capabilities, reasoning benchmarks, and cost efficiency.
@@ -314,6 +315,7 @@ With `hybrid` or `highest-quota`, a second candidate with more quota left answer
 
 ### What happens when every candidate of a pool is exhausted?
 
+- **Last-resort model (if configured)**: when every candidate of a pool is spent, the configured last-resort model answers **first and automatically**, in the main session and in subagents, with a warning notice. In the main session it is also listed first in the menu below. Set it in `/installer` → **Backups** → **Last-resort model** (shortcut `l`); choose **None** to remove it.
 - **Main session (with a screen)**: a menu lets you wait for a candidate of the pool (it shows when each one resets), use an available model **from another pool**, compact the session, or cancel. Models that are not in any pool are not offered.
 - **Subagents (no screen)**: there is no menu. The request goes to the candidate that resets first and fails with the provider's quota message, unless a **loan** applies (see below).
 

@@ -4,7 +4,7 @@ import { execSync } from "node:child_process";
 import { homedir } from "node:os";
 import type { Integration } from "./integrations.ts";
 import { validateIntegrationsConfig, validatePoolsConfig } from "./config-schema.ts";
-import { ruleIssues } from "./pools.ts";
+import { lastResortRef, ruleIssues } from "./pools.ts";
 import { DEFAULT_PROFILES_PATH, loadProfilesStore, PROFILES_KIND, PROFILES_VERSION, readProfiles, saveProfilesStore, type ProfileConfig, type ProfileWorkflow } from "./profiles.ts";
 import { t } from "./i18n/index.ts";
 import type { RoutingStrategy, RuleBlock } from "./router.ts";
@@ -626,7 +626,19 @@ export function generateConfigPreview(
 	return lines.join("\n");
 }
 
-export function writeConfigSafely(root: string, configs: { integrations?: unknown; pools?: unknown }): {
+function lastResortOnDisk(poolPath: string): string | undefined {
+	try {
+		return existsSync(poolPath) ? lastResortRef(JSON.parse(readFileSync(poolPath, "utf8"))) : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+/**
+ * `lastResort`: `"provider/model"` sets the global last-resort model, `null` removes it, omitted keeps the one already in pools.json
+ * (writers that do not manage it, such as the classic wizard or the panel's pool edits, leave it as it was).
+ */
+export function writeConfigSafely(root: string, configs: { integrations?: unknown; pools?: unknown; lastResort?: string | null }): {
 	success: boolean;
 	integrationsPath: string;
 	poolsPath: string;
@@ -660,7 +672,14 @@ export function writeConfigSafely(root: string, configs: { integrations?: unknow
 		}
 	}
 	if (Array.isArray(rawPools)) {
-		rawPools = { pools: rawPools };
+		// A bare pool list does not manage the global last-resort model: keep the one already on disk.
+		const kept = lastResortOnDisk(join(root, "pools.json"));
+		rawPools = { pools: rawPools, ...(kept ? { lastResort: kept } : {}) };
+	}
+
+	if (configs.lastResort !== undefined && rawPools && typeof rawPools === "object") {
+		const { lastResort: _old, ...rest } = rawPools as Record<string, unknown>;
+		rawPools = configs.lastResort === null ? rest : { ...rest, lastResort: configs.lastResort };
 	}
 
 	// Normalize any object candidates inside pools to strings

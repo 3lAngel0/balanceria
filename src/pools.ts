@@ -45,6 +45,12 @@ export function parseLastResort(config: unknown): Candidate | undefined {
 	return parseCandidate(ref);
 }
 
+/** The `provider/model` text of the valid last-resort model of a pools.json document, if any. */
+export function lastResortRef(config: unknown): string | undefined {
+	const parsed = parseLastResort(config);
+	return parsed ? `${parsed.provider}/${parsed.model}` : undefined;
+}
+
 export function parsePools(config: unknown): Pool[] {
 	if (!config || typeof config !== "object" || !Array.isArray((config as { pools?: unknown }).pools)) return [];
 	const pools: Pool[] = [];

@@ -3,6 +3,7 @@
 
 import type { Integration } from "./integrations.ts";
 import { DEFAULT_ORCHESTRATOR_MODE, isOrchestratorMode, type OrchestratorMode, type ProfileConfig, type ProfileWorkflow } from "./profiles.ts";
+import { lastResortRef } from "./pools.ts";
 import type { RoutingStrategy } from "./router.ts";
 import { t } from "./i18n/index.ts";
 import { applyRecommendationsToProfile, recommendRolesHeuristic, type AdvisorReport } from "./setup-advisor.ts";
@@ -26,6 +27,8 @@ interface StepperDraft {
 	pools: PoolConfig[];
 	roles: ProfileConfig;
 	orchestratorMode: OrchestratorMode;
+	/** `provider/model` used when a whole backup is spent (pools.json `lastResort`); absent when there is none. */
+	lastResort?: string;
 }
 
 export interface SetupStepperState extends StepperDraft {
@@ -54,7 +57,7 @@ export interface StepperDeps {
 	root: string;
 	current: StepperCurrent;
 	profilesPath: string;
-	writeConfig: (root: string, configs: { integrations?: unknown; pools?: unknown }) => {
+	writeConfig: (root: string, configs: { integrations?: unknown; pools?: unknown; lastResort?: string | null }) => {
 		success: boolean;
 		integrationsPath: string;
 		poolsPath: string;
@@ -79,6 +82,7 @@ const cloneDraft = (draft: StepperDraft): StepperDraft => ({
 	pools: clonePools(draft.pools),
 	roles: cloneRoles(draft.roles),
 	orchestratorMode: draft.orchestratorMode,
+	...(draft.lastResort ? { lastResort: draft.lastResort } : {}),
 });
 
 export function initStepper(
@@ -86,7 +90,7 @@ export function initStepper(
 	recommended: PoolConfig[],
 	existingRoles: ProfileConfig = {},
 	initialWorkflow?: ProfileWorkflow | OrchestratorMode,
-	options?: { guided?: boolean },
+	options?: { guided?: boolean; lastResort?: string },
 ): SetupStepperState {
 	const orchestratorMode: OrchestratorMode =
 		typeof initialWorkflow === "string" && isOrchestratorMode(initialWorkflow)
@@ -99,6 +103,7 @@ export function initStepper(
 		pools: clonePools(recommended),
 		roles: cloneRoles(existingRoles),
 		orchestratorMode,
+		...(options?.lastResort ? { lastResort: options.lastResort } : {}),
 	};
 	return { step: "providers", reached: 0, detected, dirty: false, messages: {}, ...cloneDraft(baseline), baseline, guided: options?.guided ?? false };
 }
@@ -106,6 +111,12 @@ export function initStepper(
 /** The initial state again; nothing was written. */
 export function discard(state: SetupStepperState): SetupStepperState {
 	return { ...state, step: "providers", reached: 0, dirty: false, messages: {}, ...cloneDraft(state.baseline) };
+}
+
+/** The last-resort model Save would write: dropped when its subscription is disabled, like pool members. */
+export function effectiveLastResort(state: SetupStepperState): string | undefined {
+	const ref = state.lastResort;
+	return ref && state.enabled.includes(ref.slice(0, ref.indexOf("/"))) ? ref : undefined;
 }
 
 /** The pools Save would write: candidates of disabled providers are left out, and emptied pools dropped. */
@@ -175,6 +186,13 @@ export function setRole(state: SetupStepperState, role: string, model: string, t
 	return edit(state, { roles: { ...state.roles, [role]: { ...previous, model, ...(thinking !== undefined ? { thinking } : {}) } } });
 }
 
+/** Chooses the last-resort model (`provider/model`), or none with `undefined`. */
+export function setLastResort(state: SetupStepperState, ref: string | undefined): SetupStepperState {
+	if (state.lastResort === ref) return state;
+	const { lastResort: _old, ...rest } = state;
+	return { ...rest, ...(ref ? { lastResort: ref } : {}), dirty: true };
+}
+
 export function setOrchestratorMode(state: SetupStepperState, mode: OrchestratorMode): SetupStepperState {
 	if (state.orchestratorMode === mode) return state;
 	return edit(state, { orchestratorMode: mode });
@@ -238,7 +256,7 @@ function roleChanges(draft: ProfileConfig, live: ProfileConfig): string[] {
 	return lines;
 }
 
-function nextConfig(state: SetupStepperState, current: StepperCurrent): { pools: PoolConfig[]; integrations: Integration[]; notes: string[] } {
+function nextConfig(state: SetupStepperState, current: StepperCurrent): { pools: PoolConfig[]; lastResort?: string; integrations: Integration[]; notes: string[] } {
 	// Same carry-over the classic wizard does: keep a pool's name and rules unless a removed candidate breaks them.
 	const live = (current.pools as { pools?: { id?: unknown; name?: unknown; rules?: unknown }[] } | null | undefined)?.pools;
 	const existing = new Map((Array.isArray(live) ? live : []).filter(pool => typeof pool?.id === "string").map(pool => [pool.id as string, pool]));
@@ -252,7 +270,7 @@ function nextConfig(state: SetupStepperState, current: StepperCurrent): { pools:
 	});
 	const used = new Set(pools.flatMap(pool => pool.candidates.map(ref => ref.slice(0, ref.indexOf("/")))));
 	const generated = generateRecommendedConfig(state.detected.filter(p => state.enabled.includes(p.id)));
-	return { pools, notes, integrations: mergeIntegrations(current.integrations ?? null, generated.integrations.filter(entry => used.has(entry.provider))) };
+	return { pools, notes, lastResort: effectiveLastResort(state), integrations: mergeIntegrations(current.integrations ?? null, generated.integrations.filter(entry => used.has(entry.provider))) };
 }
 
 /** A line-oriented summary of what Save would write, plus which files it would touch. */
@@ -260,6 +278,9 @@ export function buildStepperDiff(state: SetupStepperState, current: StepperCurre
 	const next = nextConfig(state, current);
 	const preview = generateConfigPreview({ pools: current.pools, integrations: current.integrations }, next);
 	const lines = [...preview.split("\n"), ...next.notes.map(note => `  ${note}`)];
+	const lastBefore = lastResortRef(current.pools);
+	const lastChanged = lastBefore !== next.lastResort;
+	if (lastChanged) lines.push(`  • pools.json last-resort model: ${lastBefore ?? "none"} → ${next.lastResort ?? "none"}`);
 	const { name, live } = profileTarget(state, current);
 	const roles = roleChanges(state.roles, live);
 	if (roles.length > 0) lines.push(`  • profiles.json [${name}] role assignments:`, ...roles.map(line => `      ${line}`));
@@ -268,7 +289,7 @@ export function buildStepperDiff(state: SetupStepperState, current: StepperCurre
 	return {
 		lines,
 		writes: {
-			pools: !lines.some(line => line.includes("pools.json: Unchanged")),
+			pools: lastChanged || !lines.some(line => line.includes("pools.json: Unchanged")),
 			integrations: !lines.some(line => line.includes("integrations.json: Unchanged")),
 			profiles: roles.length > 0 || workflowChanged,
 		},
@@ -282,7 +303,7 @@ export function applyStepper(state: SetupStepperState, deps: StepperDeps): Stepp
 	const next = nextConfig(state, deps.current);
 	let res: ReturnType<StepperDeps["writeConfig"]>;
 	try {
-		res = deps.writeConfig(deps.root, { pools: next.pools, integrations: next.integrations });
+		res = deps.writeConfig(deps.root, { pools: next.pools, lastResort: next.lastResort ?? null, integrations: next.integrations });
 	} catch (err) {
 		return { ok: false, written: [], backups: [], error: err instanceof Error ? err.message : String(err) };
 	}

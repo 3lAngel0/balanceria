@@ -249,3 +249,70 @@ test("bakLine describes the real copy name pattern in en and es", () => {
 		setLang("en");
 	}
 });
+
+// -- T3 (S1): last-resort model through the writers -----------------------------------------------
+
+import { applyStepper, setLastResort, buildStepperDiff, type StepperCurrent } from "../src/setup-stepper.ts";
+import { writeConfigSafely } from "../src/setup.ts";
+
+const FLASH_REF = "antigravity/gemini-3-8-flash";
+const withTempRoot = (current: StepperCurrent | undefined, run: (root: string) => void) => {
+	const root = mkdtempSync(join(tmpdir(), "last-resort-"));
+	try {
+		if (current?.pools) writeFileSync(join(root, "pools.json"), JSON.stringify(current.pools));
+		run(root);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+};
+const install = (root: string, draft: ReturnType<typeof buildRecommendedDraft>, current: StepperCurrent) =>
+	applyStepper(draft, { root, current, profilesPath: join(root, "profiles.json"), writeConfig: writeConfigSafely, writeProfiles: () => {} });
+const writtenPools = (root: string) => JSON.parse(readFileSync(join(root, "pools.json"), "utf8"));
+
+test("S1: Install writes lastResort at the top level of pools.json", () => {
+	withTempRoot(undefined, root => {
+		const draft = setLastResort(buildRecommendedDraft({ detected: [claude, agy] }), FLASH_REF);
+		assert.equal(install(root, draft, {}).ok, true);
+		const doc = writtenPools(root);
+		assert.equal(doc.lastResort, FLASH_REF);
+		assert.ok(Array.isArray(doc.pools));
+	});
+});
+
+test("S1: choosing None removes an existing lastResort from pools.json", () => {
+	const current: StepperCurrent = { pools: { lastResort: FLASH_REF, pools: [{ id: "claude-sonnet-5-5", candidates: ["claude-bridge/claude-sonnet-5-5", "antigravity/claude-sonnet-5-5"] }] } };
+	withTempRoot(current, root => {
+		const draft = setLastResort(buildRecommendedDraft({ detected: [claude, agy] }), undefined);
+		assert.equal(install(root, draft, current).ok, true);
+		assert.equal("lastResort" in writtenPools(root), false);
+	});
+});
+
+test("S1: a lastResort in the draft is dropped when its subscription is disabled, and a changed lastResort counts as a pools.json change", () => {
+	const draft = setLastResort(buildRecommendedDraft({ detected: [claude, agy] }), FLASH_REF);
+	const off = { ...draft, enabled: ["claude-bridge"] };
+	withTempRoot(undefined, root => {
+		install(root, off, {});
+		assert.equal("lastResort" in writtenPools(root), false);
+	});
+	const current: StepperCurrent = { pools: { pools: [{ id: "claude-sonnet-5-5", candidates: ["claude-bridge/claude-sonnet-5-5", "antigravity/claude-sonnet-5-5"], strategy: "hybrid" }] } };
+	const same = buildRecommendedDraft({ detected: [claude, agy] });
+	assert.equal(buildStepperDiff(same, current).writes.pools, false);
+	const diff = buildStepperDiff(setLastResort(same, FLASH_REF), current);
+	assert.equal(diff.writes.pools, true);
+	assert.match(diff.lines.join("\n"), /last-resort model: none → antigravity\/gemini-3-8-flash/);
+});
+
+const INTEGRATIONS = [{ provider: "claude-bridge", kind: "subscription", label: "Claude Pro (claude-bridge)" }];
+
+test("S1: writers that do not manage lastResort preserve it (bare pool list, panel edits)", () => {
+	const current: StepperCurrent = { pools: { lastResort: FLASH_REF, pools: [{ id: "p", candidates: ["claude-bridge/claude-sonnet-5-5"] }] } };
+	withTempRoot(current, root => {
+		writeConfigSafely(root, { integrations: INTEGRATIONS, pools: [{ id: "p", candidates: ["claude-bridge/claude-opus-5-5"] }] });
+		const doc = writtenPools(root);
+		assert.equal(doc.lastResort, FLASH_REF);
+		assert.deepEqual(doc.pools[0].candidates, ["claude-bridge/claude-opus-5-5"]);
+		writeConfigSafely(root, { integrations: INTEGRATIONS, pools: doc.pools, lastResort: null });
+		assert.equal("lastResort" in writtenPools(root), false);
+	});
+});

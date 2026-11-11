@@ -655,7 +655,7 @@ test("S12: Recommended visits the subscriptions step preselected and lets every 
 test("S13: backups can toggle, move up/down, change the way to choose and create a backup, all through actions", () => {
 	const s = customAt("backups");
 	const screen = installerScreen(s);
-	assert.deepEqual(screen.shortcuts.map(sc => sc.key), [" ", "u", "j", "s", "c"]);
+	assert.deepEqual(screen.shortcuts.map(sc => sc.key), [" ", "u", "j", "s", "c", "l"]);
 	assert.ok(screen.shortcuts.every(sc => sc.label.length > 0));
 	const first = screen.control.kind === "checklist" ? screen.control.items[0]!.label : "";
 	// move down: the first member goes second and the cursor follows it
@@ -871,4 +871,74 @@ test("summary: re-enabling a subscription of that backup, or reassigning its tas
 	const moved = { ...s, draft: { ...s.draft, roles: { ...s.draft.roles, "legacy-role": { model: "claude-bridge/claude-opus-5-5" } } } };
 	assert.equal(button(installerScreen(moved), "install")!.enabled, true);
 	assert.deepEqual(act(moved, press("install")).effects, ["install"]);
+});
+
+// -- T3 (S1): last-resort model ------------------------------------------------------------------
+
+const FLASH = "antigravity/gemini-3-8-flash";
+const pickLastResort = (s: InstallerState, ref: string | undefined): InstallerState => {
+	let at = act(s, press("last-resort")).state;
+	const items = (installerScreen(at).control as { items: { id: string }[] }).items;
+	const index = ref === undefined ? 0 : items.findIndex(i => i.id === ref);
+	assert.ok(index >= 0, `${ref} is offered`);
+	return act(at, { type: "select", index }).state;
+};
+
+test("S1: the backups step offers a last-resort picker with None and the models of the enabled subscriptions, and explains it", () => {
+	const s = customAt("backups");
+	assert.ok(button(installerScreen(s), "last-resort")?.enabled);
+	const open = act(s, press("last-resort")).state;
+	const screen = installerScreen(open);
+	assert.equal(screen.step, "backups");
+	assert.equal(screen.title, "Last-resort model");
+	assert.match(screen.body.join(" "), /When every subscription of a backup runs out, your agents use this model instead of stopping\. Pick a cheap one\./);
+	assert.equal(screen.control.kind, "choice");
+	const items = (screen.control as { items: { id: string; label: string; recommended?: boolean }[] }).items;
+	assert.deepEqual(items.map(i => i.id), ["none", "claude-bridge/claude-opus-5-5", "claude-bridge/claude-sonnet-5-5", "antigravity/claude-sonnet-5-5", FLASH]);
+	assert.equal(items.find(i => i.recommended)?.id, FLASH, "the flash model is suggested");
+	assert.equal(open.draft.lastResort, undefined, "the suggestion is not auto-selected");
+	assert.equal(installerScreen(act(open, { type: "back" }).state).title, "Backups");
+});
+
+test("S1: choosing a model stores it in the draft and the summary shows it; None clears it", () => {
+	let s = pickLastResort(customAt("backups"), FLASH);
+	assert.equal(s.draft.lastResort, FLASH);
+	s = act(s, { type: "back" }).state;
+	assert.match(installerScreen(s).body.join(" "), /Last-resort model: Gemini 3\.8 Flash · antigravity\./);
+	while (s.step !== "summary") s = act(s, next).state;
+	const summary = installerScreen(s);
+	assert.ok(summary.summary!.detail.includes("Last-resort model: Gemini 3.8 Flash · antigravity."));
+	const poolsGroup = (summary.control as { groups: { file: string; lines: string[] }[] }).groups.find(g => g.file === "pools.json")!;
+	assert.ok(poolsGroup.lines.includes("Last-resort model: Gemini 3.8 Flash · antigravity."));
+	// None goes back to no last-resort model.
+	let again = pickLastResort(customAt("backups"), FLASH);
+	again = pickLastResort(act(again, press("last-resort")).state, undefined);
+	assert.equal(again.draft.lastResort, undefined);
+	again = act(again, { type: "back" }).state; // closes the picker
+	while (again.step !== "summary") again = act(again, next).state;
+	assert.ok(installerScreen(again).summary!.detail.includes("Last-resort model: none."));
+});
+
+test("S1: an existing lastResort is loaded into the draft and kept when re-running the installer", () => {
+	const current = {
+		pools: { lastResort: FLASH, pools: [{ id: "claude-sonnet-5-5", name: "claude-sonnet-5-5", candidates: ["claude-bridge/claude-sonnet-5-5", "antigravity/claude-sonnet-5-5"], strategy: "hybrid" }] },
+	};
+	let s = initInstaller({ detected: both, current });
+	assert.equal(s.draft.lastResort, FLASH);
+	s = act(s, next).state; // welcome (Modify) -> scan
+	s = withScanResult(s, { found: both });
+	assert.equal(s.draft.lastResort, FLASH);
+	const opened = act(s, next, next, press("last-resort")).state;
+	assert.equal((installerScreen(opened).control as { selected: number }).selected, 4, "the saved model is highlighted");
+});
+
+test("S1: disabling the subscription of the chosen last-resort model drops it from what is written and shown", () => {
+	let s = pickLastResort(customAt("backups"), FLASH);
+	s = act(s, { type: "back" }).state; // closes picker
+	s = act(s, { type: "back" }).state; // subscriptions
+	assert.equal(s.step, "subscriptions");
+	const index = s.draft.detected.findIndex(p => p.id === "antigravity");
+	s = act(s, { type: "toggle", index }).state;
+	assert.equal(s.draft.enabled.includes("antigravity"), false);
+	assert.match(installerScreen(act(s, next).state).body.join(" "), /Last-resort model: none\./);
 });

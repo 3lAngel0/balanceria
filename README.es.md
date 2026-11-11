@@ -188,6 +188,7 @@ Ejecute el centro de configuración interactivo para detectar automáticamente l
     - **Estrategia de enrutamiento** (Mixto/`hybrid`, En orden/`waterfall`, La que más le queda/`highest-quota`): Regla que define qué suscripción responde primero.
     - **Modo del agente principal** (`organic` vs `full-delegation`): Si el agente principal trabaja por su cuenta o delega todas las tareas.
   - Presenta de antemano el panorama de pasos y un enlace para apoyar el proyecto con una estrella en GitHub: [https://github.com/3lAngel0/balanceria](https://github.com/3lAngel0/balanceria).
+- **Modelo final**: en **Respaldos** pulsá `l` (o el botón **Modelo final**) para elegir un modelo barato, o **Ninguno**. Se guarda como `lastResort` en `pools.json`, aparece en el resumen y se descarta si se desactiva su suscripción.
 - **Pipeline de respaldos y estrategias de enrutamiento**:
   - Control granular sobre los miembros de cada respaldo, su orden y la estrategia de selección:
     - **Mixto (`hybrid`)**: Hoy enruta exactamente igual que `highest-quota` (se mantiene en el mismo modelo durante la conversación y, si no, elige el que tiene más cuota libre). Todavía no tiene un umbral de "queda poco".
@@ -309,6 +310,7 @@ Con `hybrid` o `highest-quota`, un segundo candidato con más cuota libre respon
 
 ### ¿Qué pasa cuando se agotan todos los candidatos de un pool?
 
+- **Modelo de último recurso (si está configurado)**: cuando se agotan todos los candidatos de un pool, responde **primero y automáticamente** el modelo de último recurso, en la sesión principal y en los subagentes, con un aviso de advertencia. En la sesión principal además aparece primero en el menú de abajo. Se configura en `/installer` → **Respaldos** → **Modelo final** (atajo `l`); elegí **Ninguno** para quitarlo.
 - **Sesión principal (con pantalla)**: aparece un menú para esperar a un candidato del pool (muestra cuándo se renueva cada uno), usar un modelo disponible **de otro pool**, compactar la sesión o cancelar. Los modelos que no están en ningún pool no se ofrecen.
 - **Subagentes (sin pantalla)**: no hay menú. El pedido va al candidato que se renueva primero y falla con el mensaje de cuota del proveedor, salvo que aplique un **préstamo** (ver abajo).
 

@@ -3,9 +3,10 @@
 
 import { copyFileSync, existsSync, rmSync } from "node:fs";
 import { t } from "./i18n/index.ts";
+import { lastResortRef } from "./pools.ts";
 import { DEFAULT_ORCHESTRATOR_MODE, type OrchestratorMode, type ProfileConfig, type ProfileWorkflow } from "./profiles.ts";
 import { UNASSIGNED } from "./setup-advisor.ts";
-import { applyAutoAssignRoles, buildStepperDiff, initStepper, type SetupStepperState, type StepperCurrent } from "./setup-stepper.ts";
+import { applyAutoAssignRoles, buildStepperDiff, effectiveLastResort, initStepper, type SetupStepperState, type StepperCurrent } from "./setup-stepper.ts";
 import { buildBalancerProfileName, type DetectedProvider, type PoolConfig } from "./setup.ts";
 
 export interface SingleModel {
@@ -175,6 +176,13 @@ export interface FileSummary {
 	changed: boolean;
 }
 
+/** "Last-resort model: Gemini 3.8 Flash · Google AI Pro" / "none" (nothing when there is none and none was saved). */
+function lastResortLines(draft: SetupStepperState, current?: StepperCurrent): string[] {
+	const ref = effectiveLastResort(draft);
+	if (ref) return [t("installer.summary.lastResort", { model: refLabel(ref, draft.detected) })];
+	return current !== undefined && lastResortRef(current.pools) === undefined ? [] : [t("installer.summary.lastResortNone")];
+}
+
 /** What Install would do, in plain words and grouped by file; `current` holds the live files. */
 export function summaryByFile(plain: SetupStepperState, current: StepperCurrent): FileSummary[] {
 	const { draft, kept } = withKeptBackups(plain, current);
@@ -196,6 +204,7 @@ export function summaryByFile(plain: SetupStepperState, current: StepperCurrent)
 		"pools.json": [
 			...pools.map(pool => t("installer.summary.backup", { name: backupName(pool), members: pool.candidates.map(label).join(t("installer.summary.then")) })),
 			...kept.map(k => t("installer.summary.kept", { name: backupName({ id: k.id }), tasks: keptTasks(k) })),
+			...lastResortLines(draft, current),
 		],
 		"profiles.json": roleLines,
 	};
@@ -329,6 +338,7 @@ export function summaryStory(plain: SetupStepperState, current: StepperCurrent):
 		...(tasks.length > 0 ? tasks.map(([role, route]) => t("installer.summary.detail.task", { task: roleName(role), model: targetLabel(route.model!, draft.detected) })) : [t("installer.summary.detail.noTasks")]),
 		...kept.map(k => t("installer.summary.kept", { name: backupName({ id: k.id }), tasks: keptTasks(k) })),
 		...blockers,
+		...lastResortLines(draft),
 		t("installer.summary.detail.mainAgent", { mode }),
 		files.length > 0 ? t("installer.summary.detail.files", { files: files.join(", ") }) : t("installer.summary.detail.noFiles"),
 	];

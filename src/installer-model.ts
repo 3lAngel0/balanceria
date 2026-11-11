@@ -2,6 +2,7 @@
 // Pure: no rendering, no ANSI, no I/O. Hosts run the effects (scan, install, undo...) and report back through the `with*` reducers.
 
 import { t } from "./i18n/index.ts";
+import { lastResortRef } from "./pools.ts";
 import type { OrchestratorMode, ProfileWorkflow } from "./profiles.ts";
 import type { RoutingStrategy } from "./router.ts";
 import { buildAvailableModelTargets, recommendRolesHeuristic, ROLE_CATALOG, UNASSIGNED, type AdvisorReport, type RoleRecommendation } from "./setup-advisor.ts";
@@ -25,9 +26,11 @@ import {
 	applyAdvisorReport,
 	applyAutoAssignRoles,
 	createPoolFromTemplate,
+	effectiveLastResort,
 	initStepper,
 	moveCandidate,
 	poolCostWarning,
+	setLastResort,
 	setOrchestratorMode,
 	setPoolStrategy,
 	setRole,
@@ -89,6 +92,8 @@ export interface InstallerState {
 	deepAnalysis?: { model?: string };
 	/** The picker that chooses the model of one agent task (the highlighted row is `cursor`). */
 	taskPicker?: { role: string };
+	/** The last-resort model picker of the backups step (the highlighted row is `cursor`; row 0 is "None"). */
+	lastResortPicker?: boolean;
 	/** The deep analysis in flight, failed or finished; at most one runs at a time. */
 	analysis?: AnalysisState;
 	/** A communication or host error set by `withError`; shown as an error screen with retry / back. */
@@ -128,6 +133,7 @@ export type ButtonId =
 	| "assign-task"
 	| "deep-analysis"
 	| "create-backup"
+	| "last-resort"
 	| "move-up"
 	| "move-down"
 	| "cycle-method";
@@ -270,7 +276,7 @@ function advisorFor(draft: SetupStepperState): AdvisorReport {
 }
 
 function draftFromCurrent(detected: DetectedProvider[], current: StepperCurrent, workflow: InstallerInit["workflow"]): SetupStepperState {
-	return initStepper(detected, currentPools(current), activeRoles(current), workflow);
+	return initStepper(detected, currentPools(current), activeRoles(current), workflow, { lastResort: lastResortRef(current.pools) });
 }
 
 export function initInstaller(input: InstallerInit): InstallerState {
@@ -322,7 +328,7 @@ function pathOf(state: InstallerState): InstallerStep[] {
 	}
 }
 
-const go = (state: InstallerState, step: InstallerStep): InstallerState => ({ ...state, step, cursor: 0, notice: [], helpOpen: false, taskPicker: undefined, error: undefined });
+const go = (state: InstallerState, step: InstallerStep): InstallerState => ({ ...state, step, cursor: 0, notice: [], helpOpen: false, taskPicker: undefined, lastResortPicker: undefined, error: undefined });
 
 // ---------------------------------------------------------------------------------------------
 // Reducers the host calls after running an effect
@@ -506,6 +512,33 @@ const wizardTemplates = (draft: SetupStepperState): string[] => [...BACKUP_TEMPL
 /** What a task can point to: the enabled backups first (they never stop), then the models of the enabled subscriptions. */
 const pickerTargets = (draft: SetupStepperState): string[] => [...livePools(draft).map(p => `pool/${p.id}`), ...enabledRefs(draft)];
 
+/** Row 0 of the last-resort picker is "None"; the rest are the models of the enabled subscriptions. */
+const lastResortTargets = (draft: SetupStepperState): (string | undefined)[] => [undefined, ...enabledRefs(draft)];
+/** The cheap suggestion: the first flash model of the enabled subscriptions. */
+const cheapSuggestion = (draft: SetupStepperState): string | undefined => enabledRefs(draft).find(ref => /flash/i.test(ref));
+
+function lastResortContent(state: InstallerState): Content {
+	const draft = state.draft;
+	const targets = lastResortTargets(draft);
+	const chosen = effectiveLastResort(draft);
+	const suggestion = cheapSuggestion(draft);
+	return {
+		title: t("installer.lastResort.title"),
+		body: [t("installer.lastResort.body"), ...(suggestion ? [t("installer.lastResort.suggest", { model: refLabel(draft, suggestion) })] : [])],
+		control: {
+			kind: "choice",
+			selected: Math.max(0, targets.indexOf(chosen)),
+			items: targets.map(ref =>
+				ref
+					? { id: ref, label: refLabel(draft, ref), description: t("installer.lastResort.modelDesc"), ...(ref === suggestion ? { recommended: true } : {}) }
+					: { id: "none", label: t("installer.lastResort.none.label"), description: t("installer.lastResort.none.desc") },
+			),
+		},
+		buttons: [button("back"), button("last-resort", true, true, t("installer.button.assign-task")), button("cancel")],
+		help: help("lastResort"),
+	};
+}
+
 const analysisRunning = (state: InstallerState) => state.analysis?.status === "running";
 
 function tasksContent(state: InstallerState): Content {
@@ -662,7 +695,9 @@ function content(state: InstallerState): Content {
 				help: help("subscriptions"),
 			};
 		case "backups": {
+			if (state.lastResortPicker) return lastResortContent(state);
 			const items = backupItems(draft);
+			const lastResort = effectiveLastResort(draft);
 			const focus = items[Math.min(state.cursor, items.length - 1)]?.pool;
 			const { single } = suggestBackups(enabledProviders(draft));
 			const owner = (provider: string) => draft.detected.find(p => p.id === provider)?.label ?? provider;
@@ -673,6 +708,7 @@ function content(state: InstallerState): Content {
 					t("installer.backups.limitNote"),
 					...(items.length === 0 ? [t("installer.backups.none")] : []),
 					...single.map(s => t("installer.backups.single", { model: friendlyModel(s.model), subscription: owner(s.provider) })),
+					lastResort ? t("installer.lastResort.current", { model: refLabel(draft, lastResort) }) : t("installer.lastResort.currentNone"),
 				],
 				control: {
 					kind: "checklist",
@@ -690,7 +726,7 @@ function content(state: InstallerState): Content {
 					}),
 				},
 				...(focus ? { diagram: diagramOf(draft, focus, focus.candidates) } : {}),
-				buttons: [...standardButtons(state), button("create-backup")],
+				buttons: [...standardButtons(state), button("create-backup"), button("last-resort")],
 				help: help("backups"),
 			};
 		}
@@ -777,6 +813,10 @@ function focusOf(state: InstallerState, cursor: number): HelpFocus | undefined {
 			return helpFocus(provider.label, t("installer.help.focus.subscription.what", params), t("installer.help.focus.subscription.purpose", params), t("installer.help.focus.subscription.if", params), `provider: ${provider.id}`, "integrations.json");
 		}
 		case "backups": {
+			if (state.lastResortPicker) {
+				const ref = lastResortTargets(draft)[cursor];
+				return helpFocus(ref ? refLabel(draft, ref) : t("installer.lastResort.none.label"), t("installer.help.focus.lastResort.what"), t("installer.help.focus.lastResort.purpose"), t("installer.help.focus.lastResort.if"), ref ? `lastResort: ${ref}` : "lastResort", "pools.json");
+			}
 			const item = backupItems(draft)[cursor];
 			if (!item) return undefined;
 			const params = { member: refLabel(draft, item.ref), backup: poolName(item.pool) };
@@ -816,6 +856,7 @@ function shortcutsOf(state: InstallerState, cursor: number): InstallerShortcut[]
 		const item = items[cursor];
 		return [sc(" ", "toggle", { type: "toggle", index: cursor }, item !== undefined)];
 	}
+	if (state.step === "backups" && state.lastResortPicker) return [sc("enter", "lastResortUse", press("last-resort"))];
 	if (state.step === "backups") {
 		const items = backupItems(state.draft);
 		const item = items[cursor];
@@ -827,6 +868,7 @@ function shortcutsOf(state: InstallerState, cursor: number): InstallerShortcut[]
 			sc("j", "moveDown", press("move-down"), at >= 0 && at < visible.length - 1),
 			sc("s", "strategy", press("cycle-method"), item !== undefined),
 			sc("c", "createBackup", press("create-backup")),
+			sc("l", "lastResort", press("last-resort")),
 		];
 	}
 	if (state.step === "tasks" && state.existing?.mode !== "repair") {
@@ -895,7 +937,7 @@ export function installerScreen(state: InstallerState): InstallerScreen {
 	const cursor = c.control.kind === "choice" ? c.control.selected : Math.max(0, Math.min(state.cursor, length - 1));
 	const focus = blocking ? undefined : focusOf(state, cursor);
 	const analysis = state.analysis;
-	const focusedBackup = state.step === "backups" && !state.wizard ? backupItems(state.draft)[cursor]?.pool : undefined;
+	const focusedBackup = state.step === "backups" && !state.wizard && !state.lastResortPicker ? backupItems(state.draft)[cursor]?.pool : undefined;
 	const running = analysis?.status === "running" ? analysis : undefined;
 	const done = analysis?.status === "done" && state.step === "tasks" ? analysis : undefined;
 	const story = state.step === "summary" && !blocking ? summaryStory(state.draft, state.current) : undefined;
@@ -983,6 +1025,7 @@ function leave(state: InstallerState): InstallerState {
 function onNext(state: InstallerState): Result {
 	if (state.wizard) return wizardNext(state, state.wizard);
 	if (state.taskPicker) return stay(state);
+	if (state.lastResortPicker) return stay(closeLastResortPicker(state));
 	const path = pathOf(state);
 	const step = state.step;
 	if (step === "summary") {
@@ -1013,12 +1056,19 @@ function closePicker(state: InstallerState): InstallerState {
 	return { ...rest, cursor: Math.max(0, ROLE_CATALOG.findIndex(e => e.role === taskPicker?.role)) };
 }
 
+/** Closes the last-resort picker and goes back to the backups list. */
+function closeLastResortPicker(state: InstallerState): InstallerState {
+	const { lastResortPicker: _closed, ...rest } = state;
+	return { ...rest, cursor: 0 };
+}
+
 function onBack(state: InstallerState): Result {
 	if (state.error !== undefined) return stay({ ...state, error: undefined });
 	if (state.analysis?.status === "error") return stay({ ...state, analysis: undefined });
 	if (state.step === "installing" && state.installError !== undefined) return stay(go({ ...state, installError: undefined }, "summary"));
 	if (state.wizard) return wizardBack(state, state.wizard);
 	if (state.taskPicker) return stay(closePicker(state));
+	if (state.lastResortPicker) return stay(closeLastResortPicker(state));
 	if (state.deepAnalysis) {
 		const { deepAnalysis: _closed, ...rest } = state;
 		return stay(rest);
@@ -1032,6 +1082,7 @@ function onBack(state: InstallerState): Result {
 function onCancel(state: InstallerState): Result {
 	if (state.wizard) return stay({ ...state, wizard: undefined, cursor: 0 });
 	if (state.taskPicker) return stay(closePicker(state));
+	if (state.lastResortPicker) return stay(closeLastResortPicker(state));
 	if (state.deepAnalysis) {
 		const { deepAnalysis: _closed, ...rest } = state;
 		return stay(rest);
@@ -1105,6 +1156,10 @@ function onSelect(state: InstallerState, index: number): InstallerState {
 			return state.existing && EXISTING_MODES[index] ? { ...at, existing: { mode: EXISTING_MODES[index]! } } : state;
 		case "type":
 			return TYPES[index] ? { ...at, installType: TYPES[index]! } : state;
+		case "backups": {
+			if (!state.lastResortPicker || index >= lastResortTargets(state.draft).length) return state;
+			return { ...at, draft: setLastResort(state.draft, lastResortTargets(state.draft)[index]) };
+		}
 		case "main-agent":
 			return MODES[index] ? { ...at, draft: setOrchestratorMode(state.draft, MODES[index]!) } : state;
 		case "tasks": {
@@ -1126,6 +1181,7 @@ function onToggle(state: InstallerState, index: number): InstallerState {
 			return provider ? { ...at, draft: toggleProvider(draft, provider.id) } : state;
 		}
 		case "backups": {
+			if (state.lastResortPicker) return state;
 			const item = backupItems(draft)[index];
 			return item ? { ...at, backupsTouched: true, draft: toggleCandidate(draft, item.pool.id, item.ref) } : state;
 		}
@@ -1177,7 +1233,7 @@ const startAnalysis = (state: InstallerState, model: string): Result => ({
 
 /** Moves the focused backup member one place among the ticked ones, and the cursor with it. */
 function moveMember(state: InstallerState, dir: -1 | 1): InstallerState {
-	if (state.step !== "backups" || state.wizard) return state;
+	if (state.step !== "backups" || state.wizard || state.lastResortPicker) return state;
 	const item = backupItems(state.draft)[state.cursor];
 	const pool = item && state.draft.pools.find(p => p.id === item.pool.id);
 	if (!item || !pool) return state;
@@ -1191,7 +1247,7 @@ function moveMember(state: InstallerState, dir: -1 | 1): InstallerState {
 }
 
 function cycleStrategy(state: InstallerState): InstallerState {
-	if (state.step !== "backups" || state.wizard) return state;
+	if (state.step !== "backups" || state.wizard || state.lastResortPicker) return state;
 	const pool = backupItems(state.draft)[state.cursor]?.pool;
 	if (!pool) return state;
 	const next = STRATEGIES[(STRATEGIES.indexOf(pool.strategy ?? "hybrid") + 1) % STRATEGIES.length]!;
@@ -1226,6 +1282,8 @@ function onButton(state: InstallerState, id: ButtonId): Result {
 			return stay(assignTask(state));
 		case "assign-recommended":
 			return stay({ ...state, draft: applyAutoAssignRoles(state.draft) });
+		case "last-resort":
+			return stay(state.lastResortPicker ? closeLastResortPicker(state) : { ...state, cursor: Math.max(0, lastResortTargets(state.draft).indexOf(effectiveLastResort(state.draft))), lastResortPicker: true });
 		case "create-backup":
 			return stay(openWizard({ ...state, backupsTouched: true }));
 		case "deep-analysis": {

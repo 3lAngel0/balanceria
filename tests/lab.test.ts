@@ -294,3 +294,20 @@ test("the web server, data and page never import the lab", () => {
 		assert.doesNotMatch(source, /lab\.ts/, file);
 	}
 });
+
+test("S1: a lab draft keeps the top-level lastResort and its diff names a change to it", () => {
+	const { paths, cleanup } = setup();
+	try {
+		const withLast = { ...POOLS, lastResort: "agy/flash" };
+		writeFileSync(paths.poolsPath, text(withLast));
+		const base = createDraft(paths, 1);
+		assert.equal(JSON.parse(base.pools).lastResort, "agy/flash");
+		const same = diffLab({ pools: base.pools, profiles: null }, { pools: base.pools, profiles: null });
+		assert.deepEqual(same.changes, []);
+		const removed = diffLab({ pools: base.pools, profiles: null }, { pools: text(POOLS), profiles: null });
+		assert.deepEqual(removed.changes, ["last-resort model: agy/flash → (none)"]);
+		assert.deepEqual(removed.issues, []);
+	} finally {
+		cleanup();
+	}
+});

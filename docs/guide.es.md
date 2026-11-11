@@ -362,8 +362,12 @@ Ejemplo completo y verificado para segmentar un equipo de agentes:
 - **Revisores y jueces** (`review-risk`, `jd-judge-a`, `gentle-ai-verify`): Modelos de alto razonamiento con mayor nivel de thinking.
 
 ### `pools.json`
+
+`lastResort` (opcional, nivel superior): un `provider/model` que responde primero y automáticamente cuando se agotan todos los candidatos de un pool (sesión principal y subagentes). Se configura en `/installer` → Respaldos → "Modelo final" (tecla `l`); el instalador y las demás herramientas que editan pools lo conservan.
+
 ```json
 {
+  "lastResort": "antigravity/gemini-3-8-flash",
   "pools": [
     {
       "id": "orchestrator-pool",
