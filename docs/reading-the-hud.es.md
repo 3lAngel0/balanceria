@@ -280,3 +280,22 @@ El archivo `integrations.json` establece la clasificación: `"kind": "subscripti
 de subscriptions, mientras que `"kind": "api"` deriva a la vista de APIs. Providers no declarados no se
 infieren de forma arbitraria. Los pools (`pool/claude-opus-5-5`) operan como routers lógicos y no como
 integraciones: cada consumo se registra bajo el provider real que resolvió la respuesta.
+
+## La tabla de uso de Gentle Shell (`alt+u`)
+
+Gentle Shell dibuja `alt+u` por su cuenta; el balancer le pasa dos providers. `pool` lista las dos
+subscriptions y `antigravity` lista solo los grupos de agy (para subagentes con modelos de agy).
+Primero van todas las filas semanales y después todas las de 5h, con los mismos nombres que el HUD:
+
+```
+pool · orchestrator · now claude-bridge/claude-opus-5-5 · claude max
+  week · claude-bridge claude        ▰▱▱   8% · resets in 6d 10h
+  week · antigravity gemini          ▰▰▱  34% · resets in 3d 22h
+  5h   · claude-bridge claude        ▰▱▱   9% · resets in 3h 55m
+  5h   · antigravity claude · disabled · weekly limit hit  0%
+```
+
+Los porcentajes son los que reporta el provider. Una ventana que agy desactivó aparece como
+`disabled` (`· weekly limit hit` cuando su ventana semanal está llena). Cuando el router frena una
+key después de un rechazo, sus filas agregan `· router waits 2h 5m`. Una lectura más nueva de
+`agy /usage` con margen levanta ese freno.

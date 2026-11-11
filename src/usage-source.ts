@@ -94,6 +94,31 @@ export function agyUsageLimits(report: unknown): UsageLimit[] {
 	return limits;
 }
 
+export interface DisabledWindow {
+	/** Limit name, as agyUsageLimits names it ("agy claude"). */
+	name: string;
+	label: string;
+	windowSeconds: number;
+}
+
+/** The buckets agy switched off (a 5h window while its weekly one is spent), which agyUsageLimits skips. */
+export function agyDisabledWindows(report: unknown): DisabledWindow[] {
+	const command = isRecord(report) && isRecord(report.command) ? report.command : undefined;
+	const data = command && isRecord(command.data) ? command.data : undefined;
+	if (!data || !Array.isArray(data.groups)) return [];
+	const disabled: DisabledWindow[] = [];
+	for (const group of data.groups) {
+		if (!isRecord(group) || typeof group.name !== "string" || !Array.isArray(group.buckets)) continue;
+		for (const bucket of group.buckets.filter(isRecord)) {
+			if (bucket.disabled !== true) continue;
+			const seconds = bucket.window === "5h" ? FIVE_HOURS_S : bucket.window === "weekly" ? WEEK_S : undefined;
+			if (seconds === undefined) continue;
+			disabled.push({ name: AGY_LIMIT_NAMES[group.name] ?? `agy ${group.name}`, label: seconds === WEEK_S ? "week" : "5h", windowSeconds: seconds });
+		}
+	}
+	return disabled;
+}
+
 /** Quota key of a limit name, when the name is one of the known subscription limits. */
 export function quotaKeyForLimit(name: string): string | undefined {
 	if (name === "claude" || name === "claude-bridge") return CLAUDE_KEY;
@@ -128,22 +153,86 @@ export function claudeLimitName(name: string): string {
 
 export type UsageQuotaView = Pick<QuotaState, "isAvailable" | "availableAt">;
 
-function applyQuotaStateToLimit(limit: UsageLimit, state: UsageQuotaView | undefined, now: number): UsageLimit {
-	if (!state) return limit;
+/** "2h 5m", "3d 4h", "12m": how long until `until`. */
+function formatWait(until: number, now: number): string {
+	const minutes = Math.max(1, Math.ceil((until - now) / 60_000));
+	const days = Math.floor(minutes / 1440);
+	const hours = Math.floor((minutes % 1440) / 60);
+	const rest = minutes % 60;
+	if (days > 0) return `${days}d ${hours}h`;
+	return hours > 0 ? `${hours}h ${rest}m` : `${rest}m`;
+}
+
+/** Name of a limit in alt+u, matching the HUD: provider then subscription ("antigravity gemini-4-argon"). */
+function displayName(limit: UsageLimit, side: "claude" | "agy"): string {
 	const key = quotaKeyForLimit(limit.name);
-	if (!key || state.isAvailable(key, now)) return limit;
-	const resetAt = state.availableAt(key, now) ?? null;
-	const hasFullWindow = limit.windows.some(window => window.usedPercent >= 100);
-	const windows = hasFullWindow
-		? limit.windows
-		: limit.windows.map((window, index) =>
-			index === 0 ? { ...window, usedPercent: 100, resetAt: resetAt ?? window.resetAt } : window,
-		);
-	return {
-		...limit,
-		windows,
-		limitReached: true,
-	};
+	if (side === "agy" && key) return key.replace("/", " ");
+	if (side === "agy") return `antigravity ${limit.name.replace(/^agy /, "")}`;
+	return `${CLAUDE_BRIDGE_PROVIDER} ${limit.name}`;
+}
+
+const GROUP_PREFIX: Record<string, string> = { week: "week ·", "5h": "5h   ·" };
+const GROUP_ORDER = ["week", "5h"];
+
+interface Row {
+	group: string;
+	key: string | undefined;
+	limit: UsageLimit;
+}
+
+/**
+ * One limit per window, so the shell (one row per window, in order) lists
+ * every weekly row first and then every 5h row. The row name carries the group
+ * ("week ·") and the window label carries the subscription. Percentages are the
+ * reported ones; a router block only adds "router waits …" beside them.
+ */
+function windowRows(
+	sides: readonly { side: "claude" | "agy"; limits: readonly UsageLimit[] }[],
+	disabled: readonly DisabledWindow[],
+	now: number,
+	state: UsageQuotaView | undefined,
+): Row[] {
+	const rows: Row[] = [];
+	for (const { side, limits } of sides) {
+		for (const limit of limits) {
+			const key = quotaKeyForLimit(limit.name);
+			const blockedUntil = key && state && !state.isAvailable(key, now) ? state.availableAt(key, now) : undefined;
+			const name = displayName(limit, side);
+			const label = blockedUntil === undefined ? name : `${name} · router waits ${formatWait(blockedUntil, now)}`;
+			for (const window of limit.windows) {
+				rows.push({
+					group: window.label,
+					key,
+					limit: { name: GROUP_PREFIX[window.label] ?? `${window.label} ·`, windows: [{ ...window, label }], limitReached: window.usedPercent >= 100 },
+				});
+			}
+		}
+	}
+	if (sides.some(({ side }) => side === "agy")) {
+		const agyLimits = sides.find(({ side }) => side === "agy")?.limits ?? [];
+		for (const off of disabled) {
+			const limit = agyLimits.find(candidate => candidate.name === off.name) ?? { name: off.name, windows: [], limitReached: false };
+			const why = limit.windows.some(window => window.usedPercent >= 100) ? "disabled · weekly limit hit" : "disabled";
+			rows.push({
+				group: off.label,
+				key: quotaKeyForLimit(off.name),
+				limit: {
+					name: GROUP_PREFIX[off.label] ?? `${off.label} ·`,
+					windows: [{ label: `${displayName(limit, "agy")} · ${why}`, usedPercent: 0, windowSeconds: off.windowSeconds, resetAt: null }],
+					limitReached: false,
+				},
+			});
+		}
+	}
+	const rank = (group: string) => (GROUP_ORDER.indexOf(group) < 0 ? GROUP_ORDER.length : GROUP_ORDER.indexOf(group));
+	return rows.map((row, index) => ({ row, index })).sort((a, b) => rank(a.row.group) - rank(b.row.group) || a.index - b.index).map(({ row }) => row);
+}
+
+/** The routed key's first row (its weekly one) goes first: the shell's bar shows the first limit. */
+function routedFirst(rows: Row[], routedKey: string | undefined): UsageLimit[] {
+	const routed = routedKey === undefined ? -1 : rows.findIndex(row => row.key === routedKey && !row.limit.windows[0]?.label.includes("· disabled"));
+	if (routed > 0) rows.unshift(...rows.splice(routed, 1));
+	return rows.map(row => row.limit);
 }
 
 export interface PoolUsageInfo {
@@ -152,8 +241,8 @@ export interface PoolUsageInfo {
 }
 
 /**
- * Both subscriptions as one `pool` usage. The limit of the quota key the pool
- * currently routes to goes first, because the shell's bar shows the first one.
+ * Both subscriptions as one `pool` usage, grouped by window (weekly rows, then
+ * 5h rows). The routed key's row goes first, because the shell's bar shows it.
  */
 export function combinePoolUsage(
 	claude: ProviderUsage | undefined,
@@ -162,28 +251,20 @@ export function combinePoolUsage(
 	now: number,
 	state?: UsageQuotaView,
 	poolInfo?: PoolUsageInfo,
+	disabled: readonly DisabledWindow[] = [],
 ): ProviderUsage | undefined {
-	const claudeLimits = (claude?.limits ?? []).map(limit => ({
-		...limit,
-		name: claudeLimitName(limit.name),
-	}));
-	const limits = [...claudeLimits, ...agy].map(limit => applyQuotaStateToLimit(limit, state, now));
-	if (limits.length === 0) return undefined;
-	const routed = limits.findIndex(limit => routedKey !== undefined && quotaKeyForLimit(limit.name) === routedKey);
-	if (routed > 0) limits.unshift(...limits.splice(routed, 1));
+	const rows = windowRows([{ side: "claude", limits: claude?.limits ?? [] }, { side: "agy", limits: agy }], disabled, now, state);
+	if (rows.length === 0) return undefined;
+	const limits = routedFirst(rows, routedKey);
 
-	let plan: string | undefined;
-	if (poolInfo?.poolName || poolInfo?.activeRoute) {
-		const target = poolInfo.activeRoute ? ` → ${poolInfo.activeRoute}` : "";
-		const basePool = poolInfo.poolName ?? "pool";
-		plan = claude?.plan ? `${basePool}${target} · claude ${claude.plan}` : `${basePool}${target}`;
-	} else if (claude?.plan) {
-		plan = `claude ${claude.plan}`;
-	}
+	const parts: string[] = [];
+	if (poolInfo?.poolName || poolInfo?.activeRoute) parts.push(poolInfo.poolName ?? "pool");
+	if (poolInfo?.activeRoute) parts.push(`now ${poolInfo.activeRoute}`);
+	if (claude?.plan) parts.push(`claude ${claude.plan}`);
 
 	return {
 		provider: POOL_PROVIDER,
-		plan,
+		plan: parts.length > 0 ? parts.join(" · ") : undefined,
 		limits,
 		// A cached Claude snapshot keeps its own age, so "updated" never overstates it.
 		fetchedAt: Math.min(claude?.fetchedAt ?? now, now),
@@ -246,7 +327,30 @@ export function createPoolUsageSource(deps: PoolUsageSourceDeps): UsageSource {
 					.catch(() => undefined),
 				deps.readAgyReport().catch(() => undefined),
 			]);
-			return combinePoolUsage(claude, agyUsageLimits(report), deps.routedKey(), now, deps.state?.(), deps.poolInfo?.());
+			return combinePoolUsage(claude, agyUsageLimits(report), deps.routedKey(), now, deps.state?.(), deps.poolInfo?.(), agyDisabledWindows(report));
+		},
+	};
+}
+
+export const ANTIGRAVITY_PROVIDER = "antigravity";
+
+export interface AntigravityUsageSourceDeps {
+	readAgyReport: () => Promise<unknown>;
+	routedKey: () => string | undefined;
+	state?: () => UsageQuotaView | undefined;
+}
+
+/** alt+u for the `antigravity` provider (subagents on agy models): the agy groups only. */
+export function createAntigravityUsageSource(deps: AntigravityUsageSourceDeps): UsageSource {
+	return {
+		schema: USAGE_SOURCE_SCHEMA,
+		provider: ANTIGRAVITY_PROVIDER,
+		pendingNote: "agy usage pending · r to fetch",
+		async fetch(_apiKey, _fetchFn, now) {
+			const report = await deps.readAgyReport().catch(() => undefined);
+			const rows = windowRows([{ side: "agy", limits: agyUsageLimits(report) }], agyDisabledWindows(report), now, deps.state?.());
+			if (rows.length === 0) return undefined;
+			return { provider: ANTIGRAVITY_PROVIDER, plan: undefined, limits: routedFirst(rows, deps.routedKey()), fetchedAt: now };
 		},
 	};
 }

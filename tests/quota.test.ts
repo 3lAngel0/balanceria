@@ -150,17 +150,34 @@ const T0 = Date.parse("2026-10-16T12:00:00Z");
 const HOUR_MS = 3_600_000;
 const POLL = (fraction: number) => new Map([["Gemini Models", { remainingFraction: fraction, resetAt: T0 + 2 * HOUR_MS }]]);
 
-test("a 429 with an explicit reset time keeps blocking while a /usage reading still shows margin", () => {
+test("a newer agy /usage reading with margin lifts an earlier quota-reached block", () => {
 	const state = new QuotaState();
-	state.markExhausted("antigravity/gemini", T0 + 5 * HOUR_MS, "Individual quota reached. Resets in 4h53m", T0);
+	state.markExhausted("antigravity/gemini", T0 + 105 * HOUR_MS, "Individual quota reached. Resets in 105h", T0);
 
 	state.applyAgyUsage(POLL(0.17), T0 + 5 * 60_000);
-	assert.equal(state.isAvailable("antigravity/gemini", T0 + 5 * 60_000), false, "the provider said it is spent until the reset");
-	assert.equal(state.availableAt("antigravity/gemini", T0 + 5 * 60_000), T0 + 5 * HOUR_MS);
-	assert.equal(state.remainingFraction("antigravity/gemini"), 0.17, "the reading itself is still recorded");
+	assert.equal(state.isAvailable("antigravity/gemini", T0 + 5 * 60_000), true, "the newer report wins");
+	assert.equal(state.availableAt("antigravity/gemini", T0 + 5 * 60_000), undefined);
+	assert.equal(state.remainingFraction("antigravity/gemini"), 0.17);
+	const entry = state.snapshot().get("antigravity/gemini");
+	assert.equal(entry?.exhaustedUntil, undefined);
+	assert.equal(entry?.providerUntil, undefined);
+	assert.equal(entry?.reason, undefined);
+});
 
-	state.setQuotaFraction("antigravity/gemini", 0.5, T0 + 6 * HOUR_MS, T0 + 10 * 60_000);
-	assert.equal(state.isAvailable("antigravity/gemini", T0 + 10 * 60_000), false, "a quota event does not lift it either");
+test("a quota event with margin still does not lift an explicit provider block", () => {
+	const state = new QuotaState();
+	state.markExhausted("claude-bridge/claude", T0 + 5 * HOUR_MS, "rate limit reached. Resets in 5h", T0);
+	state.setQuotaFraction("claude-bridge/claude", 0.5, T0 + 6 * HOUR_MS, T0 + 10 * 60_000);
+	assert.equal(state.isAvailable("claude-bridge/claude", T0 + 10 * 60_000), false);
+	assert.equal(state.availableAt("claude-bridge/claude", T0 + 10 * 60_000), T0 + 5 * HOUR_MS);
+	assert.equal(state.remainingFraction("claude-bridge/claude"), 0.5, "the reading itself is still recorded");
+});
+
+test("an agy /usage reading with margin does not lift a stall cooldown", () => {
+	const state = new QuotaState();
+	state.markExhausted("antigravity/gemini", T0 + 360_000, "agy stalled for 5m with no output", T0);
+	state.applyAgyUsage(POLL(0.6), T0 + 60_000);
+	assert.equal(state.availableAt("antigravity/gemini", T0 + 60_000), T0 + 360_000, "a stall is not a quota answer");
 });
 
 test("once the explicit reset time has passed, the next reading with margin lifts the block", () => {

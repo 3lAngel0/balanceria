@@ -12,8 +12,8 @@ export interface QuotaEntry {
 	remainingFraction: number | undefined;
 	resetAt: number | undefined;
 	/**
-	 * Reset time the provider itself gave with its refusal. A usage reading with margin cannot lift
-	 * the exhaustion before it: the provider's answer beats a different window's remaining fraction.
+	 * Reset time the provider itself gave with its refusal. A quota event with margin cannot lift the
+	 * exhaustion before it; a newer agy /usage reading with margin can (a stall cooldown stays).
 	 * Undefined when the cooldown was only our default guess.
 	 */
 	providerUntil: number | undefined;
@@ -77,11 +77,17 @@ export class QuotaState {
 		}
 	}
 
-	/** Records a reading for `entry`: spent until `resetAt`, or free, unless the provider's own block is still open. */
-	#applyReading(entry: QuotaEntry, fraction: number, resetAt: number | undefined, reason: string, now: number): void {
+	/**
+	 * Records a reading for `entry`: spent until `resetAt`, or free, unless the provider's own block is still open.
+	 * With `trustReading`, a reading with margin also lifts an open quota refusal (never a stall cooldown):
+	 * the newer report wins over the earlier refusal.
+	 */
+	#applyReading(entry: QuotaEntry, fraction: number, resetAt: number | undefined, reason: string, now: number, trustReading = false): void {
 		entry.remainingFraction = fraction;
 		entry.resetAt = resetAt;
-		const blockedUntil = entry.providerUntil !== undefined && now <= entry.providerUntil ? entry.providerUntil : undefined;
+		const openBlock = entry.providerUntil !== undefined && now <= entry.providerUntil ? entry.providerUntil : undefined;
+		const isStallBlock = (entry.consecutiveStalls ?? 0) > 0;
+		const blockedUntil = trustReading && fraction > 0 && !isStallBlock ? undefined : openBlock;
 		if (fraction <= 0) {
 			entry.exhaustedUntil = Math.max(resetAt ?? now + this.#defaultCooldownMs, blockedUntil ?? 0);
 			entry.reason = reason;
@@ -116,7 +122,7 @@ export class QuotaState {
 		for (const [group, usage] of groups) {
 			const key = agyQuotaKeyForGroup(group);
 			if (!key) continue;
-			this.#applyReading(this.#entry(key), usage.remainingFraction, usage.resetAt, `${group} quota spent`, now);
+			this.#applyReading(this.#entry(key), usage.remainingFraction, usage.resetAt, `${group} quota spent`, now, true);
 		}
 	}
 

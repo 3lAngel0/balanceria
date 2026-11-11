@@ -88,6 +88,7 @@ import {
 	CLAUDE_BRIDGE_PROVIDER,
 	claudeLimitName,
 	claudeQuotaEvents,
+	createAntigravityUsageSource,
 	createPoolUsageSource,
 	quotaKeyForLimit,
 	throttledClaudeFetch,
@@ -328,27 +329,29 @@ export default function aiBalancer(pi: ExtensionAPI) {
 	// The Claude side reuses the claude-bridge source pi-claude-usage publishes.
 	// agy takes longer than the shell's 10-second fetch window, so the source
 	// answers with the cached report and refreshes it in the background.
+	const readCachedAgyReport = async () => {
+		const cached = loadAgyReport();
+		if (!cached || Date.now() - cached.fetchedAt > AGY_USAGE_SOURCE_MAX_AGE_MS) void pollAgy();
+		return cached?.report;
+	};
+	const poolRoutedKey = (): string | undefined => {
+		const activeModel = sessionContext?.model;
+		if (activeModel && activeModel.provider !== POOL_PROVIDER) {
+			return quotaKeyFor(activeModel.provider, activeModel.id);
+		}
+		const route = fold().lastRoute;
+		if (route?.model) return quotaKeyFor(route.provider, route.model);
+		const { pools } = getLivePools();
+		const pool = route && pools.find(candidatePool => candidatePool.id === route.pool);
+		return pool?.candidates.find(candidate => candidate.provider === route?.provider)?.quotaKey;
+	};
 	const poolUsageSource = createPoolUsageSource({
 		claudeSource: () =>
 			claudeUsageFetch
 				? { fetch: claudeUsageFetch }
 				: { fetch: async () => claudeUsageStore.load()?.usage },
-		readAgyReport: async () => {
-			const cached = loadAgyReport();
-			if (!cached || Date.now() - cached.fetchedAt > AGY_USAGE_SOURCE_MAX_AGE_MS) void pollAgy();
-			return cached?.report;
-		},
-		routedKey: () => {
-			const activeModel = sessionContext?.model;
-			if (activeModel && activeModel.provider !== POOL_PROVIDER) {
-				return quotaKeyFor(activeModel.provider, activeModel.id);
-			}
-			const route = fold().lastRoute;
-			if (route?.model) return quotaKeyFor(route.provider, route.model);
-			const { pools } = getLivePools();
-			const pool = route && pools.find(candidatePool => candidatePool.id === route.pool);
-			return pool?.candidates.find(candidate => candidate.provider === route?.provider)?.quotaKey;
-		},
+		readAgyReport: readCachedAgyReport,
+		routedKey: poolRoutedKey,
 		poolInfo: () => {
 			const route = fold().lastRoute;
 			const poolName = route?.pool ?? (sessionContext?.model?.provider === POOL_PROVIDER ? sessionContext?.model?.id : "default");
@@ -357,8 +360,15 @@ export default function aiBalancer(pi: ExtensionAPI) {
 		},
 		state: () => fold().state,
 	});
+	// Subagents on agy models meter `antigravity`; it gets the agy groups alone.
+	const antigravityUsageSource = createAntigravityUsageSource({
+		readAgyReport: readCachedAgyReport,
+		routedKey: poolRoutedKey,
+		state: () => fold().state,
+	});
 	function registerPoolUsage(): void {
 		pi.events.emit(USAGE_SOURCE_EVENT, poolUsageSource);
+		pi.events.emit(USAGE_SOURCE_EVENT, antigravityUsageSource);
 	}
 	pi.events.on(USAGE_SOURCE_EVENT, payload => {
 		const fetchClaude = usageSourceFetch(payload, CLAUDE_BRIDGE_PROVIDER);
