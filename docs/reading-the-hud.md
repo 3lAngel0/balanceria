@@ -290,3 +290,22 @@ before adopting.
 `"kind": "api"` to the APIs view. A provider that is not listed is never guessed as one or the
 other. Pools (`pool/claude-opus-5-5`) are routers, not integrations: each request is recorded
 under the real provider that answered it.
+
+## Gentle Shell's usage table (`alt+u`)
+
+Gentle Shell draws `alt+u` itself; the balancer feeds it two providers. `pool` lists both
+subscriptions and `antigravity` lists the agy groups alone (for subagents on agy models). Every
+weekly row comes first, then every 5h row, named like the HUD:
+
+```
+pool · orchestrator · now claude-bridge/claude-opus-5-5 · claude max
+  week · claude-bridge claude        ▰▱▱   8% · resets in 6d 10h
+  week · antigravity gemini          ▰▰▱  34% · resets in 3d 22h
+  5h   · claude-bridge claude        ▰▱▱   9% · resets in 3h 55m
+  5h   · antigravity claude · disabled · weekly limit hit  0%
+```
+
+Percentages are what the provider reports. A window agy switched off shows as `disabled`
+(`· weekly limit hit` when its weekly window is full). When the router is holding a key back
+after a refusal, its rows add `· router waits 2h 5m`. A newer agy `/usage` reading with margin
+lifts that hold.

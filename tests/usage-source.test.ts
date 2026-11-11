@@ -1,9 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+	agyDisabledWindows,
 	agyUsageLimits,
 	claudeQuotaEvents,
 	combinePoolUsage,
+	createAntigravityUsageSource,
 	createPoolUsageSource,
 	throttledClaudeFetch,
 	type CachedClaudeUsage,
@@ -84,57 +86,87 @@ test("agyUsageLimits returns nothing for a report it does not understand", () =>
 	assert.deepEqual(agyUsageLimits({ command: { data: { groups: "x" } } }), []);
 });
 
-test("combinePoolUsage merges both subscriptions under the pool provider, routed key first", () => {
+const rows = (usage: ProviderUsage | undefined) =>
+	(usage?.limits ?? []).map(limit => `${limit.name} ${limit.windows[0]?.label} ${Math.round(limit.windows[0]?.usedPercent ?? -1)}%`);
+const DISABLED = agyDisabledWindows(AGY_REPORT);
+
+test("agyDisabledWindows lists the buckets agy switched off, by limit and window", () => {
+	assert.deepEqual(DISABLED, [{ name: "agy claude", label: "5h", windowSeconds: 18_000 }]);
+	assert.deepEqual(agyDisabledWindows(undefined), []);
+});
+
+test("combinePoolUsage lists every weekly row first, then every 5h row, with HUD provider names", () => {
 	const agy = agyUsageLimits(AGY_REPORT);
-	const viaClaude = combinePoolUsage(CLAUDE_USAGE, agy, "claude-bridge/claude", NOW);
+	const viaClaude = combinePoolUsage(CLAUDE_USAGE, agy, "claude-bridge/claude", NOW, undefined, undefined, DISABLED);
 	assert.equal(viaClaude?.provider, "pool");
 	assert.equal(viaClaude?.plan, "claude max");
 	assert.equal(viaClaude?.fetchedAt, NOW - 1000, "the panel's age is the oldest snapshot's");
-	assert.deepEqual(viaClaude?.limits.map(limit => limit.name), ["claude", "claude opus", "agy gemini", "agy claude", "agy argon"]);
-
-	const viaAgy = combinePoolUsage(CLAUDE_USAGE, agy, "antigravity/claude", NOW);
-	assert.deepEqual(viaAgy?.limits.map(limit => limit.name), ["agy claude", "claude", "claude opus", "agy gemini", "agy argon"]);
-
-	const viaGemini = combinePoolUsage(CLAUDE_USAGE, agy, "antigravity/gemini", NOW);
-	assert.deepEqual(viaGemini?.limits.map(limit => limit.name), ["agy gemini", "claude", "claude opus", "agy claude", "agy argon"]);
+	assert.deepEqual(rows(viaClaude), [
+		"week · claude-bridge claude 12%",
+		"week · claude-bridge opus 20%",
+		"week · antigravity gemini 1%",
+		"week · antigravity claude 100%",
+		"week · antigravity gemini-4-argon 2%",
+		"5h   · claude-bridge claude 43%",
+		"5h   · antigravity gemini 25%",
+		"5h   · antigravity claude · disabled · weekly limit hit 0%",
+	]);
+	const disabled = viaClaude?.limits.at(-1);
+	assert.equal(disabled?.windows[0]?.resetAt, null, "a disabled window shows no reset");
+	assert.equal(disabled?.limitReached, false);
+	assert.equal(viaClaude?.limits[3]?.limitReached, true, "a full window marks its row reached");
 });
 
-test("combinePoolUsage formats plan with active pool and route info when provided", () => {
+test("combinePoolUsage puts the routed key's weekly row first, for the shell's bar, keeping the grouping", () => {
 	const agy = agyUsageLimits(AGY_REPORT);
-	const usage = combinePoolUsage(CLAUDE_USAGE, agy, "antigravity/claude", NOW, undefined, {
-		poolName: "default",
-		activeRoute: "antigravity/claude",
-	});
-	assert.equal(usage?.plan, "default → antigravity/claude · claude max");
-
-	const noClaudePlan = combinePoolUsage(undefined, agy, "antigravity/claude", NOW, undefined, {
-		poolName: "default",
-		activeRoute: "antigravity/claude",
-	});
-	assert.equal(noClaudePlan?.plan, "default → antigravity/claude");
+	const viaGemini = combinePoolUsage(CLAUDE_USAGE, agy, "antigravity/gemini", NOW, undefined, undefined, DISABLED);
+	assert.deepEqual(rows(viaGemini).slice(0, 3), ["week · antigravity gemini 1%", "week · claude-bridge claude 12%", "week · claude-bridge opus 20%"]);
+	assert.deepEqual(rows(viaGemini).slice(5, 6), ["5h   · claude-bridge claude 43%"]);
 });
 
-test("combinePoolUsage overlays QuotaState exhaustion so spent Argon/Gemini windows report 100% used and limitReached", () => {
+test("a disabled bucket without a full sibling window reads plain disabled", () => {
+	const report = { command: { data: { groups: [{ name: "Gemini Models", buckets: [
+		{ id: "gemini-weekly", window: "weekly", remaining_fraction: 0.5, reset_time: "2026-10-25T03:57:06Z" },
+		{ id: "gemini-5h", window: "5h", disabled: true, remaining_fraction: 1 },
+	] }] } } };
+	const usage = combinePoolUsage(undefined, agyUsageLimits(report), undefined, NOW, undefined, undefined, agyDisabledWindows(report));
+	assert.deepEqual(rows(usage), ["week · antigravity gemini 50%", "5h   · antigravity gemini · disabled 0%"]);
+});
+
+test("combinePoolUsage header names the pool and the model it uses now", () => {
+	const agy = agyUsageLimits(AGY_REPORT);
+	const info = { poolName: "orchestrator", activeRoute: "claude-bridge/claude-opus-5-5" };
+	assert.equal(combinePoolUsage(CLAUDE_USAGE, agy, undefined, NOW, undefined, info)?.plan, "orchestrator · now claude-bridge/claude-opus-5-5 · claude max");
+	assert.equal(combinePoolUsage(undefined, agy, undefined, NOW, undefined, info)?.plan, "orchestrator · now claude-bridge/claude-opus-5-5");
+	assert.equal(combinePoolUsage(CLAUDE_USAGE, agy, undefined, NOW, undefined, { poolName: "orchestrator" })?.plan, "orchestrator · claude max");
+});
+
+test("combinePoolUsage shows the reported percent under a router block and says the router waits", () => {
 	const agy = agyUsageLimits(AGY_REPORT);
 	const state = new QuotaState();
-	const resetAt = NOW + 2 * 3_600_000;
-	state.markExhausted("antigravity/gemini-4-argon", resetAt, "Individual quota reached", NOW);
+	state.markExhausted("antigravity/gemini-4-argon", NOW + 2 * 3_600_000 + 5 * 60_000, "Individual quota reached", NOW);
 
-	const combined = combinePoolUsage(CLAUDE_USAGE, agy, "antigravity/gemini-4-argon", NOW, state);
+	const combined = combinePoolUsage(CLAUDE_USAGE, agy, "antigravity/gemini-4-argon", NOW, state, undefined, DISABLED);
 	const argon = combined?.limits[0];
-	assert.equal(argon?.name, "agy argon");
-	assert.equal(argon?.limitReached, true);
-	assert.equal(argon?.windows[0]?.usedPercent, 100);
-	assert.equal(argon?.windows[0]?.resetAt, resetAt);
+	assert.equal(argon?.name, "week ·");
+	assert.equal(argon?.windows[0]?.label, "antigravity gemini-4-argon · router waits 2h 5m");
+	assert.equal(Math.round(argon?.windows[0]?.usedPercent ?? -1), 2, "never a fake 100%");
+	assert.equal(argon?.windows[0]?.resetAt, Date.parse("2026-10-25T04:25:59Z"), "the window keeps its own reset");
+	assert.equal(argon?.limitReached, false);
 });
 
 test("combinePoolUsage keeps whichever side answered and gives up only when both are empty", () => {
 	const agyOnly = combinePoolUsage(undefined, agyUsageLimits(AGY_REPORT), undefined, NOW);
 	assert.equal(agyOnly?.plan, undefined);
-	assert.deepEqual(agyOnly?.limits.map(limit => limit.name), ["agy gemini", "agy claude", "agy argon"]);
+	assert.deepEqual(rows(agyOnly), [
+		"week · antigravity gemini 1%",
+		"week · antigravity claude 100%",
+		"week · antigravity gemini-4-argon 2%",
+		"5h   · antigravity gemini 25%",
+	]);
 
 	const claudeOnly = combinePoolUsage(CLAUDE_USAGE, [], undefined, NOW);
-	assert.deepEqual(claudeOnly?.limits.map(limit => limit.name), ["claude", "claude opus"]);
+	assert.deepEqual(rows(claudeOnly), ["week · claude-bridge claude 12%", "week · claude-bridge opus 20%", "5h   · claude-bridge claude 43%"]);
 
 	assert.equal(combinePoolUsage(undefined, [], undefined, NOW), undefined);
 });
@@ -161,9 +193,10 @@ test("createPoolUsageSource registers the pool provider and fetches both sides i
 
 	const usage = await source.fetch(undefined, fakeFetch, NOW);
 	assert.deepEqual(calls.sort(), ["agy", `claude:true:${NOW}`]);
-	assert.equal(usage?.plan, "default → antigravity/claude · claude max");
-	assert.equal(usage?.limits[0].name, "agy claude");
-	assert.equal(usage?.limits.length, 5);
+	assert.equal(usage?.plan, "default · now antigravity/claude · claude max");
+	assert.equal(rows(usage)[0], "week · antigravity claude 100%");
+	assert.equal(rows(usage).at(-1), "5h   · antigravity claude · disabled · weekly limit hit 0%");
+	assert.equal(usage?.limits.length, 8);
 });
 
 test("createPoolUsageSource survives a failing side and an absent claude source", async () => {
@@ -172,7 +205,7 @@ test("createPoolUsageSource survives a failing side and an absent claude source"
 		readAgyReport: async () => AGY_REPORT,
 		routedKey: () => undefined,
 	});
-	assert.deepEqual((await failingClaude.fetch(undefined, fetch, NOW))?.limits.map(limit => limit.name), ["agy gemini", "agy claude", "agy argon"]);
+	assert.equal((await failingClaude.fetch(undefined, fetch, NOW))?.limits.length, 5);
 
 	const noClaude = createPoolUsageSource({
 		claudeSource: () => undefined,
@@ -180,6 +213,27 @@ test("createPoolUsageSource survives a failing side and an absent claude source"
 		routedKey: () => undefined,
 	});
 	assert.equal(await noClaude.fetch(undefined, fetch, NOW), undefined);
+});
+
+test("createAntigravityUsageSource answers alt+u for antigravity with only the agy rows", async () => {
+	const state = new QuotaState();
+	const source = createAntigravityUsageSource({ readAgyReport: async () => AGY_REPORT, routedKey: () => "antigravity/gemini", state: () => state });
+	assert.equal(source.schema, USAGE_SOURCE_SCHEMA);
+	assert.equal(source.provider, "antigravity");
+	const usage = await source.fetch(undefined, fetch, NOW);
+	assert.equal(usage?.provider, "antigravity");
+	assert.equal(usage?.plan, undefined);
+	assert.equal(usage?.fetchedAt, NOW);
+	assert.deepEqual(rows(usage), [
+		"week · antigravity gemini 1%",
+		"week · antigravity claude 100%",
+		"week · antigravity gemini-4-argon 2%",
+		"5h   · antigravity gemini 25%",
+		"5h   · antigravity claude · disabled · weekly limit hit 0%",
+	]);
+
+	const missing = createAntigravityUsageSource({ readAgyReport: async () => { throw new Error("agy missing"); }, routedKey: () => undefined });
+	assert.equal(await missing.fetch(undefined, fetch, NOW), undefined);
 });
 
 function memoryStore(initial?: CachedClaudeUsage) {
