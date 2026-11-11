@@ -125,7 +125,7 @@ test("quota accepts only its exact flags", () => {
 	for (const flag of ["--copy", "-c", "copy"]) assert.deepEqual(parseQuotaArgs(`quota ${flag}`), { copy: true, raw: false }, flag);
 	for (const flag of ["--raw", "-r"]) assert.deepEqual(parseQuotaArgs(`quota ${flag}`), { copy: false, raw: true }, flag);
 	assert.deepEqual(parseQuotaArgs("quota  --raw   -c"), { copy: true, raw: true });
-	for (const bad of ["quota -raw", "quota --copyx", "quota -cr", "quota foo", "quotas"]) assert.equal(parseQuotaArgs(bad), undefined, bad);
+	for (const bad of ["quota -raw", "quota --copyx", "quota -cr", "quota foo", "quotas", "quota constructor", "quota toString"]) assert.equal(parseQuotaArgs(bad), undefined, bad);
 });
 
 test("quota with unknown flags is rejected instead of guessed", () => {

@@ -80,7 +80,7 @@ export function parseQuotaArgs(command: string): { copy: boolean; raw: boolean }
 	if (head !== "quota") return undefined;
 	const options = { copy: false, raw: false };
 	for (const token of rest) {
-		const flag = QUOTA_FLAGS[token];
+		const flag = Object.hasOwn(QUOTA_FLAGS, token) ? QUOTA_FLAGS[token] : undefined;
 		if (!flag) return undefined;
 		options[flag] = true;
 	}
