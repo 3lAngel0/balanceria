@@ -365,6 +365,8 @@ Ejemplo completo y verificado para segmentar un equipo de agentes:
 
 `lastResort` (opcional, nivel superior): un `provider/model` que responde primero y automáticamente cuando se agotan todos los candidatos de un pool (sesión principal y subagentes). Se configura en `/installer` → Respaldos → "Modelo final" (tecla `l`); el instalador y las demás herramientas que editan pools lo conservan.
 
+**Préstamos automáticos desde el instalador.** `/installer` → Respaldos → "Préstamos automáticos" (tecla `a`): para cada respaldo elegís Ninguno o un modelo de una suscripción activa (primero van los de otra empresa). Al instalar se escribe un permiso `auto` por respaldo en `permissions.json` (en el directorio de datos): `models` = `pool/<id>` más el modelo elegido, `profiles` = los perfiles guardados que tienen una tarea en ese respaldo, `roles` = todas las tareas de esos perfiles que apuntan a `pool/<id>` (el formato pide nombres explícitos, sin comodines, así que volvé a instalar después de apuntar más tareas a un respaldo), vence al año. Los permisos del instalador tienen ids que empiezan con `g-inst-`; los demás nunca se tocan, y `/balancer permissions` los lista o revoca. Las copias `.bak-installer-*` y Deshacer cubren `permissions.json` igual que `pools.json`. Los préstamos solo se aplican a tareas que apuntan a un respaldo y empiezan cuando se agota su primer modelo.
+
 ```json
 {
   "lastResort": "antigravity/gemini-3-8-flash",

@@ -3,6 +3,8 @@
 
 import type { Integration } from "./integrations.ts";
 import { DEFAULT_ORCHESTRATOR_MODE, isOrchestratorMode, type OrchestratorMode, type ProfileConfig, type ProfileWorkflow } from "./profiles.ts";
+import { join } from "node:path";
+import { PERMISSIONS_FILE, installerGrantsMatch, syncInstallerGrants, type Grant, type InstallerLoan } from "./permissions.ts";
 import { lastResortRef } from "./pools.ts";
 import type { RoutingStrategy } from "./router.ts";
 import { t } from "./i18n/index.ts";
@@ -29,6 +31,8 @@ interface StepperDraft {
 	orchestratorMode: OrchestratorMode;
 	/** `provider/model` used when a whole backup is spent (pools.json `lastResort`); absent when there is none. */
 	lastResort?: string;
+	/** Automatic loans the installer manages: backup id -> `provider/model` its tasks borrow while it is spent (permissions.json). */
+	loans?: Record<string, string>;
 }
 
 export interface SetupStepperState extends StepperDraft {
@@ -51,6 +55,8 @@ export interface StepperCurrent {
 	pools?: unknown;
 	integrations?: unknown;
 	profiles?: { active?: string; profiles?: Record<string, ProfileConfig> } | null;
+	/** The grants of permissions.json; absent when the host did not read them (the installer then leaves them alone). */
+	grants?: Grant[];
 }
 
 export interface StepperDeps {
@@ -64,6 +70,10 @@ export interface StepperDeps {
 		backupCreated: boolean;
 	};
 	writeProfiles: (profileName: string, roles: ProfileConfig, workflow?: ProfileWorkflow) => void;
+	/** Where permissions.json lives; defaults to AI_BALANCER_DATA_DIR or `<root>/data`. */
+	dataDir?: string;
+	/** The clock for grants. */
+	now?: number;
 }
 
 export interface StepperApplyResult {
@@ -72,6 +82,8 @@ export interface StepperApplyResult {
 	backups: string[];
 	error?: string;
 	profilesError?: string;
+	/** Set when the automatic loans could not be saved (the rest was written). */
+	grantsError?: string;
 }
 
 type StepperPool = PoolConfig;
@@ -83,6 +95,7 @@ const cloneDraft = (draft: StepperDraft): StepperDraft => ({
 	roles: cloneRoles(draft.roles),
 	orchestratorMode: draft.orchestratorMode,
 	...(draft.lastResort ? { lastResort: draft.lastResort } : {}),
+	...(draft.loans ? { loans: { ...draft.loans } } : {}),
 });
 
 export function initStepper(
@@ -90,7 +103,7 @@ export function initStepper(
 	recommended: PoolConfig[],
 	existingRoles: ProfileConfig = {},
 	initialWorkflow?: ProfileWorkflow | OrchestratorMode,
-	options?: { guided?: boolean; lastResort?: string },
+	options?: { guided?: boolean; lastResort?: string; loans?: Record<string, string> },
 ): SetupStepperState {
 	const orchestratorMode: OrchestratorMode =
 		typeof initialWorkflow === "string" && isOrchestratorMode(initialWorkflow)
@@ -104,6 +117,7 @@ export function initStepper(
 		roles: cloneRoles(existingRoles),
 		orchestratorMode,
 		...(options?.lastResort ? { lastResort: options.lastResort } : {}),
+		...(options?.loans ? { loans: { ...options.loans } } : {}),
 	};
 	return { step: "providers", reached: 0, detected, dirty: false, messages: {}, ...cloneDraft(baseline), baseline, guided: options?.guided ?? false };
 }
@@ -117,6 +131,48 @@ export function discard(state: SetupStepperState): SetupStepperState {
 export function effectiveLastResort(state: SetupStepperState): string | undefined {
 	const ref = state.lastResort;
 	return ref && state.enabled.includes(ref.slice(0, ref.indexOf("/"))) ? ref : undefined;
+}
+
+/** The automatic loans Save would write: only for backups that stay and targets whose subscription is enabled. */
+export function effectiveLoans(state: SetupStepperState): Record<string, string> {
+	const on = new Set(state.enabled);
+	const live = new Set(state.pools.filter(pool => pool.candidates.some(ref => on.has(ref.slice(0, ref.indexOf("/"))))).map(pool => pool.id));
+	return Object.fromEntries(Object.entries(state.loans ?? {}).filter(([id, to]) => live.has(id) && on.has(to.slice(0, to.indexOf("/")))));
+}
+
+/** The loans as grants: every task that uses the backup, in every saved profile that has one (the active profile with the draft's tasks). Backups no task uses get none. */
+export function planLoans(state: SetupStepperState, current: StepperCurrent): InstallerLoan[] {
+	const active = current.profiles?.active ?? buildBalancerProfileName();
+	const byProfile: Record<string, ProfileConfig> = { ...(current.profiles?.profiles ?? {}), [active]: state.roles };
+	const planned: InstallerLoan[] = [];
+	for (const [poolId, to] of Object.entries(effectiveLoans(state))) {
+		const profiles: string[] = [];
+		const roles = new Set<string>();
+		for (const [name, routes] of Object.entries(byProfile)) {
+			const used = Object.entries(routes ?? {}).filter(([, route]) => route?.model === `pool/${poolId}`).map(([role]) => role);
+			if (used.length === 0) continue;
+			profiles.push(name);
+			for (const role of used) roles.add(role);
+		}
+		if (roles.size > 0) planned.push({ poolId, to, profiles, roles: [...roles] });
+	}
+	return planned;
+}
+
+/** True when saving would change the installer's grants. Unknown (grants not read) counts as no change when there are no loans. */
+export function loansChanged(state: SetupStepperState, current: StepperCurrent, now = Date.now()): boolean {
+	const planned = planLoans(state, current);
+	if (current.grants === undefined) return planned.length > 0;
+	return !installerGrantsMatch(current.grants, planned, now);
+}
+
+/** Chooses the automatic loan of a backup (`provider/model` it borrows from while it is spent), or none with `undefined`. */
+export function setLoan(state: SetupStepperState, poolId: string, to: string | undefined): SetupStepperState {
+	const loans = { ...(state.loans ?? {}) };
+	if (loans[poolId] === to) return state;
+	if (to) loans[poolId] = to;
+	else delete loans[poolId];
+	return { ...state, loans, dirty: true };
 }
 
 /** The pools Save would write: candidates of disabled providers are left out, and emptied pools dropped. */
@@ -314,6 +370,18 @@ export function applyStepper(state: SetupStepperState, deps: StepperDeps): Stepp
 	};
 	const { name, live } = profileTarget(state, deps.current);
 	const workflowChanged = state.orchestratorMode !== state.baseline.orchestratorMode;
+	// Automatic loans: only when the host read the grants (so "no loans" there never revokes what it did not see) or the draft has some.
+	const planned = planLoans(state, deps.current);
+	if (deps.current.grants !== undefined || planned.length > 0) {
+		const now = deps.now ?? Date.now();
+		const dataDir = deps.dataDir ?? process.env.AI_BALANCER_DATA_DIR ?? join(deps.root, "data");
+		try {
+			const changed = syncInstallerGrants(dataDir, planned, now, deps.current.grants !== undefined);
+			if (changed.added.length > 0 || changed.revoked.length > 0) result.written.push(join(dataDir, PERMISSIONS_FILE));
+		} catch (err) {
+			result.grantsError = err instanceof Error ? err.message : String(err);
+		}
+	}
 	if (roleChanges(state.roles, live).length > 0 || workflowChanged) {
 		try {
 			deps.writeProfiles(name, state.roles, { orchestratorMode: state.orchestratorMode });

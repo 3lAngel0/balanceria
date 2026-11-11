@@ -655,7 +655,7 @@ test("S12: Recommended visits the subscriptions step preselected and lets every 
 test("S13: backups can toggle, move up/down, change the way to choose and create a backup, all through actions", () => {
 	const s = customAt("backups");
 	const screen = installerScreen(s);
-	assert.deepEqual(screen.shortcuts.map(sc => sc.key), [" ", "u", "j", "s", "c", "l"]);
+	assert.deepEqual(screen.shortcuts.map(sc => sc.key), [" ", "u", "j", "s", "c", "l", "a"]);
 	assert.ok(screen.shortcuts.every(sc => sc.label.length > 0));
 	const first = screen.control.kind === "checklist" ? screen.control.items[0]!.label : "";
 	// move down: the first member goes second and the cursor follows it
@@ -1000,4 +1000,91 @@ test("strategy texts describe today's routing: no 'running low' claim for Mixed,
 		assert.match(m["installer.strategy.hybrid.desc"]!, /most|más/i);
 		assert.match(m["installer.strategy.waterfall.desc"]!, /primary|principal/i);
 	}
+});
+
+// -- T9 (S7): automatic loans ---------------------------------------------------------------------
+
+const POOL = "claude-sonnet-5-5";
+const GEMINI = "antigravity/gemini-3-8-flash";
+const OPUS = "claude-bridge/claude-opus-5-5";
+const openLoans = (s: InstallerState): InstallerState => act(s, press("loans")).state;
+/** Opens the loan list, the first backup, and picks `ref` (undefined = None). */
+const pickLoan = (s: InstallerState, ref: string | undefined): InstallerState => {
+	let at = s.loanPicker ? s : openLoans(s);
+	at = act(at, { type: "open", index: 0 }).state;
+	const items = (installerScreen(at).control as { items: { id: string }[] }).items;
+	const index = ref === undefined ? items.findIndex(i => i.id === "none") : items.findIndex(i => i.id === ref);
+	assert.ok(index >= 0, `${ref} is offered`);
+	return act(at, { type: "select", index }).state;
+};
+
+test("S7: the backups step offers Automatic loans (button and shortcut), explained in plain words", () => {
+	const s = customAt("backups");
+	assert.ok(button(installerScreen(s), "loans")?.enabled);
+	assert.equal(button(installerScreen(s), "loans")?.label, "Automatic loans");
+	assert.ok(installerScreen(s).shortcuts.some(({ key, enabled, action }) => key === "a" && enabled && (action as { id?: string }).id === "loans"));
+	const open = installerScreen(openLoans(s));
+	assert.equal(open.title, "Automatic loans");
+	assert.match(open.body.join(" "), /When a backup runs out, its tasks borrow another model until it resets, then come back\./);
+	assert.doesNotMatch(open.title + open.body.join(" "), /provider/i);
+	assert.equal(open.control.kind, "checklist");
+	const items = (open.control as { items: { id: string; assigned?: string }[] }).items;
+	assert.deepEqual(items.map(i => i.id), [POOL]);
+	assert.equal(items[0]!.assigned, "None");
+	assert.equal(installerScreen(act(openLoans(s), { type: "back" }).state).title, "Backups");
+});
+
+test("S7: a backup's loan targets are the other models of the enabled subscriptions, other families first, with None", () => {
+	const s = act(openLoans(customAt("backups")), { type: "open", index: 0 }).state;
+	const screen = installerScreen(s);
+	assert.equal(screen.control.kind, "choice");
+	const items = (screen.control as { items: { id: string }[] }).items;
+	assert.deepEqual(items.map(i => i.id), ["none", GEMINI, OPUS], "its own models are not loan targets; gemini (other family) before claude-opus");
+	assert.equal(act(s, { type: "back" }).state.loanPicker?.pool, undefined, "back returns to the backup list");
+	assert.equal(installerScreen(act(s, { type: "back" }, { type: "back" }).state).title, "Backups");
+});
+
+test("S7: choosing a target stores it in the draft and the summary names the permissions file; None clears it", () => {
+	let s = pickLoan(customAt("backups"), GEMINI);
+	assert.deepEqual(s.draft.loans, { [POOL]: GEMINI });
+	s = act(s, { type: "back" }, { type: "back" }).state;
+	s = { ...s, draft: { ...s.draft, roles: { ...s.draft.roles, orchestrator: { model: `pool/${POOL}` } } } };
+	assert.match(installerScreen(s).body.join(" "), /Automatic loan: Claude Sonnet 5\.5 borrows Gemini 3\.8 Flash · antigravity/);
+	while (s.step !== "summary") s = act(s, next).state;
+	const summary = installerScreen(s);
+	assert.ok(summary.summary!.detail.some(line => /Claude Sonnet 5\.5.*borrows Gemini 3\.8 Flash · antigravity/.test(line)));
+	const group = (summary.control as { groups: { file: string; changed: boolean; lines: string[] }[] }).groups.find(g => g.file === "permissions.json")!;
+	assert.equal(group.changed, true);
+	assert.ok(group.lines.some(line => line.includes("Gemini 3.8 Flash")));
+	let again = pickLoan(pickLoan(customAt("backups"), GEMINI), undefined);
+	assert.equal(again.draft.loans?.[POOL], undefined);
+	again = act(again, { type: "back" }, { type: "back" }).state;
+	while (again.step !== "summary") again = act(again, next).state;
+	assert.equal((installerScreen(again).control as { groups: { file: string }[] }).groups.some(g => g.file === "permissions.json"), false);
+});
+
+test("S7: the installer's own grants are loaded back into the draft; grants it does not manage are ignored", () => {
+	const future = Date.now() + 1e10;
+	const grant = (id: string, models: string[]) => ({ id, level: "auto" as const, profiles: ["p"], roles: ["orchestrator"], models, grantedAt: 1, expiresAt: future });
+	const current = {
+		pools: { pools: [{ id: POOL, name: POOL, candidates: ["claude-bridge/claude-sonnet-5-5", "antigravity/claude-sonnet-5-5"], strategy: "hybrid" }] },
+		grants: [grant("g-inst-abc-1", [`pool/${POOL}`, GEMINI]), grant("g-other-1", [`pool/${POOL}`, OPUS])],
+	};
+	const s = initInstaller({ detected: both, current });
+	assert.deepEqual(s.draft.loans, { [POOL]: GEMINI });
+	const picker = act(withScanResult(act(s, next).state, { found: both }), next, next, press("loans"), { type: "open", index: 0 }).state;
+	assert.equal((installerScreen(picker).control as { selected: number }).selected, 1, "the saved target is highlighted");
+});
+
+test("S7: a loan whose target subscription gets disabled is dropped from the summary", () => {
+	let s = pickLoan(customAt("backups"), GEMINI);
+	s = act(s, { type: "back" }, { type: "back" }, { type: "back" }).state;
+	assert.equal(s.step, "subscriptions");
+	s = act(s, { type: "toggle", index: s.draft.detected.findIndex(p => p.id === "antigravity") }).state;
+	assert.doesNotMatch(installerScreen(act(s, next).state).body.join(" "), /Automatic loan:/);
+});
+
+test("S7: Automatic loans exists in Spanish", () => {
+	assert.equal(installerMessages.es["installer.button.loans"], "Préstamos automáticos");
+	assert.match(installerMessages.es["installer.loans.body"], /prestado/);
 });

@@ -638,3 +638,25 @@ test("only the focused button is filled; the primary one is not blue at rest", (
 	assert.doesNotMatch(backFocused, /\x1b\[48;2;[^m]*m Next ▶ /);
 	assert.match(text(renderInstaller(screen, { width: 100, mode: "none" }).lines), /\[ Next ▶ \]/);
 });
+
+test("S7: the terminal reaches Automatic loans with the A key and a button, and draws both levels at every width", () => {
+	const backups = customRun().find(s => s.step === "backups")!;
+	const screen = installerScreen(backups);
+	assert.deepEqual(installerKey(screen, undefined, "a").actions, [{ type: "button", id: "loans" }]);
+	for (const width of WIDTHS) {
+		const lines = renderInstaller(screen, { width, mode: "none" }).lines;
+		assert.match(text(lines), /Automatic loans/);
+		for (const line of lines) assert.ok(vw(line) <= width, `${width}: ${strip(line)}`);
+	}
+	const list = step(backups, { type: "button", id: "loans" });
+	const open = step(list, { type: "open", index: 0 });
+	for (const state of [list, open]) {
+		for (const width of WIDTHS) {
+			const lines = renderInstaller(installerScreen(state), { width, mode: "none" }).lines;
+			assert.match(text(lines), /Automatic loans/);
+			for (const line of lines) assert.ok(vw(line) <= width, `${width}: ${strip(line)}`);
+		}
+	}
+	// In the list, Enter opens the highlighted backup; in its targets, Enter chooses and goes back to the list.
+	assert.deepEqual(installerKey(installerScreen(list), undefined, "\r").actions, [{ type: "open", index: 0 }]);
+});

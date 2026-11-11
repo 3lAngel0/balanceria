@@ -624,3 +624,42 @@ test("S1: the web installer exposes the last-resort control and an install write
 		await h.cleanup();
 	}
 });
+
+test("S7: the web installer offers Automatic loans and an install writes the auto grant to permissions.json", async () => {
+	const h = await harness();
+	try {
+		await post(h, { type: "next" });
+		await post(h, { type: "select", index: 1 });
+		await post(h, { type: "next" });
+		await settle(h);
+		await post(h, { type: "next" }); // subscriptions
+		await post(h, { type: "next" }); // backups
+		let view = (await get(h)).json();
+		assert.ok(view.screen.buttons.some((b: { id: string; enabled: boolean; label: string }) => b.id === "loans" && b.enabled && b.label === "Automatic loans"));
+		view = (await post(h, { type: "button", id: "loans" })).json();
+		assert.equal(view.screen.title, "Automatic loans");
+		assert.match(view.screen.body.join(" "), /borrow another model until it resets, then come back/);
+		view = (await post(h, { type: "open", index: 0 })).json();
+		const index = view.screen.control.items.findIndex((i: { id: string }) => i.id === "antigravity/gemini-3-8-flash");
+		assert.ok(index > 0);
+		await post(h, { type: "select", index });
+		await post(h, { type: "button", id: "loans" }); // to the list
+		await post(h, { type: "button", id: "loans" }); // back to the backups
+		await post(h, { type: "next" }); // tasks: send the first task to the backup, so the loan has a task to cover
+		await post(h, { type: "open", index: 0 });
+		await post(h, { type: "select", index: 0 });
+		await post(h, { type: "button", id: "assign-task" });
+		while ((await get(h)).json().screen.step !== "summary") await post(h, { type: "next" });
+		view = (await get(h)).json();
+		assert.ok(view.screen.summary.detail.some((line: string) => line.includes("borrows Gemini 3.8 Flash")));
+		await post(h, { type: "button", id: "install" });
+		await settle(h);
+		const grants = JSON.parse(readFileSync(join(h.root, "data", "permissions.json"), "utf8")).grants;
+		assert.equal(grants.length, 1);
+		assert.equal(grants[0].level, "auto");
+		assert.deepEqual(grants[0].models, ["pool/claude-sonnet-5-5", "antigravity/gemini-3-8-flash"]);
+		assert.equal(parseInstallerAction({ type: "button", id: "loans" })?.type, "button");
+	} finally {
+		await h.cleanup();
+	}
+});

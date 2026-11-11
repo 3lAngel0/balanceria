@@ -365,6 +365,8 @@ Here is a complete, production-tested configuration separating an agent team int
 
 `lastResort` (optional, top level): a `provider/model` that answers first, automatically, when every candidate of a pool is exhausted (main session and subagents). Set it in `/installer` → Backups → "Last-resort model" (key `l`); installer saves and other tools that edit pools preserve it.
 
+**Automatic loans from the installer.** `/installer` → Backups → "Automatic loans" (key `a`): for each backup you pick None or a model of an enabled subscription (models of another company are listed first). Install writes one `auto` grant per backup to `permissions.json` (in the data dir): `models` = `pool/<id>` plus the chosen model, `profiles` = the saved profiles that have a task on that backup, `roles` = every task of those profiles that points at `pool/<id>` (the grant format needs explicit names, no wildcards, so install again after pointing more tasks at a backup), expiry one year. Installer grants have ids starting `g-inst-`; other grants are never changed, and `/balancer permissions` lists or revokes them. The `.bak-installer-*` copies and Undo cover `permissions.json` like `pools.json`. Loans only apply to tasks that point at a backup and start once its first model is spent.
+
 ```json
 {
   "lastResort": "antigravity/gemini-3-8-flash",

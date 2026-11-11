@@ -2,6 +2,7 @@
 // Pure: no rendering, no ANSI, no I/O. Hosts run the effects (scan, install, undo...) and report back through the `with*` reducers.
 
 import { t } from "./i18n/index.ts";
+import { installerLoanTargets } from "./permissions.ts";
 import { lastResortRef } from "./pools.ts";
 import type { OrchestratorMode, ProfileWorkflow } from "./profiles.ts";
 import type { RoutingStrategy } from "./router.ts";
@@ -27,10 +28,12 @@ import {
 	applyAutoAssignRoles,
 	createPoolFromTemplate,
 	effectiveLastResort,
+	effectiveLoans,
 	initStepper,
 	moveCandidate,
 	poolCostWarning,
 	setLastResort,
+	setLoan,
 	setOrchestratorMode,
 	setPoolStrategy,
 	setRole,
@@ -94,6 +97,8 @@ export interface InstallerState {
 	taskPicker?: { role: string };
 	/** The last-resort model picker of the backups step (the highlighted row is `cursor`; row 0 is "None"). */
 	lastResortPicker?: boolean;
+	/** The automatic-loans picker of the backups step: the list of backups, or (with `pool`) the target choice of one backup. */
+	loanPicker?: { pool?: string };
 	/** The deep analysis in flight, failed or finished; at most one runs at a time. */
 	analysis?: AnalysisState;
 	/** A communication or host error set by `withError`; shown as an error screen with retry / back. */
@@ -134,6 +139,7 @@ export type ButtonId =
 	| "deep-analysis"
 	| "create-backup"
 	| "last-resort"
+	| "loans"
 	| "move-up"
 	| "move-down"
 	| "cycle-method";
@@ -285,7 +291,7 @@ function advisorFor(draft: SetupStepperState): AdvisorReport {
 }
 
 function draftFromCurrent(detected: DetectedProvider[], current: StepperCurrent, workflow: InstallerInit["workflow"]): SetupStepperState {
-	return initStepper(detected, currentPools(current), activeRoles(current), workflow, { lastResort: lastResortRef(current.pools) });
+	return initStepper(detected, currentPools(current), activeRoles(current), workflow, { lastResort: lastResortRef(current.pools), loans: current.grants ? installerLoanTargets(current.grants, Date.now()) : undefined });
 }
 
 export function initInstaller(input: InstallerInit): InstallerState {
@@ -337,7 +343,7 @@ function pathOf(state: InstallerState): InstallerStep[] {
 	}
 }
 
-const go = (state: InstallerState, step: InstallerStep): InstallerState => ({ ...state, step, cursor: 0, notice: [], helpOpen: false, taskPicker: undefined, lastResortPicker: undefined, error: undefined });
+const go = (state: InstallerState, step: InstallerStep): InstallerState => ({ ...state, step, cursor: 0, notice: [], helpOpen: false, taskPicker: undefined, lastResortPicker: undefined, loanPicker: undefined, error: undefined });
 
 // ---------------------------------------------------------------------------------------------
 // Reducers the host calls after running an effect
@@ -548,6 +554,58 @@ function lastResortContent(state: InstallerState): Content {
 	};
 }
 
+/** Row 0 is "None"; then the models of the enabled subscriptions that are not the backup's own, other families first. */
+function loanTargets(draft: SetupStepperState, poolId: string): (string | undefined)[] {
+	const pool = draft.pools.find(p => p.id === poolId);
+	const own = new Set(pool?.candidates ?? []);
+	const family = pool?.candidates[0] ? familyOf(pool.candidates[0]) : "";
+	const refs = enabledRefs(draft).filter(ref => !own.has(ref));
+	return [undefined, ...refs.filter(ref => familyOf(ref) !== family), ...refs.filter(ref => familyOf(ref) === family)];
+}
+
+function loanLines(draft: SetupStepperState): string[] {
+	const loans = effectiveLoans(draft);
+	return Object.entries(loans).map(([id, to]) => t("installer.loans.current", { backup: poolName({ id, name: draft.pools.find(p => p.id === id)?.name }), model: refLabel(draft, to) }));
+}
+
+function loansContent(state: InstallerState, picker: { pool?: string }): Content {
+	const draft = state.draft;
+	const loans = effectiveLoans(draft);
+	if (picker.pool) {
+		const pool = draft.pools.find(p => p.id === picker.pool);
+		const targets = loanTargets(draft, picker.pool);
+		return {
+			title: t("installer.loans.title"),
+			body: [t("installer.loans.pickerIntro", { backup: poolName(pool ?? { id: picker.pool }) })],
+			control: {
+				kind: "choice",
+				selected: Math.max(0, targets.indexOf(loans[picker.pool])),
+				items: targets.map(ref => (ref ? { id: ref, label: refLabel(draft, ref), description: t("installer.loans.modelDesc") } : { id: "none", label: t("installer.loans.none"), description: t("installer.loans.none.desc") })),
+			},
+			buttons: [button("back"), button("loans", true, true, t("installer.loans.done")), button("cancel")],
+			help: help("loans"),
+		};
+	}
+	const pools = livePools(draft);
+	return {
+		title: t("installer.loans.title"),
+		body: [t("installer.loans.body"), t("installer.loans.scope"), ...(pools.length === 0 ? [t("installer.loans.noBackups")] : [])],
+		control: {
+			kind: "checklist",
+			openable: true,
+			items: pools.map(pool => ({
+				id: pool.id,
+				label: poolName(pool),
+				detail: loans[pool.id] ? t("installer.loans.itemOn", { model: refLabel(draft, loans[pool.id]!) }) : t("installer.loans.itemOff"),
+				checked: loans[pool.id] !== undefined,
+				assigned: loans[pool.id] ? refLabel(draft, loans[pool.id]!) : t("installer.loans.none"),
+			})),
+		},
+		buttons: [button("back"), button("loans", true, true, t("installer.loans.done")), button("cancel")],
+		help: help("loans"),
+	};
+}
+
 const analysisRunning = (state: InstallerState) => state.analysis?.status === "running";
 
 function tasksContent(state: InstallerState): Content {
@@ -706,6 +764,7 @@ function content(state: InstallerState): Content {
 			};
 		case "backups": {
 			if (state.lastResortPicker) return lastResortContent(state);
+			if (state.loanPicker) return loansContent(state, state.loanPicker);
 			const items = backupItems(draft);
 			const lastResort = effectiveLastResort(draft);
 			const focus = items[Math.min(state.cursor, items.length - 1)]?.pool;
@@ -720,6 +779,7 @@ function content(state: InstallerState): Content {
 					...(items.length === 0 ? [t("installer.backups.none")] : []),
 					...single.map(s => t("installer.backups.single", { model: friendlyModel(s.model), subscription: owner(s.provider) })),
 					lastResort ? t("installer.lastResort.current", { model: refLabel(draft, lastResort) }) : t("installer.lastResort.currentNone"),
+					...(loanLines(draft).length > 0 ? loanLines(draft) : [t("installer.loans.currentNone")]),
 				],
 				control: {
 					kind: "checklist",
@@ -737,7 +797,7 @@ function content(state: InstallerState): Content {
 					}),
 				},
 				...(focus ? { diagram: diagramOf(draft, focus, focus.candidates) } : {}),
-				buttons: [...standardButtons(state), button("create-backup"), button("last-resort")],
+				buttons: [...standardButtons(state), button("create-backup"), button("last-resort"), button("loans")],
 				help: help("backups"),
 			};
 		}
@@ -828,6 +888,12 @@ function focusOf(state: InstallerState, cursor: number): HelpFocus | undefined {
 				const ref = lastResortTargets(draft)[cursor];
 				return helpFocus(ref ? refLabel(draft, ref) : t("installer.lastResort.none.label"), t("installer.help.focus.lastResort.what"), t("installer.help.focus.lastResort.purpose"), t("installer.help.focus.lastResort.if"), ref ? `lastResort: ${ref}` : "lastResort", "pools.json");
 			}
+			if (state.loanPicker) {
+				const pool = state.loanPicker.pool ? undefined : livePools(draft)[cursor];
+				const ref = state.loanPicker.pool ? loanTargets(draft, state.loanPicker.pool)[cursor] : undefined;
+				const label = pool ? poolName(pool) : ref ? refLabel(draft, ref) : t("installer.loans.none");
+				return helpFocus(label, t("installer.help.focus.loans.what"), t("installer.help.focus.loans.purpose"), t("installer.help.focus.loans.if"), ref ? `loan: ${ref}` : "loans", "permissions.json");
+			}
 			const item = backupItems(draft)[cursor];
 			if (!item) return undefined;
 			const params = { member: refLabel(draft, item.ref), backup: poolName(item.pool) };
@@ -868,6 +934,7 @@ function shortcutsOf(state: InstallerState, cursor: number): InstallerShortcut[]
 		return [sc(" ", "toggle", { type: "toggle", index: cursor }, item !== undefined)];
 	}
 	if (state.step === "backups" && state.lastResortPicker) return [sc("enter", "lastResortUse", press("last-resort"))];
+	if (state.step === "backups" && state.loanPicker) return [sc("enter", state.loanPicker.pool ? "lastResortUse" : "loansOpen", state.loanPicker.pool ? press("loans") : { type: "open", index: cursor })];
 	if (state.step === "backups") {
 		const items = backupItems(state.draft);
 		const item = items[cursor];
@@ -880,6 +947,7 @@ function shortcutsOf(state: InstallerState, cursor: number): InstallerShortcut[]
 			sc("s", "strategy", press("cycle-method"), item !== undefined),
 			sc("c", "createBackup", press("create-backup")),
 			sc("l", "lastResort", press("last-resort")),
+			sc("a", "loans", press("loans")),
 		];
 	}
 	if (state.step === "tasks" && state.existing?.mode !== "repair") {
@@ -948,7 +1016,7 @@ export function installerScreen(state: InstallerState): InstallerScreen {
 	const cursor = c.control.kind === "choice" ? c.control.selected : Math.max(0, Math.min(state.cursor, length - 1));
 	const focus = blocking ? undefined : focusOf(state, cursor);
 	const analysis = state.analysis;
-	const focusedBackup = state.step === "backups" && !state.wizard && !state.lastResortPicker ? backupItems(state.draft)[cursor]?.pool : undefined;
+	const focusedBackup = state.step === "backups" && !state.wizard && !state.lastResortPicker && !state.loanPicker ? backupItems(state.draft)[cursor]?.pool : undefined;
 	const running = analysis?.status === "running" ? analysis : undefined;
 	const done = analysis?.status === "done" && state.step === "tasks" ? analysis : undefined;
 	const story = state.step === "summary" && !blocking ? summaryStory(state.draft, state.current) : undefined;
@@ -1037,6 +1105,7 @@ function onNext(state: InstallerState): Result {
 	if (state.wizard) return wizardNext(state, state.wizard);
 	if (state.taskPicker) return stay(state);
 	if (state.lastResortPicker) return stay(closeLastResortPicker(state));
+	if (state.loanPicker) return stay(closeLoanPicker(state));
 	const path = pathOf(state);
 	const step = state.step;
 	if (step === "summary") {
@@ -1067,6 +1136,14 @@ function closePicker(state: InstallerState): InstallerState {
 	return { ...rest, cursor: Math.max(0, ROLE_CATALOG.findIndex(e => e.role === taskPicker?.role)) };
 }
 
+/** Steps out of the loans picker: from one backup's targets to the list, from the list to the backups step. */
+function closeLoanPicker(state: InstallerState): InstallerState {
+	const pool = state.loanPicker?.pool;
+	if (pool) return { ...state, loanPicker: {}, cursor: Math.max(0, livePools(state.draft).findIndex(p => p.id === pool)) };
+	const { loanPicker: _closed, ...rest } = state;
+	return { ...rest, cursor: 0 };
+}
+
 /** Closes the last-resort picker and goes back to the backups list. */
 function closeLastResortPicker(state: InstallerState): InstallerState {
 	const { lastResortPicker: _closed, ...rest } = state;
@@ -1080,6 +1157,7 @@ function onBack(state: InstallerState): Result {
 	if (state.wizard) return wizardBack(state, state.wizard);
 	if (state.taskPicker) return stay(closePicker(state));
 	if (state.lastResortPicker) return stay(closeLastResortPicker(state));
+	if (state.loanPicker) return stay(closeLoanPicker(state));
 	if (state.deepAnalysis) {
 		const { deepAnalysis: _closed, ...rest } = state;
 		return stay(rest);
@@ -1094,6 +1172,7 @@ function onCancel(state: InstallerState): Result {
 	if (state.wizard) return stay({ ...state, wizard: undefined, cursor: 0 });
 	if (state.taskPicker) return stay(closePicker(state));
 	if (state.lastResortPicker) return stay(closeLastResortPicker(state));
+	if (state.loanPicker) return stay(closeLoanPicker(state));
 	if (state.deepAnalysis) {
 		const { deepAnalysis: _closed, ...rest } = state;
 		return stay(rest);
@@ -1168,6 +1247,8 @@ function onSelect(state: InstallerState, index: number): InstallerState {
 		case "type":
 			return TYPES[index] ? { ...at, installType: TYPES[index]! } : state;
 		case "backups": {
+			const loanPool = state.loanPicker?.pool;
+			if (loanPool) return index < loanTargets(state.draft, loanPool).length ? { ...at, draft: setLoan(state.draft, loanPool, loanTargets(state.draft, loanPool)[index]) } : state;
 			if (!state.lastResortPicker || index >= lastResortTargets(state.draft).length) return state;
 			return { ...at, draft: setLastResort(state.draft, lastResortTargets(state.draft)[index]) };
 		}
@@ -1192,7 +1273,7 @@ function onToggle(state: InstallerState, index: number): InstallerState {
 			return provider ? { ...at, draft: toggleProvider(draft, provider.id) } : state;
 		}
 		case "backups": {
-			if (state.lastResortPicker) return state;
+			if (state.lastResortPicker || state.loanPicker) return state;
 			const item = backupItems(draft)[index];
 			return item ? { ...at, backupsTouched: true, draft: toggleCandidate(draft, item.pool.id, item.ref) } : state;
 		}
@@ -1218,6 +1299,11 @@ function onMove(state: InstallerState, delta: number): InstallerState {
 }
 
 function onOpen(state: InstallerState, index: number): InstallerState {
+	if (state.step === "backups" && state.loanPicker && !state.loanPicker.pool) {
+		const pool = livePools(state.draft)[index];
+		if (!pool) return state;
+		return { ...state, loanPicker: { pool: pool.id }, cursor: Math.max(0, loanTargets(state.draft, pool.id).indexOf(effectiveLoans(state.draft)[pool.id])) };
+	}
 	const entry = ROLE_CATALOG[index];
 	if (state.step !== "tasks" || state.wizard || state.deepAnalysis || state.taskPicker || state.existing?.mode === "repair" || !entry) return state;
 	const targets = pickerTargets(state.draft);
@@ -1244,7 +1330,7 @@ const startAnalysis = (state: InstallerState, model: string): Result => ({
 
 /** Moves the focused backup member one place among the ticked ones, and the cursor with it. */
 function moveMember(state: InstallerState, dir: -1 | 1): InstallerState {
-	if (state.step !== "backups" || state.wizard || state.lastResortPicker) return state;
+	if (state.step !== "backups" || state.wizard || state.lastResortPicker || state.loanPicker) return state;
 	const item = backupItems(state.draft)[state.cursor];
 	const pool = item && state.draft.pools.find(p => p.id === item.pool.id);
 	if (!item || !pool) return state;
@@ -1258,7 +1344,7 @@ function moveMember(state: InstallerState, dir: -1 | 1): InstallerState {
 }
 
 function cycleStrategy(state: InstallerState): InstallerState {
-	if (state.step !== "backups" || state.wizard || state.lastResortPicker) return state;
+	if (state.step !== "backups" || state.wizard || state.lastResortPicker || state.loanPicker) return state;
 	const pool = backupItems(state.draft)[state.cursor]?.pool;
 	if (!pool) return state;
 	const next = STRATEGIES[(STRATEGIES.indexOf(pool.strategy ?? "hybrid") + 1) % STRATEGIES.length]!;
@@ -1295,6 +1381,8 @@ function onButton(state: InstallerState, id: ButtonId): Result {
 			return stay({ ...state, draft: applyAutoAssignRoles(state.draft) });
 		case "last-resort":
 			return stay(state.lastResortPicker ? closeLastResortPicker(state) : { ...state, cursor: Math.max(0, lastResortTargets(state.draft).indexOf(effectiveLastResort(state.draft))), lastResortPicker: true });
+		case "loans":
+			return stay(state.loanPicker ? closeLoanPicker(state) : { ...state, cursor: 0, loanPicker: {} });
 		case "create-backup":
 			return stay(openWizard({ ...state, backupsTouched: true }));
 		case "deep-analysis": {

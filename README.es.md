@@ -323,7 +323,7 @@ Sí. Abrí `/installer`, entrá a **Respaldos**, elegí **+ Crear otro respaldo*
 3. **Estrategia**: elegí **En orden** (`waterfall`).
 4. En **Tareas de agentes**, asigná el respaldo nuevo a los roles que lo van a usar. Un respaldo que ningún rol usa no hace nada.
 
-La alternativa es un **préstamo**: dejás el pool solo con Claude y autorizás una ruta temporal a otro modelo mientras el pool está agotado (`/balancer loans`, `/balancer permissions`). Con un permiso `auto` cambia sin preguntar y vuelve cuando se renueva la ventana. Los préstamos solo se aplican a roles que apuntan a un pool.
+La alternativa es un **préstamo**: dejás el pool solo con Claude y autorizás una ruta temporal a otro modelo mientras el pool está agotado (`/balancer loans`, `/balancer permissions`). Con un permiso `auto` cambia sin preguntar y vuelve cuando se renueva la ventana. Los préstamos solo se aplican a roles que apuntan a un pool. Podés configurarlo sin escribir comandos: `/installer` → Respaldos → **Préstamos automáticos** (tecla `a`) te deja elegir, para cada respaldo, el modelo que sus tareas toman prestado cuando se agota (por ejemplo un respaldo de Claude que toma un modelo de OpenAI). El instalador lo guarda como un permiso `auto` para todas las tareas que usan ese respaldo, válido por un año (volvé a instalar para renovarlo), y no toca ningún otro permiso.
 
 ### ¿Por qué la lista de respaldos solo muestra modelos de Claude si tengo OpenAI?
 

@@ -323,3 +323,110 @@ test("the orchestrator backup and role are named Main agent (orchestrator); the 
 	assert.equal(roleName("orchestrator"), "Main agent (orchestrator)");
 	assert.equal(targetLabel("pool/orchestrator", []), "Backup Main agent (orchestrator)");
 });
+
+// -- T9 (S7): automatic loans through the writers ---------------------------------------------------
+
+import { mkdirSync } from "node:fs";
+import { INSTALLER_GRANT_PREFIX, addGrant, loadPermissions } from "../src/permissions.ts";
+import { installerSnapshotFiles } from "../src/installer-plan.ts";
+import { setLoan } from "../src/setup-stepper.ts";
+
+const OPENAI_REF = "antigravity/gemini-3-8-flash";
+const NOW = Date.parse("2026-11-11T12:00:00Z");
+const POOL_ID = "claude-sonnet-5-5";
+const loanDraft = (to: string | null = OPENAI_REF) => {
+	let draft = buildRecommendedDraft({ detected: [claude, agy] });
+	draft = setRole(draft, "orchestrator", `pool/${POOL_ID}`);
+	draft = setRole(draft, "gentle-ai-verify", `pool/${POOL_ID}`);
+	return setLoan(draft, POOL_ID, to ?? undefined);
+};
+const loanCurrent = (extra: Partial<StepperCurrent> = {}): StepperCurrent => ({ profiles: { active: "bal", profiles: { bal: {} } }, grants: [], ...extra });
+const withLoanRoot = (run: (root: string, dataDir: string) => void) => {
+	const root = mkdtempSync(join(tmpdir(), "loans-"));
+	const dataDir = join(root, "data");
+	try {
+		run(root, dataDir);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+};
+const installLoans = (root: string, dataDir: string, draft: ReturnType<typeof loanDraft>, current: StepperCurrent) =>
+	applyStepper(draft, { root, dataDir, now: NOW, current, profilesPath: join(root, "profiles.json"), writeConfig: writeConfigSafely, writeProfiles: () => {} });
+
+test("S7: Install writes an auto grant from the backup to the chosen model for every task that uses the backup", () => {
+	withLoanRoot((root, dataDir) => {
+		const result = installLoans(root, dataDir, loanDraft(), loanCurrent());
+		assert.equal(result.ok, true);
+		assert.equal(result.grantsError, undefined);
+		assert.ok(result.written.includes(join(dataDir, "permissions.json")));
+		const { grants } = loadPermissions(dataDir);
+		assert.equal(grants.length, 1);
+		const grant = grants[0]!;
+		assert.ok(grant.id.startsWith(`${INSTALLER_GRANT_PREFIX}-`));
+		assert.equal(grant.level, "auto");
+		assert.deepEqual(grant.profiles, ["bal"]);
+		const users = Object.entries(loanDraft().roles).filter(([, route]) => route.model === `pool/${POOL_ID}`).map(([role]) => role).sort();
+		assert.ok(users.includes("orchestrator") && users.includes("gentle-ai-verify"));
+		assert.deepEqual([...grant.roles].sort(), users);
+		assert.deepEqual(grant.models, [`pool/${POOL_ID}`, OPENAI_REF]);
+		assert.ok(grant.expiresAt > NOW);
+	});
+});
+
+test("S7: grants the installer does not manage are preserved; installing again with the same loan changes nothing, None revokes only its own", () => {
+	withLoanRoot((root, dataDir) => {
+		const mine = addGrant(dataDir, { level: "suggest", profiles: ["x"], roles: ["r"], models: ["pool/a", "p/m"], expiresAt: NOW + 1e9 }, NOW);
+		const current = loanCurrent({ grants: loadPermissions(dataDir).grants });
+		installLoans(root, dataDir, loanDraft(), current);
+		const after = readFileSync(join(dataDir, "permissions.json"), "utf8");
+		assert.equal(loadPermissions(dataDir).grants.length, 2);
+		const again = installLoans(root, dataDir, loanDraft(), loanCurrent({ grants: loadPermissions(dataDir).grants }));
+		assert.equal(readFileSync(join(dataDir, "permissions.json"), "utf8"), after, "same loan: file untouched");
+		assert.equal(again.written.includes(join(dataDir, "permissions.json")), false);
+		const gone = installLoans(root, dataDir, loanDraft(null), loanCurrent({ grants: loadPermissions(dataDir).grants }));
+		assert.equal(gone.grantsError, undefined);
+		const left = loadPermissions(dataDir).grants;
+		assert.deepEqual(left.map(g => g.id), [mine.id]);
+	});
+});
+
+test("S7: a host that did not read the grants never revokes; a loan for a backup no task uses writes nothing", () => {
+	withLoanRoot((root, dataDir) => {
+		installLoans(root, dataDir, loanDraft(), loanCurrent());
+		const before = readFileSync(join(dataDir, "permissions.json"), "utf8");
+		const { grants: _unread, ...unread } = loanCurrent();
+		installLoans(root, dataDir, loanDraft(null), unread);
+		assert.equal(readFileSync(join(dataDir, "permissions.json"), "utf8"), before);
+	});
+	withLoanRoot((root, dataDir) => {
+		const unused = setLoan(buildRecommendedDraft({ detected: [claude, agy], roles: {} }), POOL_ID, OPENAI_REF);
+		const bare = { ...unused, roles: {} };
+		installLoans(root, dataDir, bare, loanCurrent());
+		assert.equal(existsSync(join(dataDir, "permissions.json")), false);
+	});
+});
+
+test("S7: an unusable permissions.json is reported as grantsError and the rest of the install still happens", () => {
+	withLoanRoot((root, dataDir) => {
+		mkdirSync(dataDir, { recursive: true });
+		writeFileSync(join(dataDir, "permissions.json"), "not json");
+		const result = installLoans(root, dataDir, loanDraft(), loanCurrent());
+		assert.equal(result.ok, true);
+		assert.match(result.grantsError ?? "", /permissions\.json/);
+		assert.equal(readFileSync(join(dataDir, "permissions.json"), "utf8"), "not json");
+		assert.ok(existsSync(join(root, "pools.json")));
+	});
+});
+
+test("S7: the install snapshot covers permissions.json like pools.json, and Undo restores or removes it", () => {
+	withLoanRoot((root, dataDir) => {
+		assert.deepEqual(installerSnapshotFiles(root, dataDir, join(root, "profiles.json")).map(f => f.slice(root.length + 1)), ["pools.json", "integrations.json", "profiles.json", join("data", "permissions.json")]);
+		const files = installerSnapshotFiles(root, dataDir, join(root, "profiles.json"));
+		const snapshot = snapshotForInstall(files, nodeInstallFs, new Date(2026, 10, 11, 12, 0, 0));
+		installLoans(root, dataDir, loanDraft(), loanCurrent());
+		assert.ok(existsSync(join(dataDir, "permissions.json")));
+		assert.ok(snapshot.created.includes(join(dataDir, "permissions.json")));
+		undoInstall(snapshot, nodeInstallFs);
+		assert.equal(existsSync(join(dataDir, "permissions.json")), false);
+	});
+});

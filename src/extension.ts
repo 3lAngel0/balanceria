@@ -9,7 +9,7 @@ import { CONTENT_X, CONTENT_Y, emphasize, hitTest, layoutButtons, sameTarget, ta
 import { applyAdvisorReport, applyStepper, initStepper, type StepperCurrent } from "./setup-stepper.ts";
 import { initScreen, renderStepper, stepperInput, type StepperEffect, type StepperEvent, type StepperTone, stepperThemeColor } from "./setup-stepper-view.ts";
 import type { InstallerAction } from "./installer-model.ts";
-import { nodeInstallFs, snapshotForInstall, undoInstall, type InstallSnapshot } from "./installer-plan.ts";
+import { installerSnapshotFiles, nodeInstallFs, snapshotForInstall, undoInstall, type InstallSnapshot } from "./installer-plan.ts";
 import { canonicalKey as installerCanonicalKey, hitInstaller, installerKey, renderInstaller, type InstallerHit } from "./installer-tui.ts";
 import { channelPromptInput, initChannelPrompt, renderChannelPrompt, type InstallChannel } from "./installer-channel.ts";
 import {
@@ -2017,16 +2017,17 @@ export default function aiBalancer(pi: ExtensionAPI) {
 		detect: () => detectProviders(ctx),
 		install: (draft, current) => {
 			// Each install keeps its own copies (never overwriting an older one); applyStepper's plain `.bak` is shared with other setup flows and is not reported.
-			const snapshot = snapshotForInstall([join(ROOT, "pools.json"), join(ROOT, "integrations.json"), DEFAULT_PROFILES_PATH], nodeInstallFs);
+			const snapshot = snapshotForInstall(installerSnapshotFiles(ROOT, DATA_DIR, DEFAULT_PROFILES_PATH), nodeInstallFs);
 			installerSnapshots.push(snapshot);
 			const result = applyStepper(draft, {
 				root: ROOT,
+				dataDir: DATA_DIR,
 				current,
 				profilesPath: DEFAULT_PROFILES_PATH,
 				writeConfig: writeConfigSafely,
 				writeProfiles: (name, roles, workflow) => saveProfileRoles(DEFAULT_PROFILES_PATH, name, roles, (provider, model) => Boolean(ctx.modelRegistry.find(provider, model)), workflow),
 			});
-			return result.ok ? { ok: true, written: result.written, backups: snapshot.backups, profilesError: result.profilesError } : { ok: false, error: result.error ?? "", backups: snapshot.backups };
+			return result.ok ? { ok: true, written: result.written, backups: snapshot.backups, profilesError: result.profilesError, grantsError: result.grantsError } : { ok: false, error: result.error ?? "", backups: snapshot.backups };
 		},
 		undo: backups => {
 			// The install's own record knows which files it created; a list without a record (older copies) still restores what it names.
@@ -2047,7 +2048,16 @@ export default function aiBalancer(pi: ExtensionAPI) {
 			}
 		};
 		const store = loadProfilesStore();
-		const current: StepperCurrent = { pools: readJson("pools.json"), integrations: readJson("integrations.json"), profiles: store };
+		let grants: StepperCurrent["grants"];
+		try {
+			const loaded = loadPermissions(DATA_DIR);
+			// An unusable file reads as no grants: leave it alone rather than overwrite loans the installer never saw.
+			grants = loaded.error ? undefined : loaded.grants;
+		} catch {
+			// An unreadable grants file leaves the installer's loans untouched.
+			grants = undefined;
+		}
+		const current: StepperCurrent = { pools: readJson("pools.json"), integrations: readJson("integrations.json"), profiles: store, grants };
 		return createInstallerSession({ detected: detectProviders(ctx), current, workflow: store?.workflow?.[store.active ?? ""] }, installerHost(ctx));
 	};
 

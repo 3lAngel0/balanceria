@@ -328,7 +328,7 @@ Yes. Run `/installer`, go to **Backups**, choose **+ Create another backup** and
 3. **Strategy**: choose **In order** (`waterfall`).
 4. In **Agent tasks**, assign the new backup to the roles that should use it. A backup no role uses does nothing.
 
-The alternative is a **loan**: keep the pool Claude-only and grant a temporary route to another model while the pool is exhausted (`/balancer loans`, `/balancer permissions`). With an `auto` grant it switches without asking and returns when the window resets. Loans only apply to roles that point at a pool.
+The alternative is a **loan**: keep the pool Claude-only and grant a temporary route to another model while the pool is exhausted (`/balancer loans`, `/balancer permissions`). With an `auto` grant it switches without asking and returns when the window resets. Loans only apply to roles that point at a pool. You can set one up without typing commands: `/installer` → Backups → **Automatic loans** (key `a`) lets you pick, for each backup, the model its tasks borrow when it runs out (for example a Claude backup borrowing an OpenAI model). The installer saves it as an `auto` grant for every task that uses that backup, valid for one year (install again to renew it), and leaves any other grant untouched.
 
 ### Why does the backup list show only Claude models when I have OpenAI?
 
