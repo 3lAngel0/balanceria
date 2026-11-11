@@ -105,7 +105,8 @@ function controlRows(control: InstallerControl, cursor: number, width: number, m
 			control.items.forEach((item, i) => {
 				const hit: InstallerAction = { type: "toggle", index: i };
 				const detailHit: InstallerAction = control.openable ? { type: "open", index: i } : hit;
-				rows.push({ item: i, text: `${pointer(i === cursor)} ${item.checked ? "[x]" : "[ ]"} ${item.label}`, hits: [{ start: 0, end: width, action: hit }] });
+				const assigned = item.assigned ? `  ${pixelText("sky", `→ ${item.assigned}`, mode)}` : "";
+				rows.push({ item: i, text: `${pointer(i === cursor)} ${item.checked ? "[x]" : "[ ]"} ${item.label}${assigned}`, hits: [{ start: 0, end: width, action: hit }] });
 				if (item.detail) details(i, wrap(item.detail, Math.max(10, width - INDENT.length)), detailHit);
 				if (item.warning) details(i, wrap(`⚠ ${item.warning}`, Math.max(10, width - INDENT.length)), detailHit, "gold");
 			});

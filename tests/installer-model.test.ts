@@ -278,10 +278,12 @@ test("tasks: every task has a plain name, what it does, how much it uses and a r
 
 test("tasks: every row shows the current model and the recommendation in plain names", () => {
 	let s = customAt("tasks");
-	const rows = () => (installerScreen(s).control as { items: { detail: string }[] }).items;
+	const rows = () => (installerScreen(s).control as { items: { detail: string; assigned?: string }[] }).items;
 	assert.ok(rows().every(i => i.detail.includes("Now: not assigned · Recommended: ")));
+	assert.ok(rows().every(i => i.assigned === "not assigned"));
 	s = act(s, press("assign-recommended")).state;
 	assert.ok(rows().every(i => !i.detail.includes("not assigned")));
+	assert.ok(rows().every(i => i.assigned && i.assigned !== "not assigned"));
 });
 
 test("tasks: Space uses the recommendation even when the task already has another model", () => {

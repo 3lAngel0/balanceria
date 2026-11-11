@@ -99,7 +99,18 @@ input[type="checkbox"], input[type="radio"] {
 .opt.selected, .opt:has(input:checked) { border-color: var(--accent); }
 .opt.cursor { outline: 2px dotted var(--accent); outline-offset: 2px; }
 .opt .txt { flex: 1; min-width: 0; }
-.opt .txt b { display: block; }
+.opt .txt b { display: inline-block; }
+.opt .item-header { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 2px; }
+.opt .badge-assigned {
+	display: inline-block;
+	background: var(--bg);
+	border: 2px solid var(--accent);
+	color: var(--accent);
+	font-size: 0.8em;
+	padding: 1px 6px;
+	font-weight: 700;
+	letter-spacing: 0.5px;
+}
 .opt .ord { display: flex; gap: 4px; align-items: center; }
 .pos { color: var(--dim); font-size: 0.85em; }
 .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
@@ -690,8 +701,15 @@ export function installerPageScript(): string {
 					opt.appendChild(input);
 
 					var txt = el("span", { class: "txt" });
-					txt.appendChild(el("b", { text: c.label }));
-					if (c.description) {
+					var topRow = el("div", { class: "item-header" });
+					topRow.appendChild(el("b", { text: c.label }));
+					if (c.assigned) {
+						topRow.appendChild(el("span", { class: "badge-assigned", text: "→ " + c.assigned }));
+					}
+					txt.appendChild(topRow);
+					if (c.detail) {
+						txt.appendChild(el("span", { class: "small dim", text: c.detail }));
+					} else if (c.description) {
 						txt.appendChild(el("span", { class: "small dim", text: c.description }));
 					}
 					opt.appendChild(txt);
@@ -703,7 +721,7 @@ export function installerPageScript(): string {
 						opt.appendChild(ord);
 					}
 
-					if (c.openable) {
+					if (ctrl.openable || c.openable) {
 						var openBtn = el("button", { type: "button", class: "btn-small", text: view.text.change });
 						openBtn.addEventListener("click", function(ev) {
 							ev.stopPropagation();

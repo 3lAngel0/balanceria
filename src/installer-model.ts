@@ -153,6 +153,7 @@ export interface ChecklistItem {
 	checked: boolean;
 	recommended?: boolean;
 	warning?: string;
+	assigned?: string;
 }
 export type InstallerControl =
 	| { kind: "choice"; items: ChoiceItem[]; selected: number }
@@ -551,6 +552,7 @@ function tasksContent(state: InstallerState): Content {
 	if (state.taskPicker) {
 		const role = state.taskPicker.role;
 		const rec = recommended.get(role)?.recommendedModel;
+		const now = draft.roles[role]?.model;
 		return {
 			title: t("installer.tasks.title"),
 			body: [t("installer.tasks.pickerIntro", { task: roleName(role) })],
@@ -559,7 +561,7 @@ function tasksContent(state: InstallerState): Content {
 				selected: Math.max(0, Math.min(state.cursor, pickerTargets(draft).length - 1)),
 				items: pickerTargets(draft).map(target => ({
 					id: target,
-					label: targetLabel(target, draft.detected),
+					label: targetLabel(target, draft.detected) + (target === now ? ` [${t("installer.tasks.current")}]` : ""),
 					description: t(target.startsWith("pool/") ? "installer.tasks.backupDesc" : "installer.tasks.directDesc"),
 					...(target === rec ? { recommended: true } : {}),
 				})),
@@ -577,15 +579,18 @@ function tasksContent(state: InstallerState): Content {
 			items: ROLE_CATALOG.map(entry => {
 				const rec = recommended.get(entry.role);
 				const now = draft.roles[entry.role]?.model;
+				const assigned = now && now !== UNASSIGNED ? targetLabel(now, draft.detected) : t("installer.tasks.notAssigned");
+				const recModel = rec ? targetLabel(rec.recommendedModel, draft.detected) : "-";
 				return {
 					id: entry.role,
 					label: roleName(entry.role),
+					assigned,
 					detail: [
 						t(`installer.role.${entry.role}.does`),
 						t("installer.tasks.uses", { level: t(`installer.consumption.${entry.category}`) }),
 						t("installer.tasks.state", {
-							now: now && now !== UNASSIGNED ? targetLabel(now, draft.detected) : t("installer.tasks.notAssigned"),
-							model: rec ? targetLabel(rec.recommendedModel, draft.detected) : "-",
+							now: assigned,
+							model: recModel,
 						}),
 					].join(" "),
 					checked: Boolean(rec) && now === rec!.recommendedModel,
