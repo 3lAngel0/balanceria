@@ -37,6 +37,14 @@ function parseCandidate(ref: unknown): Candidate | undefined {
 	return { provider, model, quotaKey: quotaKeyFor(provider, model) };
 }
 
+/** The global last-resort model of pools.json (`lastResort: "provider/model"`), used when a whole pool is spent. */
+export function parseLastResort(config: unknown): Candidate | undefined {
+	if (!config || typeof config !== "object") return undefined;
+	const ref = (config as { lastResort?: unknown }).lastResort;
+	if (typeof ref !== "string" || ref.startsWith(`${POOL_PROVIDER}/`)) return undefined;
+	return parseCandidate(ref);
+}
+
 export function parsePools(config: unknown): Pool[] {
 	if (!config || typeof config !== "object" || !Array.isArray((config as { pools?: unknown }).pools)) return [];
 	const pools: Pool[] = [];
@@ -130,16 +138,16 @@ export function ignoredRuleWarnings(config: unknown): string[] {
 	});
 }
 
-const poolsCache = new Map<string, { mtime: number; data: { pools: Pool[]; warnings: string[] } }>();
+const poolsCache = new Map<string, { mtime: number; data: { pools: Pool[]; warnings: string[]; lastResort?: Candidate } }>();
 
-export function getLivePools(root = ROOT): { pools: Pool[]; warnings: string[] } {
+export function getLivePools(root = ROOT): { pools: Pool[]; warnings: string[]; lastResort?: Candidate } {
 	try {
 		const filePath = join(root, "pools.json");
 		const mtime = statSync(filePath).mtimeMs;
 		const hit = poolsCache.get(filePath);
 		if (!hit || hit.mtime !== mtime) {
 			const config = JSON.parse(readFileSync(filePath, "utf8"));
-			const data = { pools: parsePools(config), warnings: ignoredRuleWarnings(config) };
+			const data = { pools: parsePools(config), warnings: ignoredRuleWarnings(config), lastResort: parseLastResort(config) };
 			poolsCache.set(filePath, { mtime, data });
 			return data;
 		}

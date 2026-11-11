@@ -440,7 +440,7 @@ export default function aiBalancer(pi: ExtensionAPI) {
 			maxTokens: 65_536,
 			async route(request, ctx) {
 				const now = Date.now();
-				const { pools: currentPools } = getLivePools();
+				const { pools: currentPools, lastResort } = getLivePools();
 				for (const p of currentPools) registerPool(p);
 				const currentPool = currentPools.find(p => p.id === pool.id) ?? pool;
 				// A stale context or an unreadable journal never blocks the request.
@@ -467,6 +467,7 @@ export default function aiBalancer(pi: ExtensionAPI) {
 					processStartedAt,
 					loans,
 					contextTokens: current?.contextTokens ?? null,
+					lastResort,
 					permissions: () => ({
 						grants: loadPermissions(DATA_DIR).grants,
 						profile: loadProfilesStore()?.active,
@@ -576,7 +577,8 @@ export default function aiBalancer(pi: ExtensionAPI) {
 					const previous = lastRouted.get(pool.id);
 					lastRouted.set(pool.id, targetRef);
 					record({ type: "route", ts: Date.now(), pool: pool.id, provider: choice.provider, model: choice.model, reason: request.reason });
-					if (previous && ctx.hasUI) ctx.ui.notify(`ai-balancer: pool/${pool.id} ${previous} → ${targetRef}`, "info");
+					if (ctx.hasUI && trace.decidedBy === "last-resort") ctx.ui.notify(`ai-balancer: ${t("ops.lastResortRouted", { pool: pool.id, model: targetRef })}`, "warning");
+					else if (previous && ctx.hasUI) ctx.ui.notify(`ai-balancer: pool/${pool.id} ${previous} → ${targetRef}`, "info");
 					registerPoolUsage();
 					refreshStatus(ctx);
 				}
@@ -665,7 +667,8 @@ export default function aiBalancer(pi: ExtensionAPI) {
 			refreshStatus(ctx);
 			return;
 		}
-		const alternative = failoverAlternative(pool.candidates, key, state);
+		const { lastResort } = getLivePools();
+		const alternative = failoverAlternative(lastResort ? [...pool.candidates, lastResort] : pool.candidates, key, state);
 		if (!alternative) {
 			circuitBreaker.checkAndTrip({
 				poolId: pool.id,

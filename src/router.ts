@@ -39,6 +39,8 @@ export interface RouteInput {
 	contextTokens?: number | null;
 	/** API list prices, for `pick: lowest-cost`; without them that pick behaves as `highest-quota`. */
 	prices?: PriceTable;
+	/** Model used when every candidate of the pool is spent, before the reopens-first fallback. */
+	lastResort?: Candidate;
 }
 
 // One block of a pool's rule pipeline (docs/design/control-plane.md §6), run in
@@ -59,10 +61,10 @@ export function defaultRules(strategy: RoutingStrategy | undefined): RuleBlock[]
 }
 
 /** The rule that settled a route; names match the rule pipeline of docs/design/control-plane.md. */
-export type DecidedBy = "sticky" | "prefer-for-role" | "prefer-for-context" | "waterfall" | "direct" | "highest-quota" | "lowest-cost" | "fallback" | "loan";
+export type DecidedBy = "sticky" | "prefer-for-role" | "prefer-for-context" | "waterfall" | "direct" | "highest-quota" | "lowest-cost" | "fallback" | "last-resort" | "loan";
 
 export interface TraceStep {
-	rule: "sticky" | "available" | "prefer-for-role" | "prefer-for-context" | "pick" | "fallback" | "loan";
+	rule: "sticky" | "available" | "prefer-for-role" | "prefer-for-context" | "pick" | "fallback" | "last-resort" | "loan";
 	/** "chosen", "skipped", or for `available` the count, e.g. "2 of 3". */
 	result: string;
 	why: string;
@@ -204,6 +206,13 @@ export function routeWithTrace(input: RouteInput): { candidate: Candidate; trace
 		return done(bestCandidate, "highest-quota");
 	}
 	countAvailable();
+
+	// Every window is spent: the configured last-resort model answers while it can.
+	const lastResort = input.lastResort;
+	if (lastResort && available(lastResort) && !candidates.some(candidate => candidate.quotaKey === lastResort.quotaKey && candidate.model === lastResort.model)) {
+		steps.push({ rule: "last-resort", result: "chosen", why: `every window is spent; ${label(lastResort)} is the last-resort model` });
+		return done(lastResort, "last-resort");
+	}
 
 	// Every window is spent: pick the one that reopens first, so the request
 	// fails with that provider's own message instead of a made-up one.

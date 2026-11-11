@@ -34,6 +34,8 @@ export interface RouteWithLoansInput {
 	/** Lazy: read only when preferredSpent holds, so ordinary requests read no extra files. */
 	permissions: () => { grants: Grant[]; profile: string | undefined };
 	policy?: SwitchPolicy;
+	/** Global last-resort model, tried when every candidate of the routed pool is spent. */
+	lastResort?: Candidate;
 }
 
 export interface RouteWithLoansResult {
@@ -95,6 +97,7 @@ export function routeWithLoans(input: RouteWithLoansInput): RouteWithLoansResult
 			role: input.role,
 			contextTokens: input.contextTokens,
 			prices: input.prices,
+			lastResort: input.lastResort,
 		});
 
 	const normal = routePool(input.pool);
