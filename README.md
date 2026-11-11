@@ -98,7 +98,7 @@ flowchart TD
 - 🛡️ **Failover Cost Containment**: When an expensive candidate (`input + output` > $15/M, such as Opus) fails, retries strictly filter for cheaper candidates first.
 - ⚡ **Circuit Breaker**: When all candidates in a pool are exhausted, the circuit breaker halts retries immediately, saves an emergency checkpoint to `data/circuit-breaker-checkpoint.json`, and alerts the user.
 - 📊 **Interactive TUI & Web Control Center** (boxed tables, pixel-art colors and light animation, and a plain-language Help box that `?` toggles; `NO_COLOR` and `AI_BALANCER_REDUCE_MOTION=1` are respected): Live status bar, side panel overlay (`Ctrl+Alt+B`), comprehensive 5-tab usage console (`Ctrl+Alt+U`), Heads-Up Display (`/hud`), and an authenticated local/LAN web dashboard (`/balancer serve`).
-- 🦫 **Conversational Setup Hub (TUI & Web `/installer`)**: 3-column interactive installer guided by an animated pixel-art Capybara mascot and balance scale. Features plain-language concept glossaries, granular backup routing strategies (`hybrid`, `waterfall`, `highest-quota`), single-flight guarded AI Deep Analysis, human narrative summaries, non-overwriting timestamped backups with exact undo, and strict web sandboxing.
+- 🦫 **Conversational Setup Hub (terminal & web, via `/balancer setup`)**: 3-column interactive installer guided by an animated pixel-art Capybara mascot and balance scale. Features plain-language concept glossaries, granular backup routing strategies (`hybrid`, `waterfall`, `highest-quota`), single-flight guarded AI Deep Analysis, human narrative summaries, non-overwriting timestamped backups with exact undo, and strict web sandboxing.
 - 🔒 **100% Offline & Private**: All data is stored strictly on your local disk in `data/`. No external telemetry, no remote tracker, and no stored API keys. See [Security and Privacy](docs/SECURITY-AND-PRIVACY.md).
 
 ---
@@ -169,7 +169,7 @@ Launch the configuration hub to auto-detect installed providers, configure pools
 /balancer setup
 ```
 
-`/balancer setup` runs a conversational, 3-column setup installer available in both the terminal console (TUI) and via a local web browser at `/installer`:
+`/balancer setup` runs a conversational, 3-column setup installer available in both the terminal console (TUI) and in a local web browser (choose **Install via web**; the page opens at `http://127.0.0.1:8787/installer?token=…`):
 
 - **3-Column Conversational Layout**:
   - **Left rail**: Structured steps list with status icons (`✓` done, `●` current, `○` todo) and step progress indicator ("Step N of M").
@@ -207,14 +207,14 @@ Launch the configuration hub to auto-detect installed providers, configure pools
   - **Per-install timestamped copies**: Saves distinct timestamped copies (`<file>.bak-installer-YYYYMMDDHHMMSS[-n]`) without overwriting prior `.bak` files.
   - **Exact Undo ("Undo everything")**: Restores the exact state prior to that specific installation and removes any newly created files.
 - **Web Installer Security**:
-  - Operates strictly under the web server's security sandbox at `/installer`: active only while an installer is running, protected by session token, enforces loopback (`127.0.0.1`) or HTTPS (plain-HTTP LAN changes are refused), and locked down by a strict Content Security Policy (CSP with no inline styles, no `eval`, and no `innerHTML`).
+  - Operates strictly under the web server's security sandbox for the installer page: active only while an installer is running, protected by session token, enforces loopback (`127.0.0.1`) or HTTPS (plain-HTTP LAN changes are refused), and locked down by a strict Content Security Policy (CSP with no inline styles, no `eval`, and no `innerHTML`).
 
 The step-by-step detail is in the [guide](docs/guide.md#10-installation--interactive-setup-hub).
 
 **How setup starts.** `/balancer setup` first asks **Select language** (English / Español): `Enter` applies it to this run only, `P` saves it permanently, and the whole interface, Help included, switches at once. Then it asks **Where do you want to install?**:
 
 - **Install via terminal**: the installer opens in the terminal.
-- **Install via web**: the terminal shows the steps to run it in a browser and waits. It starts the web server on `127.0.0.1:8787` (this computer only; a server that is already running is reused as you configured it), shows the link with the token and an **[Open in browser]** button when there is a desktop, and over SSH prints the exact tunnel command to run on your own computer plus the link to open afterwards. Then it shows "Waiting for you to finish the installation in the browser..." with **[Cancel]**; when the browser finishes, the terminal shows the same "Done" summary. Cancel stops the server if the installer started it. The `/installer` page exists only while an installer is running, needs the token, accepts changes only from the same origin, and refuses them over plain-HTTP LAN (only `127.0.0.1` or HTTPS).
+- **Install via web**: the terminal shows the steps to run it in a browser and waits. It starts the web server on `127.0.0.1:8787` (this computer only; a server that is already running is reused as you configured it), shows the link with the token and an **[Open in browser]** button when there is a desktop, and over SSH prints the exact tunnel command to run on your own computer plus the link to open afterwards. Then it shows "Waiting for you to finish the installation in the browser..." with **[Cancel]**; when the browser finishes, the terminal shows the same "Done" summary. Cancel stops the server if the installer started it. The installer page exists only while an installer is running, needs the token, accepts changes only from the same origin, and refuses them over plain-HTTP LAN (only `127.0.0.1` or HTTPS).
 
 **Install types.** **Recommended** (preselected: finds your subscriptions, sets everything up and jumps to the Summary), **Custom** (each choice is explained and you decide: subscriptions, backups, agent tasks and main agent) or **Advanced** (the technical stepper, same as `setup --skip`). If ai-balancer is already installed, the first screen offers **Modify** (Custom with your current setup loaded), **Repair** (finds agent tasks that point to backups or models that no longer exist and proposes fixes) or **Start from scratch** (saves `.bak` copies and sets the recommended configuration again).
 

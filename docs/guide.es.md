@@ -501,7 +501,7 @@ gentle-shell install <path-to-repo>
 
 Al ejecutar `/balancer setup` se inicia el centro conversacional de configuración e instalación. El asistente detecta automáticamente los proveedores de IA del sistema, estructura pools virtuales de modelos con estrategias de failover a medida y optimiza la asignación de roles de agentes a través de dos canales unificados:
 - **Consola de terminal (TUI)**: Funciona directamente en su terminal con navegación por teclado y soporte de ratón en pantalla completa (`TuiAltScreen`).
-- **Instalador web (`/installer`)**: Funciona en cualquier navegador de escritorio o móvil mediante un servidor en loopback local o túnel SSH seguro.
+- **Instalador web** (`/balancer setup` → **Instalación vía web**; página en `http://127.0.0.1:8787/installer?token=…`): Funciona en cualquier navegador de escritorio o móvil mediante un servidor en loopback local o túnel SSH seguro.
 
 Ambos canales ejecutan exactamente sobre el mismo modelo de estado y motor de planificación, lo que garantiza decisiones, textos, recomendaciones y validaciones idénticas.
 
@@ -625,9 +625,9 @@ El instalador garantiza una configuración atómica segura y cero pérdida de da
   - En la pantalla de "Listo", la acción **[Deshacer todo]** restaura de inmediato los archivos exactos previos a esa instalación y elimina de forma limpia cualquier archivo nuevo que se haya creado. Las copias de respaldo previas se conservan para auditoría.
 
 #### 8. Seguridad y aislamiento del instalador web
-Al ejecutar la instalación vía web (`/balancer setup` -> Instalación vía web, o navegando a `/installer`):
+Al ejecutar la instalación vía web (`/balancer setup` → **Instalación vía web**; no existe un comando `/installer`, es solo la ruta de la página que enlaza la terminal):
 
-- **Ciclo de vida efímero**: La página `/installer` y sus endpoints (`GET /api/installer`, `POST /api/installer`) existen únicamente mientras hay una sesión de instalación activa.
+- **Ciclo de vida efímero**: La página del instalador (ruta `/installer`) y sus endpoints (`GET /api/installer`, `POST /api/installer`) existen únicamente mientras hay una sesión de instalación activa.
 - **Autenticación por token**: Toda petición exige el token criptográfico generado por el servidor.
 - **Política de seguridad de contenido estricta (CSP)**:
   - Prohíbe estilos inline (`style-src 'self'`).
