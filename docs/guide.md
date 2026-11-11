@@ -10,6 +10,7 @@ It is **not** limited to a single bridge: `ai-balancer` discovers, unifies, and 
 - **Claude Code CLI (`claude-code`)**: Claude 3.7 Sonnet.
 - **OpenCode Engine (`opencode`)**: opencode-code-v1.
 - **Local LLMs via Ollama (`ollama`)**: Qwen 2.5 Coder, Llama 3.2, DeepSeek Coder.
+- **Pi `/login` subscriptions** (`openai-codex` for ChatGPT Plus/Pro, `anthropic`, `github-copilot`, …): detected from their OAuth entry in `auth.json`.
 - **Direct Paid APIs**: Anthropic (`ANTHROPIC_API_KEY`) and Google Gemini (`GEMINI_API_KEY`).
 - **Any Pi Provider**: Any model reachable through Pi's Model Registry declared in `pools.json`.
 

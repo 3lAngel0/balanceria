@@ -35,6 +35,33 @@ export interface DetectOptions {
 	homeDir?: string;
 	env?: NodeJS.ProcessEnv | Record<string, string | undefined>;
 	execWhich?: (bin: string) => boolean;
+	/** Models Pi's registry knows for a provider; used for login subscriptions before the built-in list. */
+	modelsFor?: (provider: string) => string[];
+}
+
+/**
+ * Subscriptions Pi signs in to with `/login` (OAuth), stored in the agent's auth.json.
+ * The models are the fallback when Pi's registry is not at hand (Pi 1.5.2 catalog).
+ */
+const LOGIN_SUBSCRIPTIONS: Record<string, { label: string; models: string[] }> = {
+	"openai-codex": { label: "OpenAI ChatGPT Plus/Pro (login)", models: ["gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-sol", "gpt-6-astra", "gpt-6-luna", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"] },
+	anthropic: { label: "Claude Pro/Max (login)", models: ["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"] },
+	"github-copilot": { label: "GitHub Copilot (login)", models: ["claude-opus-5.5", "claude-sonnet-5.5", "gpt-6.1-sol", "gemini-4-argon"] },
+	"kimi-coding": { label: "Kimi Code (login)", models: ["k3.1-pro", "kimi-for-coding"] },
+};
+
+/** Provider ids with an OAuth (`/login`) credential in auth.json; anything unreadable counts as none. */
+export function readLoginProviders(authFile: string): string[] {
+	if (!existsSync(authFile)) return [];
+	try {
+		const parsed: unknown = JSON.parse(readFileSync(authFile, "utf8"));
+		if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return [];
+		return Object.entries(parsed as Record<string, unknown>)
+			.filter(([, value]) => typeof value === "object" && value !== null && (value as { type?: unknown }).type === "oauth")
+			.map(([id]) => id);
+	} catch {
+		return [];
+	}
 }
 
 export interface PoolConfig {
@@ -201,6 +228,12 @@ export function detectSystemProviders(options?: DetectOptions): DetectedProvider
 		}
 	});
 
+	const agentDir = resolveAgentDir({
+		agentDir: options?.agentDir,
+		env,
+		homeDir: home,
+	});
+
 	// Load packages from Pi agent settings.json
 	let packages: string[] = [];
 	if (options?.settings !== undefined) {
@@ -208,11 +241,6 @@ export function detectSystemProviders(options?: DetectOptions): DetectedProvider
 			packages = options.settings.packages;
 		}
 	} else {
-		const agentDir = resolveAgentDir({
-			agentDir: options?.agentDir,
-			env,
-			homeDir: home,
-		});
 		const settingsFile = options?.settingsPath ?? join(agentDir, "settings.json");
 		if (existsSync(settingsFile)) {
 			try {
@@ -331,8 +359,23 @@ export function detectSystemProviders(options?: DetectOptions): DetectedProvider
 		availableModels: ["qwen2.5-coder", "llama3.2"],
 	});
 
-	// 6. Direct APIs from environment
-	if (env.ANTHROPIC_API_KEY) {
+	// 6. Subscriptions signed in with Pi's /login (OAuth in auth.json)
+	const logins = readLoginProviders(join(agentDir, "auth.json"));
+	for (const id of logins) {
+		const known = LOGIN_SUBSCRIPTIONS[id];
+		const fromRegistry = options?.modelsFor?.(id) ?? [];
+		providers.push({
+			id,
+			label: known?.label ?? `${id} (login)`,
+			kind: "subscription",
+			detected: true,
+			source: "Pi /login (auth.json)",
+			availableModels: fromRegistry.length > 0 ? fromRegistry : (known?.models ?? []),
+		});
+	}
+
+	// 7. Direct APIs from environment (a /login of the same provider wins)
+	if (env.ANTHROPIC_API_KEY && !logins.includes("anthropic")) {
 		providers.push({
 			id: "anthropic",
 			label: "Anthropic API",
@@ -342,7 +385,7 @@ export function detectSystemProviders(options?: DetectOptions): DetectedProvider
 			availableModels: ["claude-3-5-sonnet-20241022", "claude-3-5-haiku-20241022"],
 		});
 	}
-	if (env.GEMINI_API_KEY) {
+	if (env.GEMINI_API_KEY && !logins.includes("google")) {
 		providers.push({
 			id: "google",
 			label: "Gemini API",

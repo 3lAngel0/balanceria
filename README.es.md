@@ -139,6 +139,7 @@ Supervise en tiempo real el consumo de tokens, el estado de las cuotas por prove
 | **Claude Code CLI** | `claude-code` | Suscripción | Binario CLI `claude` o paquete `claude-code` |
 | **OpenCode Engine** | `opencode` | Suscripción | Binario CLI `opencode` o paquete `opencode` |
 | **Ollama (LLMs locales)** | `ollama` | Local | Binario CLI `ollama` en `PATH` |
+| **Suscripciones con `/login` de Pi** (ChatGPT Plus/Pro, Claude Pro/Max, GitHub Copilot, Kimi…) | `openai-codex`, `anthropic`, `github-copilot`, … | Suscripción | Una entrada OAuth en el `auth.json` del agente (ejecutar `/login` en Pi); los modelos salen del registro de Pi |
 | **Anthropic API** | `anthropic` | API paga | Variable de entorno `ANTHROPIC_API_KEY` |
 | **Google Gemini API** | `google` | API paga | Variable de entorno `GEMINI_API_KEY` |
 | **Proveedores personalizados de Pi** | *(cualquiera)* | Cualquiera | Cualquier modelo registrado en el catálogo de modelos de Pi declarado en `pools.json` |

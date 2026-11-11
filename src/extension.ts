@@ -1113,6 +1113,10 @@ export default function aiBalancer(pi: ExtensionAPI) {
 	 * The Control Center overlay. With `canPickAction` (the slash command, which can run what is picked) `/` closes it
 	 * and resolves with "menu"; the shortcut has no command context, so there `/` only leaves a hint.
 	 */
+	/** Providers on this machine, with login subscriptions listing the models Pi's own registry knows for them. */
+	const detectProviders = (ctx: ExtensionContext): DetectedProvider[] =>
+		detectSystemProviders({ modelsFor: provider => ctx.modelRegistry.getAll().filter(model => model.provider === provider).map(model => model.id) });
+
 	const showControlCenter = (ctx: ExtensionContext, initialTab: ControlCenterTab, canPickAction: boolean): Promise<string | undefined> => {
 		let tab: ControlCenterTab = initialTab;
 		let pickedAction: string | undefined;
@@ -1135,7 +1139,7 @@ export default function aiBalancer(pi: ExtensionAPI) {
 		let offset = 0;
 		let followSelected = false;
 
-		const cachedProviders = detectSystemProviders();
+		const cachedProviders = detectProviders(ctx);
 		const allCandidateOptions = [
 			...new Set(
 				cachedProviders
@@ -2020,7 +2024,7 @@ export default function aiBalancer(pi: ExtensionAPI) {
 	/** The effects of the installer (scan, install, analysis, undo) on this machine; the terminal and the web channel run the same ones. */
 	const installerSnapshots: InstallSnapshot[] = [];
 	const installerHost = (ctx: ExtensionContext): InstallerHostDeps => ({
-		detect: detectSystemProviders,
+		detect: () => detectProviders(ctx),
 		install: (draft, current) => {
 			// Each install keeps its own copies (never overwriting an older one); applyStepper's plain `.bak` is shared with other setup flows and is not reported.
 			const snapshot = snapshotForInstall([join(ROOT, "pools.json"), join(ROOT, "integrations.json"), DEFAULT_PROFILES_PATH], nodeInstallFs);
@@ -2054,7 +2058,7 @@ export default function aiBalancer(pi: ExtensionAPI) {
 		};
 		const store = loadProfilesStore();
 		const current: StepperCurrent = { pools: readJson("pools.json"), integrations: readJson("integrations.json"), profiles: store };
-		return createInstallerSession({ detected: detectSystemProviders(), current, workflow: store?.workflow?.[store.active ?? ""] }, installerHost(ctx));
+		return createInstallerSession({ detected: detectProviders(ctx), current, workflow: store?.workflow?.[store.active ?? ""] }, installerHost(ctx));
 	};
 
 	/** Where the installer leaves the user once it ends. */
@@ -2278,7 +2282,7 @@ export default function aiBalancer(pi: ExtensionAPI) {
 	};
 
 	const openSetupStepper = async (ctx: ExtensionContext): Promise<void> => {
-		const detected = detectSystemProviders();
+		const detected = detectProviders(ctx);
 		if (!detected.some(p => p.detected && p.kind === "subscription")) {
 			ctx.ui.notify(`ai-balancer: ${t("setup.stepper.noProviders")}`, "warning");
 			return;

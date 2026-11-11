@@ -139,6 +139,7 @@ Monitor live token throughput, model health, quota windows, and real-time routin
 | **Claude Code CLI** | `claude-code` | Subscription | CLI binary `claude` or package `claude-code` |
 | **OpenCode Engine** | `opencode` | Subscription | CLI binary `opencode` or package `opencode` |
 | **Ollama (Local LLMs)** | `ollama` | Local | CLI binary `ollama` in `PATH` |
+| **Pi `/login` subscriptions** (ChatGPT Plus/Pro, Claude Pro/Max, GitHub Copilot, Kimi…) | `openai-codex`, `anthropic`, `github-copilot`, … | Subscription | An OAuth entry in the agent's `auth.json` (run `/login` in Pi); models come from Pi's registry |
 | **Anthropic API** | `anthropic` | Paid API | Environment variable `ANTHROPIC_API_KEY` |
 | **Google Gemini API** | `google` | Paid API | Environment variable `GEMINI_API_KEY` |
 | **Custom Pi Providers** | *(any)* | Any | Any model declared in Pi's model registry placed in `pools.json` |
@@ -163,7 +164,7 @@ pi install git:github.com/3lAngel0/balanceria
 
 Pi checks for a new version each time it starts and shows "Package Updates Available". Update with
 `pi update git:github.com/3lAngel0/balanceria`; the next session shows what changed (see [CHANGELOG.md](CHANGELOG.md)).
-Installing with a ref (`@v0.3.1`) pins that version and turns the check off.
+Installing with a ref (`@v0.3.2`) pins that version and turns the check off.
 
 ### 2. Interactive Setup Hub
 

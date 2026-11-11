@@ -3,6 +3,12 @@
 Pi shows the entries newer than your installed version after `pi update`.
 Each release bumps `version` in `package.json` and adds a `## [x.y.z]` heading here.
 
+## [0.3.2] - 2026-11-11
+
+### Fixed
+
+- The console and web installers now list subscriptions signed in with Pi's `/login` (ChatGPT Plus/Pro as `openai-codex`, Claude Pro/Max, GitHub Copilot, Kimi…). They are read from the OAuth entries in the agent's `auth.json`, with models from Pi's registry.
+
 ## [0.3.1] - 2026-11-11
 
 ### Fixed

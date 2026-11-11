@@ -78,6 +78,68 @@ test("detectSystemProviders reads settings.json packages fixture correctly", () 
 	assert.equal(agy.detected, true, "antigravity should be detected via settings package");
 });
 
+function withAuthFixture(auth: unknown, run: (agentDir: string) => void): void {
+	const agentDir = mkdtempSync(join(tmpdir(), "auth-fixture-"));
+	try {
+		if (auth !== undefined) writeFileSync(join(agentDir, "auth.json"), typeof auth === "string" ? auth : JSON.stringify(auth));
+		run(agentDir);
+	} finally {
+		rmSync(agentDir, { recursive: true, force: true });
+	}
+}
+
+test("detectSystemProviders reports an OpenAI subscription logged in with /login (auth.json oauth)", () => {
+	withAuthFixture({ "openai-codex": { type: "oauth", access: "x", refresh: "y", expires: 0 } }, agentDir => {
+		const providers = detectSystemProviders({ settings: { packages: [] }, agentDir, execWhich: () => false, env: {}, homeDir: "/nonexistent-dir" });
+		const codex = providers.find(p => p.id === "openai-codex");
+		assert.ok(codex, "openai-codex should be listed");
+		assert.equal(codex.detected, true);
+		assert.equal(codex.kind, "subscription");
+		assert.match(codex.label, /OpenAI/);
+		assert.match(codex.source, /login/i);
+		assert.ok(codex.availableModels.length > 0, "login subscription needs models for the pools");
+		assert.ok(codex.availableModels.every(m => !m.includes("/") && m !== ""));
+	});
+});
+
+test("detectSystemProviders reports every oauth login entry and prefers registry models when given", () => {
+	const auth = {
+		"openai-codex": { type: "oauth" },
+		"github-copilot": { type: "oauth" },
+		"some-new-login": { type: "oauth" },
+		openai: { type: "api_key", key: "sk-test" },
+	};
+	withAuthFixture(auth, agentDir => {
+		const providers = detectSystemProviders({
+			settings: { packages: [] }, agentDir, execWhich: () => false, env: {}, homeDir: "/nonexistent-dir",
+			modelsFor: provider => provider === "some-new-login" ? ["model-a"] : [],
+		});
+		const ids = providers.filter(p => p.detected && p.kind === "subscription").map(p => p.id).sort();
+		assert.deepEqual(ids, ["github-copilot", "openai-codex", "some-new-login"]);
+		assert.deepEqual(providers.find(p => p.id === "some-new-login")?.availableModels, ["model-a"]);
+		assert.ok((providers.find(p => p.id === "openai-codex")?.availableModels.length ?? 0) > 0, "falls back to the built-in list");
+		assert.equal(providers.some(p => p.id === "openai"), false, "an API key is not a login subscription");
+	});
+});
+
+test("detectSystemProviders: anthropic login wins over ANTHROPIC_API_KEY and is listed once", () => {
+	withAuthFixture({ anthropic: { type: "oauth" } }, agentDir => {
+		const providers = detectSystemProviders({ settings: { packages: [] }, agentDir, execWhich: () => false, env: { ANTHROPIC_API_KEY: "k" }, homeDir: "/nonexistent-dir" });
+		const anthropic = providers.filter(p => p.id === "anthropic");
+		assert.equal(anthropic.length, 1);
+		assert.equal(anthropic[0].kind, "subscription");
+	});
+});
+
+test("detectSystemProviders ignores a missing or malformed auth.json", () => {
+	for (const auth of [undefined, "{not json", "[]"]) {
+		withAuthFixture(auth, agentDir => {
+			const providers = detectSystemProviders({ settings: { packages: [] }, agentDir, execWhich: () => false, env: {}, homeDir: "/nonexistent-dir" });
+			assert.equal(providers.filter(p => p.detected).length, 0);
+		});
+	}
+});
+
 test("detectSystemProviders handles empty packages and no binaries", () => {
 	const providers = detectSystemProviders({
 		settings: { packages: [] },

@@ -10,6 +10,7 @@
 - **Claude Code CLI (`claude-code`)**: Claude 3.7 Sonnet.
 - **OpenCode Engine (`opencode`)**: opencode-code-v1.
 - **LLMs locales vía Ollama (`ollama`)**: Qwen 2.5 Coder, Llama 3.2, DeepSeek Coder.
+- **Suscripciones con `/login` de Pi** (`openai-codex` para ChatGPT Plus/Pro, `anthropic`, `github-copilot`, …): se detectan por su entrada OAuth en `auth.json`.
 - **APIs directas pagas**: Anthropic (`ANTHROPIC_API_KEY`) y Google Gemini (`GEMINI_API_KEY`).
 - **Cualquier proveedor de Pi**: Cualquier modelo accesible a través del Model Registry de Pi declarado en `pools.json`.
 
