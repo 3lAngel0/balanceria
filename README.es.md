@@ -258,6 +258,7 @@ Seleccione un pool directamente en el chat mediante `/model pool/claude-sonnet-5
 | `/balancer` | Menú interactivo con descripciones de comandos y atajos. |
 | `/balancer panel` o `Ctrl+Alt+B` | Muestra u oculta el panel lateral y el Control Center de 4 pestañas. |
 | `/balancer usage` o `Ctrl+Alt+U` | Abre la consola completa de uso en 5 pestañas (Now, Quotas, Days, Sessions, HUD). |
+| `/balancer quota` | Muestra un resumen compacto de la cuota en vivo (% usado por ventana y hora de reinicio). `--copy` / `-c` (o `quota copy`) lo copia al portapapeles; `--raw` / `-r` lo imprime como texto plano. |
 | `/balancer setup` | Abre el instalador: idioma y luego **Instalación vía terminal** o **Instalación vía web**. |
 | `/balancer setup --dummy` / `-d`, `/balancer dummy`, o `D` en el Centro de control | Abre el instalador en la terminal (primero el idioma, sin la pregunta terminal/web). |
 | `/balancer setup --skip` / `-s` | Va directo al stepper técnico (Providers → Estrategia → Roles → Confirmar), después del idioma. |
