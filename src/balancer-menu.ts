@@ -13,6 +13,7 @@ export function balancerMenu(): SelectItem[] {
 		{ value: "usage", label: t("menu.usage.label"), description: t("menu.usage.desc") },
 		{ value: "refresh", label: t("menu.refresh.label"), description: t("menu.refresh.desc") },
 		{ value: "setup", label: t("menu.setup.label"), description: t("menu.setup.desc") },
+		{ value: "setup --dummy", label: t("menu.setupDummy.label"), description: t("menu.setupDummy.desc") },
 		{ value: "setup classic", label: t("menu.setupClassic.label"), description: t("menu.setupClassic.desc") },
 		{ value: "report", label: t("menu.report.label"), description: t("menu.report.desc") },
 		{ value: "simulate", label: t("menu.simulate.label"), description: t("menu.simulate.desc") },
@@ -69,12 +70,13 @@ export type BalancerArgs =
 
 const TAB_COMMANDS: readonly ControlCenterTab[] = ["overview", "roles", "pools", "advisor"];
 
-const SIMPLE = new Set(["panel", "usage", "refresh", "setup", "setup classic", "report", "simulate", "switch-cost", "loans", "quota", "help"]);
+const SIMPLE = new Set(["panel", "usage", "refresh", "setup", "setup classic", "setup --dummy", "setup -d", "setup --skip", "setup -s", "report", "simulate", "switch-cost", "loans", "quota", "help"]);
 
 export function resolveBalancerArgs(args: string): BalancerArgs {
 	const command = args.trim();
 	if (command === "") return { kind: "overlay" };
-	if (command === "menu") return { kind: "menu" };
+	if (command === "menu" || command === "skip") return { kind: "menu" };
+	if (command === "dummy") return { kind: "command", command: "setup --dummy" };
 	const tab = TAB_COMMANDS.find(name => name === command);
 	if (tab) return { kind: "overlay", tab };
 	if (

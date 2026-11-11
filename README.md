@@ -98,6 +98,7 @@ flowchart TD
 - 🛡️ **Failover Cost Containment**: When an expensive candidate (`input + output` > $15/M, such as Opus) fails, retries strictly filter for cheaper candidates first.
 - ⚡ **Circuit Breaker**: When all candidates in a pool are exhausted, the circuit breaker halts retries immediately, saves an emergency checkpoint to `data/circuit-breaker-checkpoint.json`, and alerts the user.
 - 📊 **Interactive TUI & Web Control Center** (boxed tables, pixel-art colors and light animation, and a plain-language Help box that `?` toggles; `NO_COLOR` and `AI_BALANCER_REDUCE_MOTION=1` are respected): Live status bar, side panel overlay (`Ctrl+Alt+B`), comprehensive 5-tab usage console (`Ctrl+Alt+U`), Heads-Up Display (`/hud`), and an authenticated local/LAN web dashboard (`/balancer serve`).
+- 🦫 **Conversational Setup Hub (TUI & Web `/installer`)**: 3-column interactive installer guided by an animated pixel-art Capybara mascot and balance scale. Features plain-language concept glossaries, granular backup routing strategies (`hybrid`, `waterfall`, `highest-quota`), single-flight guarded AI Deep Analysis, human narrative summaries, non-overwriting timestamped backups with exact undo, and strict web sandboxing.
 - 🔒 **100% Offline & Private**: All data is stored strictly on your local disk in `data/`. No external telemetry, no remote tracker, and no stored API keys. See [Security and Privacy](docs/SECURITY-AND-PRIVACY.md).
 
 ---
@@ -160,7 +161,7 @@ Or install it as a standard Pi extension:
 pi install git:github.com/3lAngel0/balanceria
 ```
 
-### 2. Interactive Setup Wizard
+### 2. Interactive Setup Hub
 
 Launch the configuration hub to auto-detect installed providers, configure pools, and assign agent roles:
 
@@ -168,7 +169,65 @@ Launch the configuration hub to auto-detect installed providers, configure pools
 /balancer setup
 ```
 
-`/balancer setup` opens a four-step overlay: **Providers → Strategy → Roles → Confirm**. Each step explains what it decides, the last step shows a diff of exactly what will be written, and nothing changes until you press **Save** (**Discard** or `Esc` leaves every file as it is). Keys: `←/→` steps, `↑/↓` rows, `Space`/`Enter` toggle or cycle, `u`/`d` reorder candidates, `s` save. Mouse clicks and the wheel work in fullscreen terminals only; elsewhere the keys do the same. Without a UI it falls back to the classic wizard, which you can also run with `/balancer setup classic`. On start it asks **Select language** (English / Español): `Enter` applies it to this run only, `P` saves it permanently, and the whole interface, Help included, switches at once. On the Roles step, the **Orchestrator mode** row (`m`, or `Space`/`Enter`) sets `organic` or `full-delegation` for the active profile (Gentle Shell 4.7.0 `workflow.orchestratorMode`).
+`/balancer setup` runs a conversational, 3-column setup installer available in both the terminal console (TUI) and via a local web browser at `/installer`:
+
+- **3-Column Conversational Layout**:
+  - **Left rail**: Structured steps list with status icons (`✓` done, `●` current, `○` todo) and step progress indicator ("Step N of M").
+  - **Center column**: Conversational guide featuring a pixel-art Capybara mascot with an animated mechanical balance scale, a speech bubble explaining the step, stage area for controls and routing diagrams, closing notice ("*Nothing is applied until you confirm*"), and action buttons protected by a single-flight double-click guard.
+  - **Right rail**: Dedicated, always-visible detailed help panel showing "*What it is*", "*Purpose*", "*If you pick this*", technical names, and destination configuration files.
+- **Capybara Mascot & Balance Animations**:
+  - Poses react dynamically across 3 states: `idle` (default resting pose), `working` (active during detection scan, deep analysis, and installation), and `happy` (celebration upon completion on the Done screen).
+  - Procedural animations: mascot breathing, blinking eyes, and tilting balance pans.
+  - Accessibility-first: fully respects `AI_BALANCER_REDUCE_MOTION=1` and `prefers-reduced-motion: reduce`, freezing movement to a crisp static frame.
+- **Welcome Screen & Concept Glossary**:
+  - Comprehensive introduction explaining concepts in plain language before changing settings:
+    - **Subscription** (technical name: provider / `integrations.json`): AI plan you pay for or are signed into (e.g., Claude Pro, Google AI Pro).
+    - **Backup** (pool / `pools.json`): Group of subscriptions providing the same model for seamless rollover.
+    - **Agent task** (role / `profiles.json`): Subagent jobs (reading files, writing code, checking results) mapped to appropriate models.
+    - **Routing strategy** (`hybrid`, `waterfall`, `highest-quota`): Rules defining which subscription answers first.
+    - **Main agent mode** (`organic` vs `full-delegation`): Whether the main agent works directly or delegates all tasks.
+  - Clear overview of installer steps and GitHub community star link: [https://github.com/3lAngel0/balanceria](https://github.com/3lAngel0/balanceria).
+- **Backup Pipeline & Routing Strategies**:
+  - Full control over backup members, candidate priority ordering (`u`/`d`), and routing strategies:
+    - **Mixed (`hybrid`)**: Starts with the primary candidate, transitioning to one with more room when running low to preserve cache while avoiding exhaustion.
+    - **In order (`waterfall`)**: Strictly uses the primary candidate until exhausted before rolling over to the second.
+    - **Most room left (`highest-quota`)**: Dynamically queries quota headroom and selects the candidate with the highest remaining capacity.
+- **Agent Tasks & AI Deep Analysis ("Búsqueda profunda")**:
+  - Assign roles instantly with zero quota consumption via **Assign recommended**, or trigger **Deep analysis** (`Realizar búsqueda profunda`).
+  - Deep analysis consults an AI advisor model to evaluate task allocations against real model capabilities, reasoning benchmarks, and cost efficiency.
+  - Features live progress with an animated indeterminate bar and elapsed seconds counter.
+  - Single-flight concurrency lock prevents duplicate clicks or spending quota twice.
+  - Displays a confirmation banner upon completion showing duration in seconds, tokens used, and the subscription billed.
+- **Human-Readable Summary**:
+  - Plain-language narrative summarizing the configuration in everyday terms before writing anything to disk.
+  - Structured bulleted breakdown of subscriptions, backup pools, member priority chains, routing strategies, agent task mappings, and orchestrator mode.
+  - Reassuring closing notice ensuring full user agency before final confirmation.
+- **Installation Integrity & Non-Overwriting Backups**:
+  - **Backup preservation**: If an existing profile references `pool/<id>`, that backup pool is preserved in `pools.json` and never dropped.
+  - **Per-install timestamped copies**: Saves distinct timestamped copies (`<file>.bak-installer-YYYYMMDDHHMMSS[-n]`) without overwriting prior `.bak` files.
+  - **Exact Undo ("Undo everything")**: Restores the exact state prior to that specific installation and removes any newly created files.
+- **Web Installer Security**:
+  - Operates strictly under the web server's security sandbox at `/installer`: active only while an installer is running, protected by session token, enforces loopback (`127.0.0.1`) or HTTPS (plain-HTTP LAN changes are refused), and locked down by a strict Content Security Policy (CSP with no inline styles, no `eval`, and no `innerHTML`).
+
+The step-by-step detail is in the [guide](docs/guide.md#10-installation--interactive-setup-hub).
+
+**How setup starts.** `/balancer setup` first asks **Select language** (English / Español): `Enter` applies it to this run only, `P` saves it permanently, and the whole interface, Help included, switches at once. Then it asks **Where do you want to install?**:
+
+- **Install via terminal**: the installer opens in the terminal.
+- **Install via web**: the terminal shows the steps to run it in a browser and waits. It starts the web server on `127.0.0.1:8787` (this computer only; a server that is already running is reused as you configured it), shows the link with the token and an **[Open in browser]** button when there is a desktop, and over SSH prints the exact tunnel command to run on your own computer plus the link to open afterwards. Then it shows "Waiting for you to finish the installation in the browser..." with **[Cancel]**; when the browser finishes, the terminal shows the same "Done" summary. Cancel stops the server if the installer started it. The `/installer` page exists only while an installer is running, needs the token, accepts changes only from the same origin, and refuses them over plain-HTTP LAN (only `127.0.0.1` or HTTPS).
+
+**Install types.** **Recommended** (preselected: finds your subscriptions, sets everything up and jumps to the Summary), **Custom** (each choice is explained and you decide: subscriptions, backups, agent tasks and main agent) or **Advanced** (the technical stepper, same as `setup --skip`). If ai-balancer is already installed, the first screen offers **Modify** (Custom with your current setup loaded), **Repair** (finds agent tasks that point to backups or models that no longer exist and proposes fixes) or **Start from scratch** (saves `.bak` copies and sets the recommended configuration again).
+
+**Plain names.** The installer says *subscription* (technical name: provider), *backup* (pool), *agent task* (role), *how to choose which to use first* (strategy) and *main agent* (orchestrator mode). The technical names appear only in the `[?]` box and in Advanced.
+
+**Advanced (technical stepper).** A four-step overlay: **Providers → Strategy → Roles → Confirm**. Each step explains what it decides, the last step shows a diff of exactly what will be written, and nothing changes until you press **Save** (**Discard** or `Esc` leaves every file as it is). Keys: `←/→` steps, `↑/↓` rows, `Space`/`Enter` toggle or cycle, `u`/`d` reorder candidates, `s` save. Mouse clicks and the wheel work in fullscreen terminals only; elsewhere the keys do the same. Without a UI it falls back to the classic wizard, which you can also run with `/balancer setup classic`. On the Roles step, the **Orchestrator mode** row (`m`, or `Space`/`Enter`) sets `organic` or `full-delegation` for the active profile (Gentle Shell 4.7.0 `workflow.orchestratorMode`).
+
+**Shortcuts into setup.**
+
+- `/balancer setup --dummy` / `-d`, `/balancer dummy`, or `D` in the Control Center (`d` on the Overview tab): asks the language, then opens the installer in the terminal without the terminal/web question.
+- `/balancer setup --skip` / `-s`: asks the language, then goes straight to the technical stepper. `/balancer skip` opens the action menu directly.
+
+**Language.** Set it explicitly with `AI_BALANCER_LANG=es|en`. Priority: `AI_BALANCER_LANG` > `LC_ALL` > `LC_MESSAGES` > `LANG` > `LANGUAGE`; `/balancer lang es|en|auto` persists the choice in `~/.gentle-shell/agent/settings.json`.
 
 The classic wizard detects local providers, guides strategy selection (`hybrid` or `waterfall`), lets you customize candidate priorities, and provides an AI Setup Advisor (cost-safe; never recommends Opus) to optimize role assignments. Changes are written safely with automatic `.bak` backups.
 
@@ -200,7 +259,11 @@ Select a pool model directly in chat via `/model pool/claude-sonnet-5-5` or conf
 | `/balancer` | Opens the Control Center overlay (click or use the keys). `/balancer roles\|pools\|advisor` jumps to a tab; `/balancer menu` (or `/` inside the overlay) lists every action. |
 | `/balancer panel` or `Ctrl+Alt+B` | Toggle live sidebar overlay and 4-tab Control Center. |
 | `/balancer usage` or `Ctrl+Alt+U` | Open full 5-tab Usage Console (Now, Quotas, Days, Sessions, HUD). |
-| `/balancer setup` | Open the step-by-step setup overlay (Providers → Strategy → Roles → Confirm). `/balancer setup classic` runs the previous prompt-based wizard. |
+| `/balancer setup` | Open the installer: language, then **Install via terminal** or **Install via web**. |
+| `/balancer setup --dummy` / `-d`, `/balancer dummy`, or `D` in the Control Center | Open the installer in the terminal (language first, no terminal/web question). |
+| `/balancer setup --skip` / `-s` | Go straight to the technical stepper (Providers → Strategy → Roles → Confirm), after the language prompt. |
+| `/balancer skip` | Open the action menu directly. |
+| `/balancer setup classic` | Run the previous prompt-based wizard. |
 | `/balancer lang [es\|en\|auto]` | Inspect or switch active UI language without restarting. |
 | `/balancer help` | Short glossary: pool, candidate, loan, grant, circuit breaker, role, window pace, context re-sent. |
 | `/balancer serve [lan] [port]` | Start real-time authenticated web dashboard (supports LAN mode & TLS). |

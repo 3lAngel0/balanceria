@@ -5,6 +5,7 @@ import type { Integration } from "./integrations.ts";
 import { DEFAULT_ORCHESTRATOR_MODE, isOrchestratorMode, type OrchestratorMode, type ProfileConfig, type ProfileWorkflow } from "./profiles.ts";
 import type { RoutingStrategy } from "./router.ts";
 import { t } from "./i18n/index.ts";
+import { applyRecommendationsToProfile, recommendRolesHeuristic, type AdvisorReport } from "./setup-advisor.ts";
 import {
 	buildBalancerProfileName,
 	carryRules,
@@ -36,6 +37,10 @@ export interface SetupStepperState extends StepperDraft {
 	messages: Partial<Record<SetupStep, string[]>>;
 	/** The draft as initialised, restored by `discard`. */
 	baseline: StepperDraft;
+	/** Guided (dummy) mode: the strategy step also previews the pools.json block. */
+	guided?: boolean;
+	/** One-line advice of the last auto-assign or deep search. */
+	advisorSummary?: string;
 }
 
 /** The live files, as read from disk by the caller. */
@@ -66,6 +71,7 @@ export interface StepperApplyResult {
 	profilesError?: string;
 }
 
+type StepperPool = PoolConfig;
 const clonePools = (pools: readonly PoolConfig[]): PoolConfig[] => pools.map(pool => ({ ...pool, candidates: [...pool.candidates] }));
 const cloneRoles = (roles: ProfileConfig): ProfileConfig => JSON.parse(JSON.stringify(roles));
 const cloneDraft = (draft: StepperDraft): StepperDraft => ({
@@ -80,6 +86,7 @@ export function initStepper(
 	recommended: PoolConfig[],
 	existingRoles: ProfileConfig = {},
 	initialWorkflow?: ProfileWorkflow | OrchestratorMode,
+	options?: { guided?: boolean },
 ): SetupStepperState {
 	const orchestratorMode: OrchestratorMode =
 		typeof initialWorkflow === "string" && isOrchestratorMode(initialWorkflow)
@@ -93,7 +100,7 @@ export function initStepper(
 		roles: cloneRoles(existingRoles),
 		orchestratorMode,
 	};
-	return { step: "providers", reached: 0, detected, dirty: false, messages: {}, ...cloneDraft(baseline), baseline };
+	return { step: "providers", reached: 0, detected, dirty: false, messages: {}, ...cloneDraft(baseline), baseline, guided: options?.guided ?? false };
 }
 
 /** The initial state again; nothing was written. */
@@ -171,6 +178,43 @@ export function setRole(state: SetupStepperState, role: string, model: string, t
 export function setOrchestratorMode(state: SetupStepperState, mode: OrchestratorMode): SetupStepperState {
 	if (state.orchestratorMode === mode) return state;
 	return edit(state, { orchestratorMode: mode });
+}
+
+/** A secondary pool that mixes cheap `flash` models with expensive `claude` quota can burn that quota on trivial requests. */
+export function poolCostWarning(pool: StepperPool): string | undefined {
+	if (pool.id === "orchestrator") return undefined;
+	const hasFlash = pool.candidates.some(ref => /flash/i.test(ref));
+	const hasClaude = pool.candidates.some(ref => /claude/i.test(ref));
+	return hasFlash && hasClaude ? t("setup.stepper.costWarning", { pool: pool.id }) : undefined;
+}
+
+const POOL_TEMPLATES = ["claude-opus-5-5", "claude-sonnet-5-5", "orchestrator"] as const;
+const TEMPLATE_MATCH: Record<(typeof POOL_TEMPLATES)[number], RegExp> = {
+	"claude-opus-5-5": /opus/i,
+	"claude-sonnet-5-5": /sonnet/i,
+	orchestrator: /argon|sonnet/i,
+};
+
+/** Adds a pool from a template (or the next free custom one), filled from the enabled providers' models. */
+export function createPoolFromTemplate(state: SetupStepperState, templateId?: string): SetupStepperState {
+	const id = templateId ?? POOL_TEMPLATES.find(template => !state.pools.some(pool => pool.id === template)) ?? `custom-pool-${state.pools.length + 1}`;
+	if (state.pools.some(pool => pool.id === id)) return state;
+	const all = state.detected.filter(p => state.enabled.includes(p.id)).flatMap(p => p.availableModels.map(model => `${p.id}/${model}`));
+	const match = TEMPLATE_MATCH[id as (typeof POOL_TEMPLATES)[number]];
+	const matching = match ? all.filter(ref => match.test(ref)) : all;
+	const candidates = matching.length > 0 ? matching : all;
+	return edit(state, { pools: [...state.pools, { id, name: id, candidates, strategy: "hybrid" }] });
+}
+
+/** Zero-token heuristic over every catalog role. */
+export function applyAutoAssignRoles(state: SetupStepperState, quotaByKey?: Readonly<Record<string, number>>): SetupStepperState {
+	const report = recommendRolesHeuristic({ providers: state.detected.filter(p => state.enabled.includes(p.id)), pools: state.pools, quotaByKey });
+	return { ...edit(state, { roles: applyRecommendationsToProfile(state.roles, report.recommendations) }), advisorSummary: report.summary };
+}
+
+/** Applies a (deep search) advisor report to the draft roles. */
+export function applyAdvisorReport(state: SetupStepperState, report: AdvisorReport): SetupStepperState {
+	return { ...edit(state, { roles: applyRecommendationsToProfile(state.roles, report.recommendations) }), advisorSummary: report.summary };
 }
 
 /** i18n key of the plain-language description of what a step decides. */

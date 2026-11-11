@@ -1,13 +1,31 @@
 import { execFile } from "node:child_process";
-import { mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { copyToClipboard, type ExtensionAPI, type ExtensionCommandContext, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Key, matchesKey, SelectList, truncateToWidth, visibleWidth, type TuiMouseEvent, type TuiMouseEventResult } from "@earendil-works/pi-tui";
-import { CONTENT_X, emphasize, hitTest, layoutButtons, sameTarget, tabHitAreas, wheelOffset, type ButtonCell, type HitLayout, type MouseTarget } from "./control-center-mouse.ts";
-import { applyStepper, initStepper, type StepperCurrent } from "./setup-stepper.ts";
+import { CONTENT_X, CONTENT_Y, emphasize, hitTest, layoutButtons, sameTarget, tabHitAreas, wheelOffset, type ButtonCell, type HitLayout, type MouseTarget } from "./control-center-mouse.ts";
+import { applyAdvisorReport, applyStepper, initStepper, type StepperCurrent } from "./setup-stepper.ts";
 import { initScreen, renderStepper, stepperInput, type StepperEffect, type StepperEvent, type StepperTone, stepperThemeColor } from "./setup-stepper-view.ts";
+import type { InstallerAction } from "./installer-model.ts";
+import { nodeInstallFs, snapshotForInstall, undoInstall, type InstallSnapshot } from "./installer-plan.ts";
+import { canonicalKey as installerCanonicalKey, hitInstaller, installerKey, renderInstaller, type InstallerHit } from "./installer-tui.ts";
+import { channelPromptInput, initChannelPrompt, renderChannelPrompt, type InstallChannel } from "./installer-channel.ts";
+import {
+	applyLanFirewall,
+	getFirewallDetails,
+	initFirewallPromptState,
+	firewallPromptInput,
+	renderFirewallPrompt,
+	runInteractiveCommand,
+	initRemoteForwardState,
+	remoteForwardInput,
+	renderRemoteForwardPrompt,
+	startLanForwarder,
+	type RemoteForwardOption,
+	type FirewallDetails,
+} from "./installer-remote-forward.ts";
 import { initLangPrompt, langPromptInput, renderLangPrompt } from "./setup-lang-prompt.ts";
 import { BALANCER_MENU, balancerMenu, glossaryText, resolveBalancerArgs } from "./balancer-menu.ts";
 import { initLang, getLang, setLang, saveLangSetting, t } from "./i18n/index.ts";
@@ -23,7 +41,7 @@ import { HUD_VIEWS, hudHints, moveCursor, pressRedKey, renderHud, selectedSessio
 import { runHudChoice, type HudChoice } from "./hud-actions.ts";
 import { loadIntegrations } from "./integrations.ts";
 import { renderPanel, statusLine, statusWithContext, turnTelemetry, renderControlCenter, controlCenterButtons, controlCenterTabLabels, CONTROL_CENTER_TABS, type ControlCenterTab, type OverviewSessionRow, type TurnTelemetry } from "./panel.ts";
-import { ROLE_CATALOG, buildAvailableModelTargets, recommendRolesHeuristic, recommendRolesWithAdvisor, createDefaultCliAiRunner, applyRecommendationsToProfile, type AdvisorReport } from "./setup-advisor.ts";
+import { ROLE_CATALOG, buildAvailableModelTargets, recommendRolesHeuristic, recommendRolesWithAdvisor, createDefaultCliAiRunner, createModelCliAiRunner, applyRecommendationsToProfile, type AdvisorReport } from "./setup-advisor.ts";
 import { applySuggestionToProfile, DEFAULT_PROFILES_PATH, loadProfilesStore, qualifyModel, readProfiles, saveProfilesStore, type ProfilesStore } from "./profiles.ts";
 import { loadPrices } from "./prices.ts";
 import { clipAlias, createSessionIndex, DEFAULT_SESSIONS_ROOT, findSessionFile } from "./session-index.ts";
@@ -62,8 +80,9 @@ import { CircuitBreaker } from "./circuit-breaker.ts";
 import { runSetupWizard, detectSystemProviders, generateRecommendedConfig, saveProfileRoles, writeConfigSafely, toggleCandidateInList, moveCandidateInList, type DetectedProvider, type PoolConfig } from "./setup.ts";
 import { buildSessionDetail, buildWebReport, readSessionCwd, snapshotSessionIds, type WebReport } from "./web-data.ts";
 import { webSnapshotHtml } from "./web-page.ts";
-import { bindWebHandlers, formatServeStart, isValidSessionId, parseServeArgs, runningWebServer, startServing, stopServing, type WebHandlers } from "./web-serve.ts";
-import { loadTlsFiles, probeReport, type OpenResult, type TlsMaterial } from "./web-server.ts";
+import { bindWebHandlers, formatServeStart, isValidSessionId, parseServeArgs, runningWebServer, sshTunnelHint, startServing, stopServing, type WebHandlers } from "./web-serve.ts";
+import { DEFAULT_WEB_PORT, loadTlsFiles, probeReport, type OpenResult, type TlsMaterial, type WebServer } from "./web-server.ts";
+import { createInstallerSession, setInstallerSession, type InstallerHostDeps, type InstallerOutcome, type InstallerSession } from "./web-installer.ts";
 import {
 	agyUsageLimits,
 	CLAUDE_BRIDGE_PROVIDER,
@@ -1290,6 +1309,14 @@ export default function aiBalancer(pi: ExtensionAPI) {
 							return;
 						}
 
+						if (input === "D" || (input === "d" && tab === "overview")) {
+							done();
+							setTimeout(() => {
+								void runSetup(ctx, { dummy: true });
+							}, 50);
+							return;
+						}
+
 						if (input === "w") {
 							done();
 							setTimeout(() => {
@@ -1796,15 +1823,127 @@ export default function aiBalancer(pi: ExtensionAPI) {
 		});
 
 	/** `/balancer setup`: the stepper overlay, or the classic prompts when there is no UI or no custom overlay. */
-	const runSetup = async (ctx: ExtensionContext): Promise<void> => {
-		if (ctx.hasUI && typeof ctx.ui?.custom === "function") {
-			await promptSetupLanguage(ctx);
-		}
-		if (!ctx.hasUI || typeof ctx.ui?.custom !== "function") {
+	const runSetup = async (ctx: ExtensionContext, options?: { classic?: boolean; dummy?: boolean; skip?: boolean }): Promise<void> => {
+		if (options?.classic || !ctx.hasUI || typeof ctx.ui?.custom !== "function") {
 			await runClassicSetup(ctx);
 			return;
 		}
-		await openSetupStepper(ctx);
+		await promptSetupLanguage(ctx);
+		if (options?.skip) {
+			await openSetupStepper(ctx);
+			return;
+		}
+		if (!options?.dummy) {
+			const channel = await promptInstallChannel(ctx);
+			if (!channel) return;
+			if (channel === "web") {
+				await runWebInstall(ctx);
+				return;
+			}
+		}
+		await openInstaller(ctx);
+	};
+
+	/** Overlay frame shared by the setup prompts: a bordered box around the view's lines. */
+	const framed = (theme: { fg(name: any, text: string): string }, width: number, lines: string[]): string[] => {
+		const border = (text: string) => theme.fg("border", text);
+		const inner = Math.max(20, width - 4);
+		const row = (text: string) => `${border("│")} ${truncateToWidth(text, inner, "…", true)} ${border("│")}`;
+		return [border(`╭${"─".repeat(inner + 2)}╮`), ...lines.map(row), border(`╰${"─".repeat(inner + 2)}╯`)];
+	};
+
+		const promptRemoteForward = async (ctx: ExtensionContext): Promise<RemoteForwardOption | undefined> => {
+		let state = initRemoteForwardState();
+		const mode = colorMode();
+		return ctx.ui.custom<RemoteForwardOption | undefined>(
+			(tui, theme, _keybindings, done) => {
+				const finish = () => {
+					if (state.cancelled) done(undefined);
+					else if (state.done) done(state.selected);
+					else tui.requestRender();
+				};
+				return {
+				render(width: number): string[] {
+					return framed(theme, width, renderRemoteForwardPrompt(state, Math.max(20, width - 4), mode));
+				},
+				handleInput(data: string) {
+					state = remoteForwardInput(state, { type: "key", data: canonicalKey(data) });
+					finish();
+				},
+				handleMouse(event: TuiMouseEvent): TuiMouseEventResult | undefined {
+					if (event.type !== "click" || event.button !== "left") return undefined;
+					state = remoteForwardInput(state, { type: "mouse", kind: "click", x: event.x - CONTENT_X, y: event.y - CONTENT_Y });
+					finish();
+					return { handled: true, render: true };
+				},
+				invalidate() {},
+				dispose() {},
+				};
+			},
+			{ overlay: true, overlayOptions: { width: "76%", minWidth: 50, anchor: "center" } },
+		);
+	};
+
+	const promptFirewallAction = async (ctx: ExtensionContext, details: FirewallDetails): Promise<"run" | "back" | undefined> => {
+		let state = initFirewallPromptState(details);
+		const mode = colorMode();
+		return ctx.ui.custom<"run" | "back" | undefined>(
+			(tui, theme, _keybindings, done) => {
+				const finish = () => {
+					if (state.cancelled) done(undefined);
+					else if (state.done) done(state.selected);
+					else tui.requestRender();
+				};
+				return {
+					render(width: number): string[] {
+						return framed(theme, width, renderFirewallPrompt(state, Math.max(20, width - 4), mode));
+					},
+					handleInput(data: string) {
+						state = firewallPromptInput(state, { type: "key", data: canonicalKey(data) });
+						finish();
+					},
+					handleMouse(event: TuiMouseEvent): TuiMouseEventResult | undefined {
+						if (event.type !== "click" || event.button !== "left") return undefined;
+						return { handled: true, render: true };
+					},
+					invalidate() {},
+					dispose() {},
+				};
+			},
+			{ overlay: true, overlayOptions: { width: "80%", minWidth: 56, anchor: "center" } },
+		);
+	};
+
+	const promptInstallChannel = async (ctx: ExtensionContext): Promise<InstallChannel | undefined> => {
+		let state = initChannelPrompt();
+		const mode = colorMode();
+		return ctx.ui.custom<InstallChannel | undefined>(
+			(tui, theme, _keybindings, done) => {
+				const finish = () => {
+					if (state.cancelled) done(undefined);
+					else if (state.done) done(state.selected);
+					else tui.requestRender();
+				};
+				return {
+					render(width: number): string[] {
+						return framed(theme, width, renderChannelPrompt(state, Math.max(20, width - 4), mode));
+					},
+					handleInput(data: string) {
+						state = channelPromptInput(state, { type: "key", data: canonicalKey(data) });
+						finish();
+					},
+					handleMouse(event: TuiMouseEvent): TuiMouseEventResult | undefined {
+						if (event.type !== "click" || event.button !== "left") return undefined;
+						state = channelPromptInput(state, { type: "mouse", kind: "click", x: event.x - CONTENT_X, y: event.y - CONTENT_Y });
+						finish();
+						return { handled: true, render: true };
+					},
+					invalidate() {},
+					dispose() {},
+				};
+			},
+			{ overlay: true, overlayOptions: { width: "70%", minWidth: 44, anchor: "center" } },
+		);
 	};
 
 	const promptSetupLanguage = async (ctx: ExtensionContext): Promise<void> => {
@@ -1855,8 +1994,10 @@ export default function aiBalancer(pi: ExtensionAPI) {
 		}
 	};
 
-	/** Pi hands overlays raw input in either terminal protocol; the view works on the legacy sequences. */
+	/** Pi hands overlays raw input in either terminal protocol; the view works on the legacy sequences. The enhanced encodings (kitty CSI-u, modifyOtherKeys, key releases) are decoded by the pure installer-tui helper, the rest by Pi's own matcher. */
 	const canonicalKey = (data: string): string => {
+		const decoded = installerCanonicalKey(data);
+		if (decoded !== data) return decoded;
 		if (matchesKey(data, Key.escape)) return "\x1b";
 		if (matchesKey(data, Key.enter)) return "\r";
 		if (matchesKey(data, Key.space)) return " ";
@@ -1864,6 +2005,266 @@ export default function aiBalancer(pi: ExtensionAPI) {
 		if (matchesKey(data, Key.tab)) return "\t";
 		for (const [name, seq] of [["up", "\x1b[A"], ["down", "\x1b[B"], ["right", "\x1b[C"], ["left", "\x1b[D"]] as const) if (matchesKey(data, name)) return seq;
 		return data;
+	};
+
+	/** The effects of the installer (scan, install, analysis, undo) on this machine; the terminal and the web channel run the same ones. */
+	const installerSnapshots: InstallSnapshot[] = [];
+	const installerHost = (ctx: ExtensionContext): InstallerHostDeps => ({
+		detect: detectSystemProviders,
+		install: (draft, current) => {
+			// Each install keeps its own copies (never overwriting an older one); applyStepper's plain `.bak` is shared with other setup flows and is not reported.
+			const snapshot = snapshotForInstall([join(ROOT, "pools.json"), join(ROOT, "integrations.json"), DEFAULT_PROFILES_PATH], nodeInstallFs);
+			installerSnapshots.push(snapshot);
+			const result = applyStepper(draft, {
+				root: ROOT,
+				current,
+				profilesPath: DEFAULT_PROFILES_PATH,
+				writeConfig: writeConfigSafely,
+				writeProfiles: (name, roles, workflow) => saveProfileRoles(DEFAULT_PROFILES_PATH, name, roles, (provider, model) => Boolean(ctx.modelRegistry.find(provider, model)), workflow),
+			});
+			return result.ok ? { ok: true, written: result.written, backups: snapshot.backups, profilesError: result.profilesError } : { ok: false, error: result.error ?? "", backups: snapshot.backups };
+		},
+		undo: backups => {
+			// The install's own record knows which files it created; a list without a record (older copies) still restores what it names.
+			const snapshot = [...installerSnapshots].reverse().find(s => s.backups.length === backups.length && s.backups.every((b, i) => b === backups[i])) ?? { backups, created: [] };
+			return undoInstall(snapshot, nodeInstallFs);
+		},
+		deepAnalysis: (providers, pools, model) => recommendRolesWithAdvisor({ providers, pools }, { aiRunner: createModelCliAiRunner(model, AGY_BIN), deep: true }),
+		notify: (message, level) => ctx.ui.notify(message, level),
+		changed: () => refreshStatus(ctx),
+	});
+
+	const newInstallerSession = (ctx: ExtensionContext): InstallerSession => {
+		const readJson = (file: string): unknown => {
+			try {
+				return JSON.parse(readFileSync(join(ROOT, file), "utf8"));
+			} catch {
+				return null;
+			}
+		};
+		const store = loadProfilesStore();
+		const current: StepperCurrent = { pools: readJson("pools.json"), integrations: readJson("integrations.json"), profiles: store };
+		return createInstallerSession({ detected: detectSystemProviders(), current, workflow: store?.workflow?.[store.active ?? ""] }, installerHost(ctx));
+	};
+
+	/** Where the installer leaves the user once it ends. */
+	const afterInstaller = async (ctx: ExtensionContext, session: InstallerSession, outcome: InstallerOutcome | undefined): Promise<void> => {
+		if (outcome === "panel") await openControlCenter(ctx);
+		else if (outcome === "advanced") await openSetupStepper(ctx);
+		else if (!session.state.finished) ctx.ui.notify(`ai-balancer: ${t("setup.stepper.cancelled")}`, "info");
+	};
+
+	/** The installer overlay: the shared model drawn in the terminal. */
+	const openInstaller = async (ctx: ExtensionContext): Promise<void> => {
+		const session = newInstallerSession(ctx);
+		const outcome = await ctx.ui.custom<InstallerOutcome>(
+			(tui, theme, _keybindings, done) => {
+				const mode = colorMode();
+				const animate = motionEnabled();
+				let focus: number | undefined;
+				let hits: InstallerHit[] = [];
+				let closed = false;
+				const redraw = () => {
+					if (!closed) tui.requestRender();
+				};
+				// The mascot, spinner and bar move on a FRAME_MS tick, only while this overlay is open and only when motion is allowed.
+				const motion = animate ? setInterval(redraw, FRAME_MS) : undefined;
+				motion?.unref?.();
+				session.onChange(redraw);
+				session.onEnd(outcome => done(outcome));
+				const apply = (action: InstallerAction) => {
+					const before = session.state.step;
+					session.act(action);
+					if (session.state.step !== before) focus = undefined;
+				};
+				return {
+					render(width: number): string[] {
+						const inner = Math.max(20, width - 4);
+						const rows = Math.max(14, ((tui as { terminal?: { rows?: number } }).terminal?.rows ?? 40) - 6);
+						const now = Date.now();
+						const view = renderInstaller(session.screen(), { width: inner, mode, focus, rows, animate, frame: frameOf(now), now });
+						hits = view.hits;
+						const border = (text: string) => theme.fg("border", text);
+						const row = (text: string) => `${border("│")} ${truncateToWidth(text, inner, "…", true)} ${border("│")}`;
+						const painted = view.lines.map(line => paintTones(line, (name, text) => theme.fg(name, text)));
+						return [border(`╭${"─".repeat(inner + 2)}╮`), ...painted.map(row), border(`╰${"─".repeat(inner + 2)}╯`)];
+					},
+					handleInput(data: string) {
+						const result = installerKey(session.screen(), focus, canonicalKey(data));
+						focus = result.focus;
+						for (const action of result.actions) apply(action);
+						redraw();
+					},
+					// Pointer events only reach overlays under TuiAltScreen; without it the keys still work.
+					handleMouse(event: TuiMouseEvent): TuiMouseEventResult | undefined {
+						if (event.type !== "click" || event.button !== "left") return undefined;
+						const action = hitInstaller(hits, event.x - CONTENT_X, event.y - CONTENT_Y);
+						if (!action) return undefined;
+						focus = undefined;
+						apply(action);
+						redraw();
+						return { handled: true, render: false };
+					},
+					invalidate() {},
+					dispose() {
+						closed = true;
+						if (motion) clearInterval(motion);
+						session.close();
+					},
+				};
+			},
+			{ overlay: true, overlayOptions: { width: "90%", minWidth: 72, anchor: "center" } },
+		);
+		await afterInstaller(ctx, session, outcome);
+	};
+
+	/** The web channel: the installer page runs in the browser, this overlay tells the user how to reach it and waits. */
+	const runWebInstall = async (ctx: ExtensionContext): Promise<void> => {
+		const remote = Boolean(process.env.SSH_CONNECTION || process.env.SSH_TTY);
+		let lanMode = false;
+
+		if (remote && ctx.hasUI && typeof ctx.ui?.custom === "function") {
+			let forwardChoice: RemoteForwardOption | undefined;
+			while (!forwardChoice) {
+				const choice = await promptRemoteForward(ctx);
+				if (choice === undefined) {
+					return;
+				}
+				if (choice === "lan") {
+					lanMode = true;
+					forwardChoice = "lan";
+				} else if (choice === "firewall") {
+					const details = await getFirewallDetails(DEFAULT_WEB_PORT);
+					const action = await promptFirewallAction(ctx, details);
+					if (action === "run" && details.commandString) {
+						const res = await runInteractiveCommand(details.commandString);
+						if (res.success) {
+							ctx.ui.notify(`ai-balancer: ${t("installer.remote.firewallSuccess")}`, "info");
+						} else {
+							ctx.ui.notify(`ai-balancer: ${t("installer.remote.firewallFailed", { error: `Exit code ${res.code}` })}`, "warning");
+						}
+						lanMode = true;
+						forwardChoice = "firewall";
+					}
+				} else {
+					forwardChoice = choice;
+				}
+			}
+		}
+
+		const existing = runningWebServer();
+		if (existing && existing.lan !== lanMode) {
+			await stopServing();
+		}
+
+		let served: { server: WebServer; started: boolean };
+		try {
+			served = await startServing({ port: DEFAULT_WEB_PORT, lan: lanMode, tokenFile: WEB_TOKEN_FILE, handlers: webHandlers() });
+		} catch (error) {
+			const running = runningWebServer();
+			if (!running) {
+				ctx.ui.notify(`ai-balancer: ${t("installer.web.startFailed", { error: error instanceof Error ? error.message : String(error) })}`, "error");
+				return;
+			}
+			served = { server: running, started: false };
+		}
+		const { server, started } = served;
+		const session = newInstallerSession(ctx);
+		setInstallerSession(session);
+
+		const link = server.url.replace("/?token=", "/installer?token=");
+		const lanLinks = server.lan ? server.lanUrls.map(url => url.replace("/?token=", "/installer?token=")) : [];
+		const opener = process.platform === "darwin" ? "open" : process.platform === "linux" && (process.env.DISPLAY || process.env.WAYLAND_DISPLAY) ? "xdg-open" : undefined;
+		const canOpen = opener !== undefined && !remote;
+
+		type Phase = "waiting" | "done" | "cancelled";
+		const outcome = await ctx.ui.custom<InstallerOutcome | undefined>(
+			(tui, theme, _keybindings, done) => {
+				const mode = colorMode();
+				let phase: Phase = "waiting";
+				let rows: { y: number; key: string }[] = [];
+				const finishWith = (value: InstallerOutcome | undefined) => done(value);
+				session.onChange(() => tui.requestRender());
+				session.onEnd(finalOutcome => {
+					if (finalOutcome === "exit") {
+						phase = "cancelled";
+						finishWith(undefined);
+					} else {
+						phase = "done";
+						tui.requestRender();
+					}
+				});
+				const press = (key: string) => {
+					if (phase === "done") {
+						if (key === "enter" || key === "escape") finishWith(session.outcome);
+					} else if (key === "o" && canOpen) {
+						execFile(opener!, [link], () => {});
+					} else if (key === "escape" || key === "cancel") {
+						phase = "cancelled";
+						finishWith(undefined);
+					}
+				};
+				const body = (inner: number): { lines: string[]; buttons: { y: number; key: string }[] } => {
+					const dim = (text: string) => theme.fg("muted", text);
+					const lines: string[] = [theme.fg("accent", t("installer.web.title")), ""];
+					const buttons: { y: number; key: string }[] = [];
+					lines.push(t(started ? "installer.web.started" : "installer.web.reused", { port: server.port }), "");
+					lines.push(t("installer.web.link"), `  ${link}`);
+					for (const url of lanLinks) lines.push(`  ${t("installer.web.lan", { urls: url })}`);
+					if (canOpen) {
+						buttons.push({ y: lines.length, key: "o" });
+						lines.push(`  [ ${t("installer.web.open")} ]`);
+					}
+					lines.push("");
+					if (remote) lines.push(t("installer.web.remote"), `  ${sshTunnelHint(server.port)}`, "", t("installer.web.remoteLink"), `  ${link}`, "");
+					if (phase === "done") {
+						lines.push(...renderInstaller(session.screen(), { width: inner, mode, rows: 30 }).lines.map(line => paintTones(line, (name, text) => theme.fg(name, text))), "", dim(t("installer.web.doneKeys")));
+					} else {
+						lines.push(t("installer.web.waiting"));
+						buttons.push({ y: lines.length, key: "cancel" });
+						lines.push(`  [ ${t("installer.web.cancel")} ]`, "", dim(t("installer.web.keys")));
+					}
+					return { lines, buttons };
+				};
+				return {
+					render(width: number): string[] {
+						const inner = Math.max(20, width - 4);
+						const view = body(inner);
+						rows = view.buttons;
+						const border = (text: string) => theme.fg("border", text);
+						const row = (text: string) => `${border("│")} ${truncateToWidth(text, inner, "…", true)} ${border("│")}`;
+						return [border(`╭${"─".repeat(inner + 2)}╮`), ...view.lines.map(row), border(`╰${"─".repeat(inner + 2)}╯`)];
+					},
+					handleInput(data: string) {
+						const key = matchesKey(data, Key.escape) ? "escape" : matchesKey(data, Key.enter) ? "enter" : data.toLowerCase();
+						press(key);
+					},
+					handleMouse(event: TuiMouseEvent): TuiMouseEventResult | undefined {
+						if (event.type !== "click" || event.button !== "left") return undefined;
+						const hit = rows.find(r => r.y === event.y || r.y === event.y - 1 || r.y === event.y - CONTENT_Y);
+						if (!hit) return undefined;
+						press(hit.key);
+						return { handled: true, render: true };
+					},
+					invalidate() {},
+					dispose() {
+						session.close();
+					},
+				};
+			},
+			{ overlay: true, overlayOptions: { width: "90%", minWidth: 72, anchor: "center" } },
+		);
+		setInstallerSession(undefined);
+		session.close();
+		if (outcome === undefined) {
+			// Cancel ends the session; the server stops only when this install started it.
+			if (started) await stopServing();
+			ctx.ui.notify(`ai-balancer: ${t("installer.web.cancelled")}`, "info");
+			return;
+		}
+		// The panel is served by this same server; any other ending hands it back if this install started it.
+		if (started && outcome !== "panel") await stopServing();
+		await afterInstaller(ctx, session, outcome);
 	};
 
 	const openSetupStepper = async (ctx: ExtensionContext): Promise<void> => {
@@ -1884,7 +2285,7 @@ export default function aiBalancer(pi: ExtensionAPI) {
 		const recommended = generateRecommendedConfig(detected.filter(p => p.detected), { hasModel: (provider, model) => Boolean(ctx.modelRegistry.find(provider, model)) }).pools;
 		let screen = initScreen(initStepper(detected, recommended, store?.profiles?.[store.active ?? ""] ?? {}, store?.workflow?.[store.active ?? ""]), current);
 
-		const effect = await ctx.ui.custom<StepperEffect>(
+		const effect = await ctx.ui.custom<"save" | "cancel" | "discard" | "none">(
 			(tui, theme, _keybindings, done) => {
 				const bodyRows = () => Math.max(8, ((tui as { terminal?: { rows?: number } }).terminal?.rows ?? 40) - 14);
 				const mode = colorMode();
@@ -1896,8 +2297,19 @@ export default function aiBalancer(pi: ExtensionAPI) {
 					const result = stepperInput(screen, event);
 					const changed = result.state !== screen;
 					screen = result.state;
-					if (result.effect !== "none") done(result.effect);
-					else if (changed) tui.requestRender();
+					if (result.effect === "save" || result.effect === "cancel") {
+						done(result.effect);
+					} else if (typeof result.effect === "object" && result.effect.type === "deep-search") {
+						void recommendRolesWithAdvisor(
+							{ providers: detected, pools: screen.stepper.pools },
+							{ aiRunner: createModelCliAiRunner(result.effect.model, AGY_BIN), deep: true },
+						).then(report => {
+							screen = { ...screen, stepper: applyAdvisorReport(screen.stepper, report) };
+							tui.requestRender();
+						});
+					} else if (changed) {
+						tui.requestRender();
+					}
 				};
 				return {
 					render(width: number): string[] {
@@ -2295,6 +2707,14 @@ export default function aiBalancer(pi: ExtensionAPI) {
 			}
 			if (command === "setup") {
 				await runSetup(ctx);
+				return;
+			}
+			if (command === "setup --dummy" || command === "setup -d") {
+				await runSetup(ctx, { dummy: true });
+				return;
+			}
+			if (command === "setup --skip" || command === "setup -s") {
+				await runSetup(ctx, { skip: true });
 				return;
 			}
 			if (command === "setup classic") {

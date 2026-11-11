@@ -6,6 +6,7 @@ import { X509Certificate, createPrivateKey, randomBytes, timingSafeEqual } from 
 import { networkInterfaces } from "node:os";
 import { isIP } from "node:net";
 import { dirname } from "node:path";
+import { activeInstallerSession, installerPageHtml, installerPageScript, installerPageStyle, installerView, parseInstallerAction } from "./web-installer.ts";
 
 // The live web report. By default it listens on 127.0.0.1 only and answers
 // nothing without the token, which lives in a file only the OS user can read
@@ -27,6 +28,9 @@ import { dirname } from "node:path";
 //   cannot read the report through the browser.
 // - The one action that changes something (open a session in Pi) is a POST
 //   that must come from the same origin.
+// - The installer page and its API (`/installer`, `/api/installer`) exist only
+//   while an installer session is active; everything above applies to them, and
+//   their POST also needs a JSON body and no cross-site fetch metadata.
 
 export const DEFAULT_WEB_PORT = 8787;
 export const WEB_HOST = "127.0.0.1";
@@ -37,7 +41,7 @@ const SESSION_ID = /^[A-Za-z0-9._-]{1,128}$/;
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]"]);
 
 const SECURITY_HEADERS = {
-	"content-security-policy": "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+	"content-security-policy": "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
 	"cache-control": "no-store",
 	"x-content-type-options": "nosniff",
 	"referrer-policy": "no-referrer",
@@ -339,6 +343,52 @@ export function sessionId(raw: string): string | undefined {
 	}
 }
 
+const INSTALLER_PATHS = new Set(["/installer", "/installer.js", "/installer.css", "/api/installer"]);
+
+/** The installer page and API; false when the path is not theirs or no installer session is active. */
+async function routeInstaller(req: IncomingMessage, res: ServerResponse, path: string, lan: boolean, tls: boolean): Promise<boolean> {
+	if (!INSTALLER_PATHS.has(path)) return false;
+	const session = activeInstallerSession();
+	if (!session) {
+		sendText(res, 404, "ai-balancer: not found.\n");
+		return true;
+	}
+	if (req.method === "POST" && path === "/api/installer") {
+		const site = req.headers["sec-fetch-site"];
+		if (!isSameOriginPost(req, lan, tls) || (site !== undefined && site !== "same-origin" && site !== "none")) {
+			sendText(res, 403, "ai-balancer: cross-origin request refused.\n");
+			return true;
+		}
+		if (!tls && !isAllowedHost(req.headers.host, lan)) {
+			sendJson(res, 403, { ok: false, message: "actions are permitted only over loopback, LAN, or HTTPS" });
+			return true;
+		}
+		const body = await readJsonBody(req, res, "the installer action", "is");
+		if (!body) return true;
+		const action = parseInstallerAction(body.value);
+		if (!action) {
+			sendJson(res, 400, { ok: false, message: "unknown installer action" });
+			return true;
+		}
+		if (session.outcome !== undefined) {
+			sendJson(res, 409, installerView(session));
+			return true;
+		}
+		session.act(action);
+		sendJson(res, 200, installerView(session));
+		return true;
+	}
+	if (req.method !== "GET" && req.method !== "HEAD") {
+		send(res, 405, "text/plain; charset=utf-8", "ai-balancer: use GET.\n", { allow: path === "/api/installer" ? "GET, POST" : "GET" });
+		return true;
+	}
+	if (path === "/installer") send(res, 200, "text/html; charset=utf-8", installerPageHtml());
+	else if (path === "/installer.js") send(res, 200, "text/javascript; charset=utf-8", installerPageScript());
+	else if (path === "/installer.css") send(res, 200, "text/css; charset=utf-8", installerPageStyle());
+	else sendJson(res, 200, installerView(session));
+	return true;
+}
+
 async function route(req: IncomingMessage, res: ServerResponse, options: WebServerOptions, token: string): Promise<void> {
 	const lan = options.lan === true;
 	const tls = options.tls !== undefined;
@@ -370,6 +420,7 @@ async function route(req: IncomingMessage, res: ServerResponse, options: WebServ
 	}
 
 	const path = url.pathname;
+	if (await routeInstaller(req, res, path, lan, tls)) return;
 	const open = /^\/api\/sessions\/([^/]+)\/open$/.exec(path);
 	if (open) {
 		if (req.method !== "POST") {

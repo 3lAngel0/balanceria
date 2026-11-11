@@ -1,15 +1,6 @@
 {
   "pools": [
     {
-      "id": "gemini-3-8-flash",
-      "name": "Flash (pool: agy flash → claude-bridge sonnet)",
-      "candidates": [
-        "antigravity/gemini-3-8-flash",
-        "claude-bridge/claude-sonnet-5-5"
-      ],
-      "strategy": "waterfall"
-    },
-    {
       "id": "claude-opus-5-5",
       "name": "Opus 5.5 (pool)",
       "candidates": [
@@ -20,22 +11,20 @@
     },
     {
       "id": "claude-sonnet-5-5",
-      "name": "Sonnet 5.5 (pool: agy sonnet → agy flash → claude-bridge sonnet)",
+      "name": "Sonnet 5.5 (pool: agy sonnet → claude-bridge sonnet)",
       "candidates": [
         "antigravity/claude-sonnet-5-5",
-        "antigravity/gemini-3-8-flash",
         "claude-bridge/claude-sonnet-5-5"
       ],
       "strategy": "hybrid"
     },
     {
       "id": "orchestrator",
-      "name": "Orchestrator (pool: argon → agy claude → gemini flash → claude-bridge)",
+      "name": "Orchestrator (pool: argon → agy claude → claude-bridge)",
       "candidates": [
         "antigravity/gemini-4-argon",
         "antigravity/claude-sonnet-5-5",
         "antigravity/claude-opus-5-5",
-        "antigravity/gemini-3-8-flash",
         "claude-bridge/claude-opus-5-5",
         "claude-bridge/claude-sonnet-5-5"
       ],

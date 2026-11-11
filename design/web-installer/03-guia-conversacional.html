@@ -1,0 +1,311 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1440">
+<title>C · Guía conversacional con capibara</title>
+<style>
+:root{--bg:#181425;--surface:#262b44;--border:#3a4466;--shadow:#0e0b16;--light:#5a6988;--text:#e4e6ee;--dim:#8b9bb4;--accent:#feae34;--hp:#38b764;--mp:#3b5dc9;--xp:#a363d9;--bad:#e43b44}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{width:1440px;height:900px;overflow:hidden;background:var(--bg);color:var(--text);font:14px/20px ui-monospace,"Cascadia Code","Source Code Pro",Menlo,Consolas,monospace;image-rendering:pixelated}
+h1{font-size:16px;margin:0 0 8px}
+h2{font-size:14px;margin:0 0 8px;color:var(--accent);text-transform:uppercase;letter-spacing:1px}
+h3{font-size:14px;margin:0 0 4px}
+p{margin:0 0 8px}
+a{color:var(--accent)}
+.dim{color:var(--dim)}
+.small{font-size:.85em}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.pixel-card{background:var(--surface);border:4px solid var(--border);box-shadow:inset -4px -4px 0 0 var(--shadow),inset 4px 4px 0 0 var(--light);padding:12px 16px}
+button{font:inherit;color:var(--text);background:var(--border);border:0;padding:4px 12px;box-shadow:inset -4px -4px 0 0 var(--shadow),inset 4px 4px 0 0 var(--light);cursor:pointer}
+button:hover:not(:disabled):not([aria-disabled=true]){background:var(--light)}
+button:disabled,button[aria-disabled=true]{opacity:.4;cursor:default}
+button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,[tabindex]:focus-visible{outline:4px solid var(--accent);outline-offset:0}
+.btn-primary{background:var(--accent);color:var(--bg);font-weight:700;padding:4px 16px}
+.btn-primary:hover:not(:disabled):not([aria-disabled=true]){background:var(--text)}
+.btn-small{background:transparent;border:2px solid var(--border);box-shadow:none;font-size:.85em;padding:2px 6px}
+.btn-small:hover:not(:disabled){background:var(--border)}
+input[type=checkbox],input[type=radio]{accent-color:var(--accent);width:16px;height:16px;margin:0;flex:none}
+.close-note{border:4px solid var(--bad);padding:4px 12px;background:var(--bg)}
+.mock{height:44px;display:flex;align-items:center;gap:8px;padding:0 16px;background:var(--shadow);border-bottom:4px solid var(--border)}
+.mock .lbl{color:var(--dim)}
+.mock button{padding:2px 8px}
+.mock button[aria-pressed=true]{background:var(--accent);color:var(--bg)}
+.mock .sp{flex:1}
+.step .mark{display:inline-block;width:16px;text-align:center}
+.step[data-s=done] .mark{color:var(--hp)}
+.step[data-s=current]{color:var(--accent);font-weight:700}
+.step[data-s=todo]{color:var(--dim)}
+[hidden]{display:none!important}
+.defs{margin:0;display:grid;gap:8px}
+.def{background:var(--bg);border:2px solid var(--border);padding:8px 12px;cursor:default}
+.def:hover,.def:focus-visible,.def:focus-within{border-color:var(--accent)}
+.def dt{color:var(--accent);font-weight:700}
+.def dd{margin:0}
+.list{list-style:none;margin:0;padding:0;display:grid;gap:8px}
+.opt{display:flex;gap:8px;align-items:flex-start;background:var(--bg);border:4px solid var(--border);padding:8px 12px}
+.opt:hover,.opt:focus-within{border-color:var(--light)}
+.opt:has(input:checked){border-color:var(--accent)}
+.opt .txt{flex:1;min-width:0}
+.opt .txt b{display:block}
+.opt .ord{display:flex;gap:4px;align-items:center}
+.pos{color:var(--dim);font-size:.85em}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.bar{display:block;height:16px;background:var(--shadow);box-shadow:inset 4px 4px 0 0 #000;overflow:hidden;position:relative}
+.bar i{position:absolute;inset:0 auto 0 0;width:35%;background:repeating-linear-gradient(90deg,var(--accent) 0 8px,var(--shadow) 8px 12px);animation:slide 2.4s steps(24) infinite alternate}
+@keyframes slide{from{left:0}to{left:65%}}
+.progress{background:var(--bg);border:4px solid var(--border);padding:12px 16px}
+.progress[hidden]{display:none}
+.status{border:4px solid var(--hp);background:var(--bg);padding:8px 12px}
+.alert{border:4px solid var(--bad);background:var(--bg);padding:8px 12px}
+.alert h2{color:var(--text)}
+.steps-run{list-style:none;margin:0 0 12px;padding:0;display:grid;gap:4px}
+.steps-run li{display:flex;gap:8px}
+.steps-run .ok{color:var(--hp)}
+.steps-run .ko{color:var(--text);font-weight:700}.steps-run .ko span{color:var(--bad)}
+.steps-run .wait{color:var(--dim)}
+table.tasks{border-collapse:collapse;width:100%}
+table.tasks th{color:var(--accent);text-align:left;padding:4px 8px;border-bottom:4px solid var(--border)}
+table.tasks td{padding:6px 8px;border-bottom:4px solid var(--bg);vertical-align:top}
+table.tasks tr:hover td,table.tasks tr:focus-within td{background:var(--bg)}
+.narr p{margin:0 0 8px}
+.review{margin:0 0 8px;padding-left:20px}
+.review li{margin:0 0 2px}
+.closing{border-top:4px solid var(--border);padding-top:8px;color:var(--accent);font-weight:700}
+.diagram{background:var(--bg);border:4px solid var(--border);padding:8px}
+.diagram svg{display:block;width:100%;max-width:480px;height:auto}
+.dg-node{fill:var(--surface);stroke:var(--border);stroke-width:4}
+.dg-use{stroke:var(--accent)}
+.dg-off{opacity:.4}
+.dg-line{stroke:var(--light);stroke-width:4;fill:none}
+.dg-t{fill:var(--text);font:14px ui-monospace,Menlo,Consolas,monospace}
+.dg-d{fill:var(--dim);font:12px ui-monospace,Menlo,Consolas,monospace}
+.cap{display:block;shape-rendering:crispEdges;image-rendering:pixelated}
+.cap .c-o{fill:var(--shadow)}.cap .c-b{fill:var(--accent)}.cap .c-w{fill:var(--text)}.cap .c-l{fill:var(--light)}.cap .c-h{fill:var(--hp)}
+.cap .body{animation:breathe 3.2s steps(1) infinite}
+.cap .eye{animation:blink 4.8s steps(1) infinite}
+.cap .panl{animation:bob 2.4s steps(1) infinite}
+.cap .panr{animation:bob 2.4s steps(1) infinite reverse}
+@keyframes breathe{0%{transform:translateY(0)}50%{transform:translateY(-1px)}}
+@keyframes blink{0%,94%{opacity:1}95%,100%{opacity:0}}
+@keyframes bob{0%{transform:translateY(0)}50%{transform:translateY(1px)}}
+.star{display:inline-flex;gap:8px;align-items:center}
+.star-row{margin:12px 0 16px}
+.help h2{margin-bottom:4px}
+.help .focus{font-weight:700;margin:0 0 8px}
+.help dl{margin:0;display:grid;gap:8px}
+.help dt{color:var(--accent)}
+.help dd{margin:0}
+.help .tech{margin:12px 0 0;padding-top:8px;border-top:2px solid var(--border);color:var(--dim);font-size:.85em}
+@media (prefers-reduced-motion:reduce){
+ *{animation-duration:.001ms!important;transition-duration:.001ms!important}
+ .cap *,.bar i{animation:none!important}
+ .bar i{width:40%;left:0}
+}
+
+.app{display:grid;grid-template-columns:232px 1fr 384px;gap:16px;padding:16px;height:856px}
+.rail{overflow:hidden;display:flex;flex-direction:column}
+.rail ol{list-style:none;margin:8px 0 0 8px;padding:0 0 0 16px;border-left:4px solid var(--border);display:grid;gap:12px}
+.rail .step{position:relative;padding-left:4px}
+.rail .step .mark{position:absolute;left:-30px;top:0;width:24px;background:var(--surface);color:var(--dim)}
+.rail .step[data-s=done] .mark{color:var(--hp)}
+.rail .step[data-s=current] .mark{color:var(--accent)}
+.rail .stepn{margin-top:auto;color:var(--dim)}
+.talk{display:grid;grid-template-rows:auto 1fr auto;gap:12px;min-width:0;min-height:0}
+.guide{display:flex;gap:16px;align-items:flex-end}
+.guide .who{background:var(--bg);border:4px solid var(--border);padding:8px;flex:none}
+.bubble{position:relative;flex:1;background:var(--text);color:var(--bg);border:4px solid var(--shadow);padding:12px 16px;margin-bottom:8px;box-shadow:inset -4px -4px 0 0 var(--light)}
+.bubble::before{content:"";position:absolute;left:-12px;bottom:12px;width:12px;height:12px;background:var(--text);border-left:4px solid var(--shadow);border-bottom:4px solid var(--shadow)}
+.bubble p{margin:0}
+.bubble .who-name{font-weight:700;font-size:.85em;margin-bottom:4px;color:var(--bg)}
+.stage{overflow:auto;min-height:0;background:var(--bg);border:4px solid var(--border);padding:12px 16px;position:relative}
+.stage .stateview>h1{display:none}
+.stage .stateview>p:first-of-type:not(.star-row){display:none}
+.reply{display:flex;gap:16px;align-items:center}
+.reply .close-note{flex:1}
+.nav{display:flex;gap:8px}
+.help{overflow:auto}
+.wl{display:block}
+.wl-main>p{display:none}
+.wl-cap{display:none}
+.defs{grid-template-columns:1fr 1fr}
+.def{background:var(--surface)}
+.bk{display:grid;grid-template-columns:1fr;gap:12px}
+.strats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.opt{background:var(--surface)}
+.deep-pick .row{align-items:stretch}
+.deep-pick .opt{min-width:200px}
+.stateview{animation:fade .3s steps(3)}
+@keyframes fade{from{opacity:.2}to{opacity:1}}
+</style>
+</head>
+<body>
+<nav class="mock" aria-label="Estados de la maqueta"><span class="lbl">Maqueta · estado:</span><button type="button" data-go="welcome" aria-pressed="false">Bienvenida</button><button type="button" data-go="backups" aria-pressed="false">Respaldos</button><button type="button" data-go="tasks" aria-pressed="false">Tareas</button><button type="button" data-go="tasks-running" aria-pressed="false">Análisis en curso</button><button type="button" data-go="tasks-done" aria-pressed="false">Análisis listo</button><button type="button" data-go="summary" aria-pressed="false">Resumen</button><button type="button" data-go="error" aria-pressed="false">Error</button><span class="sp"></span><span class="dim small">Cada estado usa los textos reales del instalador</span></nav>
+<div class="app">
+<nav class="rail pixel-card" aria-label="Pasos de la instalación"><h2>Tu camino</h2><ol><li class="step" data-i="0" data-s="todo"><span class="mark" aria-hidden="true">○</span> <span>Bienvenida</span></li><li class="step" data-i="1" data-s="todo"><span class="mark" aria-hidden="true">○</span> <span>Tipo de instalación</span></li><li class="step" data-i="2" data-s="todo"><span class="mark" aria-hidden="true">○</span> <span>Buscando suscripciones</span></li><li class="step" data-i="3" data-s="todo"><span class="mark" aria-hidden="true">○</span> <span>Tus suscripciones</span></li><li class="step" data-i="4" data-s="todo"><span class="mark" aria-hidden="true">○</span> <span>Respaldos</span></li><li class="step" data-i="5" data-s="todo"><span class="mark" aria-hidden="true">○</span> <span>Tareas de los agentes</span></li><li class="step" data-i="6" data-s="todo"><span class="mark" aria-hidden="true">○</span> <span>Agente principal</span></li><li class="step" data-i="7" data-s="todo"><span class="mark" aria-hidden="true">○</span> <span>Resumen</span></li><li class="step" data-i="8" data-s="todo"><span class="mark" aria-hidden="true">○</span> <span>Instalando</span></li><li class="step" data-i="9" data-s="todo"><span class="mark" aria-hidden="true">○</span> <span>Listo</span></li></ol><p class="stepn" aria-hidden="true"></p></nav>
+<div class="talk">
+ <section class="guide" aria-label="La capibara te explica"><div class="who"><svg class="cap" viewBox="0 0 35 14" width="210" height="84" role="img" aria-label="Capibara guía con una balanza"><g><rect class="c-w" x="6" y="0" width="2" height="1"/><rect class="c-w" x="6" y="1" width="2" height="1"/><rect class="c-w" x="0" y="2" width="14" height="1"/><rect class="c-w" x="6" y="3" width="2" height="1"/><rect class="c-w" x="6" y="4" width="2" height="1"/><rect class="c-w" x="6" y="5" width="2" height="1"/><rect class="c-w" x="6" y="6" width="2" height="1"/><rect class="c-w" x="6" y="7" width="2" height="1"/><rect class="c-w" x="6" y="8" width="2" height="1"/><rect class="c-w" x="6" y="9" width="2" height="1"/><rect class="c-w" x="6" y="10" width="2" height="1"/><rect class="c-w" x="6" y="11" width="2" height="1"/><rect class="c-w" x="6" y="12" width="2" height="1"/><rect class="c-w" x="3" y="13" width="8" height="1"/></g><g class="panl"><rect class="c-w" x="2" y="3" width="1" height="1"/><rect class="c-w" x="2" y="4" width="1" height="1"/><rect class="c-w" x="2" y="5" width="1" height="1"/><rect class="c-l" x="0" y="6" width="5" height="1"/><rect class="c-l" x="1" y="7" width="3" height="1"/></g><g class="panr"><rect class="c-w" x="11" y="3" width="1" height="1"/><rect class="c-w" x="11" y="4" width="1" height="1"/><rect class="c-w" x="11" y="5" width="1" height="1"/><rect class="c-l" x="9" y="6" width="5" height="1"/><rect class="c-l" x="10" y="7" width="3" height="1"/></g><g class="body"><rect class="c-o" x="27" y="2" width="2" height="1"/><rect class="c-o" x="17" y="3" width="11" height="1"/><rect class="c-b" x="28" y="3" width="1" height="1"/><rect class="c-o" x="29" y="3" width="2" height="1"/><rect class="c-o" x="16" y="4" width="1" height="1"/><rect class="c-b" x="17" y="4" width="14" height="1"/><rect class="c-o" x="31" y="4" width="4" height="1"/><rect class="c-o" x="15" y="5" width="1" height="1"/><rect class="c-b" x="16" y="5" width="3" height="1"/><rect class="c-w" x="19" y="5" width="2" height="1"/><rect class="c-b" x="21" y="5" width="13" height="1"/><rect class="c-o" x="34" y="5" width="1" height="1"/><rect class="c-o" x="15" y="6" width="1" height="1"/><rect class="c-b" x="16" y="6" width="18" height="1"/><rect class="c-o" x="34" y="6" width="1" height="1"/><rect class="c-o" x="15" y="7" width="1" height="1"/><rect class="c-b" x="16" y="7" width="18" height="1"/><rect class="c-o" x="34" y="7" width="1" height="1"/><rect class="c-o" x="15" y="8" width="1" height="1"/><rect class="c-b" x="16" y="8" width="17" height="1"/><rect class="c-o" x="33" y="8" width="1" height="1"/><rect class="c-o" x="16" y="9" width="1" height="1"/><rect class="c-b" x="17" y="9" width="15" height="1"/><rect class="c-o" x="32" y="9" width="1" height="1"/><rect class="c-o" x="16" y="10" width="16" height="1"/><rect class="c-o" x="17" y="11" width="1" height="1"/><rect class="c-b" x="18" y="11" width="2" height="1"/><rect class="c-o" x="20" y="11" width="1" height="1"/><rect class="c-o" x="28" y="11" width="1" height="1"/><rect class="c-b" x="29" y="11" width="2" height="1"/><rect class="c-o" x="31" y="11" width="1" height="1"/><rect class="c-o" x="17" y="12" width="1" height="1"/><rect class="c-b" x="18" y="12" width="2" height="1"/><rect class="c-o" x="20" y="12" width="1" height="1"/><rect class="c-o" x="28" y="12" width="1" height="1"/><rect class="c-b" x="29" y="12" width="2" height="1"/><rect class="c-o" x="31" y="12" width="1" height="1"/><rect class="c-o" x="17" y="13" width="4" height="1"/><rect class="c-o" x="28" y="13" width="4" height="1"/><rect class="c-o eye" x="31" y="5" width="1" height="1"/></g></svg></div><div class="bubble" role="status" aria-live="polite"><div class="who-name">Capibara de ai-balancer</div><p id="bubble"></p></div></section>
+ <main class="stage" tabindex="0" aria-label="Pantalla del paso"><section class="stateview" data-state="welcome" hidden><h1>Bienvenido a ai-balancer</h1>
+<div class="wl">
+ <div class="wl-main">
+  <p>ai-balancer vigila cuánto te queda de cada suscripción de IA.</p>
+  <p>Cuando una se agota, pasa tus agentes a una suscripción de respaldo para que no dejes de trabajar.</p>
+  <p>Este instalador lo arma por vos, una decisión por pantalla.</p>
+  <p class="dim">Tarda unos 2 minutos. No se cambia nada hasta el final y siempre podés volver atrás.</p>
+  <h2>Qué va a hacer este instalador</h2>
+  <ol class="review"><li>Buscar las suscripciones de IA en las que iniciaste sesión (no gasta nada de tu uso).</li><li>Armar respaldos para que tus agentes no se frenen cuando se agota una suscripción.</li><li>Asignar cada tarea de los agentes al modelo que mejor le queda.</li><li>Mostrarte un resumen y escribir los archivos solo cuando apretes Instalar, guardando antes una copia .bak de cada uno.</li></ol>
+ </div>
+ 
+</div>
+<p class="star-row"><a class="star" href="https://github.com/3lAngel0/balanceria" data-focus="welcome"><svg viewBox="0 0 9 7" width="27" height="21" aria-hidden="true" class="cap"><rect class="c-b" x="4" y="0" width="1" height="1"/><rect class="c-b" x="3" y="1" width="1" height="1"/><rect class="c-b" x="4" y="1" width="1" height="1"/><rect class="c-b" x="5" y="1" width="1" height="1"/><rect class="c-b" x="0" y="2" width="1" height="1"/><rect class="c-b" x="1" y="2" width="1" height="1"/><rect class="c-b" x="2" y="2" width="1" height="1"/><rect class="c-b" x="3" y="2" width="1" height="1"/><rect class="c-b" x="4" y="2" width="1" height="1"/><rect class="c-b" x="5" y="2" width="1" height="1"/><rect class="c-b" x="6" y="2" width="1" height="1"/><rect class="c-b" x="7" y="2" width="1" height="1"/><rect class="c-b" x="8" y="2" width="1" height="1"/><rect class="c-b" x="1" y="3" width="1" height="1"/><rect class="c-b" x="2" y="3" width="1" height="1"/><rect class="c-b" x="3" y="3" width="1" height="1"/><rect class="c-b" x="4" y="3" width="1" height="1"/><rect class="c-b" x="5" y="3" width="1" height="1"/><rect class="c-b" x="6" y="3" width="1" height="1"/><rect class="c-b" x="7" y="3" width="1" height="1"/><rect class="c-b" x="2" y="4" width="1" height="1"/><rect class="c-b" x="3" y="4" width="1" height="1"/><rect class="c-b" x="4" y="4" width="1" height="1"/><rect class="c-b" x="5" y="4" width="1" height="1"/><rect class="c-b" x="6" y="4" width="1" height="1"/><rect class="c-b" x="1" y="5" width="1" height="1"/><rect class="c-b" x="2" y="5" width="1" height="1"/><rect class="c-b" x="3" y="5" width="1" height="1"/><rect class="c-b" x="5" y="5" width="1" height="1"/><rect class="c-b" x="6" y="5" width="1" height="1"/><rect class="c-b" x="7" y="5" width="1" height="1"/><rect class="c-b" x="1" y="6" width="1" height="1"/><rect class="c-b" x="2" y="6" width="1" height="1"/><rect class="c-b" x="6" y="6" width="1" height="1"/><rect class="c-b" x="7" y="6" width="1" height="1"/></svg><span>Si ai-balancer te sirve, dejá una estrella en GitHub: https://github.com/3lAngel0/balanceria</span></a></p>
+<h2>Palabras que usa este instalador</h2>
+<dl class="defs"><div class="def" tabindex="0" data-focus="def-sub"><dt>Suscripción</dt><dd>Un plan de IA que pagás o en el que iniciaste sesión (por ejemplo Claude Pro o Google AI Pro). Cada una tiene su propio límite de uso.</dd></div><div class="def" tabindex="0" data-focus="def-backup"><dt>Respaldo</dt><dd>Una lista ordenada de suscripciones que ofrecen el mismo modelo. Cuando la primera se agota, tu agente pasa a la siguiente y sigue trabajando.</dd></div><div class="def" tabindex="0" data-focus="def-task"><dt>Tarea del agente</dt><dd>Un trabajo que hacen tus agentes, como leer archivos, escribir código o revisar. Cada tarea puede usar otro modelo: barato para lo simple y fuerte para lo difícil.</dd></div><div class="def" tabindex="0" data-focus="def-strategy"><dt>Estrategia (cómo elegir cuál usar primero)</dt><dd>La regla que sigue un respaldo para elegir qué suscripción responde ahora: en orden, la que más margen tiene, o una mezcla de ambas.</dd></div><div class="def" tabindex="0" data-focus="def-main"><dt>Agente principal</dt><dd>El agente con el que hablás. Puede hacer el trabajo él solo o solo coordinar y repartir cada tarea a los otros agentes.</dd></div></dl></section><section class="stateview" data-state="backups" hidden><h1>Respaldos</h1>
+<p>Un respaldo junta suscripciones que ofrecen el mismo modelo. Cuando la primera se agota, tu agente pasa a la siguiente.</p>
+<div class="bk">
+ <div class="bk-edit">
+  <h2>Respaldo Claude Sonnet 5.5</h2>
+  <ul class="list" id="bk-list" aria-label="Miembros del respaldo, en orden"></ul>
+  <p class="small dim" style="margin-top:8px">Cada suscripción tiene su propio límite de uso.</p>
+  <div class="row"><button type="button" class="btn-small" data-focus="backups">+ Crear otro respaldo</button></div>
+ </div>
+ <div class="bk-view">
+  <h2>Cómo queda</h2>
+  <div class="diagram" id="bk-diagram" role="img" aria-label="Tu agente, después el respaldo, después las suscripciones en orden"></div>
+  <p class="small dim" style="margin-top:8px"><b>Claude Opus 5.5</b> (solo en Claude Pro): no necesita respaldo.<br><b>Gemini 3.8 Flash</b> (solo en Google AI Pro): no necesita respaldo.</p>
+ </div>
+</div>
+<h2>Cómo elegir cuál usar primero</h2>
+<p class="small dim">Elegí cómo decide ai-balancer qué suscripción del respaldo responde ahora.</p>
+<div class="strats" role="radiogroup" aria-label="Cómo elegir cuál usar primero"><label class="opt" data-focus="st-hybrid"><input type="radio" name="strat" value="hybrid" checked><span class="txt"><b>Mixto</b><span class="small dim">Arranca con la primera y pasa a una con más margen cuando se está agotando. Ejemplo: la 1.ª casi no tiene uso, responde la 2.ª.</span></span></label><label class="opt" data-focus="st-waterfall"><input type="radio" name="strat" value="waterfall"><span class="txt"><b>En orden</b><span class="small dim">Usa siempre la primera hasta que se agota y después la segunda. Ejemplo: la 1.ª se usa toda la semana; la 2.ª solo cuando la 1.ª se vacía.</span></span></label><label class="opt" data-focus="st-highest-quota"><input type="radio" name="strat" value="highest-quota"><span class="txt"><b>La que más le queda</b><span class="small dim">Elige siempre la suscripción con más uso disponible. Ejemplo: a la 1.ª le queda 20 % y a la 2.ª 70 %, responde la 2.ª.</span></span></label></div></section><section class="stateview" data-state="tasks" hidden><h1>Tareas de los agentes</h1>
+<p>Cada tarea es un trabajo de tus agentes. Elegí qué modelo la hace; la recomendación cuida tu uso.</p>
+<table class="tasks"><thead><tr><th scope="col" style="width:28px"><span class="sr">Asignar</span></th><th scope="col">Tarea</th><th scope="col">Consumo</th><th scope="col">Ahora · Recomendado</th></tr></thead><tbody><tr data-focus="task-read"><td><input type="checkbox" aria-label="Asignar lo recomendado a Leer archivos" checked></td><td><b>Leer archivos</b><br><span class="small dim">Recorre tu proyecto rápido sin cambiar nada.</span></td><td>Consume poco de tu uso.</td><td>Ahora: Gemini 3.8 Flash · Recomendado: Gemini 3.8 Flash</td></tr><tr data-focus="task-write"><td><input type="checkbox" aria-label="Asignar lo recomendado a Escribir código" checked></td><td><b>Escribir código</b><br><span class="small dim">Hace los cambios y corre las pruebas.</span></td><td>Consume mucho de tu uso.</td><td>Ahora: Respaldo Claude Sonnet 5.5 · Recomendado: Respaldo Claude Sonnet 5.5</td></tr><tr data-focus="task-check"><td><input type="checkbox" aria-label="Asignar lo recomendado a Comprobar el resultado"></td><td><b>Comprobar el resultado</b><br><span class="small dim">Confirma que lo construido funciona.</span></td><td>Consume una cantidad media de tu uso.</td><td>Ahora: sin asignar · Recomendado: Gemini 3.8 Flash</td></tr><tr data-focus="task-risk"><td><input type="checkbox" aria-label="Asignar lo recomendado a Revisar riesgos"></td><td><b>Revisar riesgos</b><br><span class="small dim">Busca cosas que podrían salir mal.</span></td><td>Consume una cantidad media de tu uso.</td><td>Ahora: sin asignar · Recomendado: Claude Opus 5.5</td></tr></tbody></table>
+<div class="row" style="margin:12px 0">
+ <button type="button" data-focus="tasks">Asignar lo recomendado</button>
+ <button type="button" class="deep" data-act="deep" data-focus="deep">Análisis profundo (gasta uso)</button>
+ <span class="small dim">Asignar lo recomendado no gasta uso.</span>
+</div>
+<div class="deep-pick"><p>Voy a buscar en profundidad para estas tareas: Leer archivos, Escribir código, Revisar riesgos. Decime cuál modelo uso (gasta algo de su uso).</p><div class="row" role="radiogroup" aria-label="Suscripción para el análisis"><label class="opt"><input type="radio" name="deep" checked><span class="txt"><b>Claude Pro</b><span class="small dim">Tiene su propio límite de uso.</span></span></label><label class="opt"><input type="radio" name="deep"><span class="txt"><b>Google AI Pro</b><span class="small dim">Tiene su propio límite de uso.</span></span></label></div></div></section><section class="stateview" data-state="tasks-running" hidden><h1>Tareas de los agentes</h1>
+<p>Cada tarea es un trabajo de tus agentes. Elegí qué modelo la hace; la recomendación cuida tu uso.</p>
+<table class="tasks"><thead><tr><th scope="col" style="width:28px"><span class="sr">Asignar</span></th><th scope="col">Tarea</th><th scope="col">Consumo</th><th scope="col">Ahora · Recomendado</th></tr></thead><tbody><tr data-focus="task-read"><td><input type="checkbox" aria-label="Asignar lo recomendado a Leer archivos" checked></td><td><b>Leer archivos</b><br><span class="small dim">Recorre tu proyecto rápido sin cambiar nada.</span></td><td>Consume poco de tu uso.</td><td>Ahora: Gemini 3.8 Flash · Recomendado: Gemini 3.8 Flash</td></tr><tr data-focus="task-write"><td><input type="checkbox" aria-label="Asignar lo recomendado a Escribir código" checked></td><td><b>Escribir código</b><br><span class="small dim">Hace los cambios y corre las pruebas.</span></td><td>Consume mucho de tu uso.</td><td>Ahora: Respaldo Claude Sonnet 5.5 · Recomendado: Respaldo Claude Sonnet 5.5</td></tr><tr data-focus="task-check"><td><input type="checkbox" aria-label="Asignar lo recomendado a Comprobar el resultado"></td><td><b>Comprobar el resultado</b><br><span class="small dim">Confirma que lo construido funciona.</span></td><td>Consume una cantidad media de tu uso.</td><td>Ahora: sin asignar · Recomendado: Gemini 3.8 Flash</td></tr><tr data-focus="task-risk"><td><input type="checkbox" aria-label="Asignar lo recomendado a Revisar riesgos"></td><td><b>Revisar riesgos</b><br><span class="small dim">Busca cosas que podrían salir mal.</span></td><td>Consume una cantidad media de tu uso.</td><td>Ahora: sin asignar · Recomendado: Claude Opus 5.5</td></tr></tbody></table>
+<div class="row" style="margin:12px 0">
+ <button type="button" data-focus="tasks" disabled>Asignar lo recomendado</button>
+ <button type="button" class="deep" data-act="deep" data-focus="deep" disabled aria-disabled="true">Análisis profundo (gasta uso)</button>
+ <span class="small dim">Hay un análisis en curso: el botón vuelve cuando termine.</span>
+</div>
+<div class="progress" role="group" aria-label="Análisis profundo en curso"><p style="margin-bottom:8px">Consultando a Claude Pro. Gasta algo de su uso y puede tardar unos minutos. No vuelvas a pedirlo.</p><div class="bar" role="progressbar" aria-label="Consultando al modelo" aria-valuetext="Consultando, sin duración conocida"><i></i></div><p class="small dim" style="margin:8px 0 0" aria-live="off">Pasaron <b class="elapsed">12</b> s</p></div></section><section class="stateview" data-state="tasks-done" hidden><h1>Tareas de los agentes</h1>
+<p>Cada tarea es un trabajo de tus agentes. Elegí qué modelo la hace; la recomendación cuida tu uso.</p>
+<table class="tasks"><thead><tr><th scope="col" style="width:28px"><span class="sr">Asignar</span></th><th scope="col">Tarea</th><th scope="col">Consumo</th><th scope="col">Ahora · Recomendado</th></tr></thead><tbody><tr data-focus="task-read"><td><input type="checkbox" aria-label="Asignar lo recomendado a Leer archivos" checked></td><td><b>Leer archivos</b><br><span class="small dim">Recorre tu proyecto rápido sin cambiar nada.</span></td><td>Consume poco de tu uso.</td><td>Ahora: Gemini 3.8 Flash · Recomendado: Gemini 3.8 Flash</td></tr><tr data-focus="task-write"><td><input type="checkbox" aria-label="Asignar lo recomendado a Escribir código" checked></td><td><b>Escribir código</b><br><span class="small dim">Hace los cambios y corre las pruebas.</span></td><td>Consume mucho de tu uso.</td><td>Ahora: Respaldo Claude Sonnet 5.5 · Recomendado: Respaldo Claude Sonnet 5.5</td></tr><tr data-focus="task-check"><td><input type="checkbox" aria-label="Asignar lo recomendado a Comprobar el resultado" checked></td><td><b>Comprobar el resultado</b><br><span class="small dim">Confirma que lo construido funciona.</span></td><td>Consume una cantidad media de tu uso.</td><td>Ahora: Gemini 3.8 Flash · Recomendado: Gemini 3.8 Flash</td></tr><tr data-focus="task-risk"><td><input type="checkbox" aria-label="Asignar lo recomendado a Revisar riesgos" checked></td><td><b>Revisar riesgos</b><br><span class="small dim">Busca cosas que podrían salir mal.</span></td><td>Consume una cantidad media de tu uso.</td><td>Ahora: Claude Opus 5.5 · Recomendado: Claude Opus 5.5</td></tr></tbody></table>
+<div class="row" style="margin:12px 0">
+ <button type="button" data-focus="tasks">Asignar lo recomendado</button>
+ <button type="button" class="deep" data-act="deep" data-focus="deep">Análisis profundo (gasta uso)</button>
+ <span class="small dim">Asignar lo recomendado no gasta uso.</span>
+</div>
+<div class="status" role="status"><b>Consultado: tardó 47 s, gastó 3.120 tokens de la suscripción Claude Pro</b><p class="small dim" style="margin:4px 0 0">Las tareas Comprobar el resultado y Revisar riesgos ya tienen modelo asignado. Podés cambiarlo antes de seguir.</p></div></section><section class="stateview" data-state="summary" hidden><h1>Resumen</h1>
+<div class="narr">
+ <p>Vas a balancear la carga entre estos proveedores: Claude Pro, Google AI Pro.</p>
+ <p>Después tenés este pool de suscripciones que vienen incluidas en cada proveedor y ofrecen el mismo modelo, para que tus agentes no se frenen: Respaldo Claude Sonnet 5.5 (Claude Pro, después Google AI Pro).</p>
+ <p>Se usan los modelos: Claude Opus 5.5, Claude Sonnet 5.5, Gemini 3.8 Flash, conjuntamente con la estrategia Mixto.</p>
+ <p>Tu agente principal: Trabaja solo.</p>
+</div>
+<h2>Para que puedas revisarlo</h2>
+<p>Para que puedas revisarlo te dejo un resumen de la configuración que seleccionaste:</p>
+<ul class="review">
+ <li>Suscripciones: Claude Pro, Google AI Pro</li>
+ <li>Respaldo Claude Sonnet 5.5: 1. Claude Pro, 2. Google AI Pro. Cómo elegir: Mixto.</li>
+ <li>Tarea Leer archivos: Gemini 3.8 Flash</li>
+ <li>Tarea Escribir código: Respaldo Claude Sonnet 5.5</li>
+ <li>Tarea Comprobar el resultado: Gemini 3.8 Flash</li>
+ <li>Tarea Revisar riesgos: Claude Opus 5.5</li>
+ <li>Agente principal: Trabaja solo</li>
+ <li>Archivos que cambian: pools.json, integrations.json, profiles.json. Antes se guarda una copia .bak de cada uno.</li>
+</ul>
+<p class="closing">Si estás de acuerdo apretá Enter o cancelalo, o volvé atrás con los menús.</p></section><section class="stateview" data-state="error" hidden><div class="alert" role="alert">
+ <h2>La instalación no terminó</h2>
+ <p>Falló al escribir tu configuración: EACCES, permiso denegado al escribir pools.json.</p>
+ <p>Ya se escribieron algunos archivos. Apretá Reintentar para probar de nuevo, Atrás para revisar el resumen, o Deshacer para restaurar tus copias .bak.</p>
+</div>
+<h2 style="margin-top:12px">Instalando</h2>
+<ul class="steps-run">
+ <li class="ok"><span aria-hidden="true">✓</span>Guardando copias de tus archivos</li>
+ <li class="ko"><span aria-hidden="true">✕</span>Armando los respaldos (falló)</li>
+ <li class="wait"><span aria-hidden="true">○</span>Asignando las tareas de los agentes</li>
+ <li class="wait"><span aria-hidden="true">○</span>Comprobando que cada suscripción tiene la sesión iniciada</li>
+</ul>
+<p class="dim small">Esto no gasta nada de tu uso. Se guardaron 3 copias (.bak). Podés deshacer todo.</p></section></main>
+ <footer class="reply"><p class="close-note" role="note" style="margin:0">Si cerrás el setup no se aplica nada: tus archivos quedan como están hasta que aprietes Instalar.</p><div class="nav" id="nav"></div></footer>
+</div>
+<aside class="help pixel-card" aria-label="Ayuda del paso" aria-live="polite"><div id="help-body"><h2>¿Qué es esto?</h2><p class="focus">Bienvenida</p><dl><div><dt>Qué es</dt><dd>Este es el instalador de ai-balancer. Vigila cuánto uso le queda a cada una de tus suscripciones de IA y pasa tus agentes a otra cuando una se agota, así no lo hacés a mano.</dd></div><div><dt>Para qué sirve</dt><dd>Leé las definiciones de abajo para que las próximas pantallas se entiendan. No se escribe nada hasta que aprietes Instalar al final.</dd></div></dl><p class="tech">Nombre técnico: ai-balancer<br>Se guarda en: pools.json, integrations.json, profiles.json</p></div></aside>
+</div>
+<script>
+const D={"steps":["Bienvenida","Tipo de instalación","Buscando suscripciones","Tus suscripciones","Respaldos","Tareas de los agentes","Agente principal","Resumen","Instalando","Listo"],"stateStep":{"welcome":0,"backups":4,"tasks":5,"tasks-running":5,"tasks-done":5,"summary":7,"error":8},"help":{"welcome":{"title":"Bienvenida","what":"Este es el instalador de ai-balancer. Vigila cuánto uso le queda a cada una de tus suscripciones de IA y pasa tus agentes a otra cuando una se agota, así no lo hacés a mano.","purpose":"Leé las definiciones de abajo para que las próximas pantallas se entiendan. No se escribe nada hasta que aprietes Instalar al final.","tech":"ai-balancer","file":"pools.json, integrations.json, profiles.json"},"def-sub":{"title":"Suscripción","what":"Un plan de IA que pagás o en el que iniciaste sesión (por ejemplo Claude Pro o Google AI Pro). Cada una tiene su propio límite de uso.","purpose":"Es lo que ai-balancer vigila y reparte.","tech":"provider","file":"integrations.json"},"def-backup":{"title":"Respaldo","what":"Una lista ordenada de suscripciones que ofrecen el mismo modelo. Cuando la primera se agota, tu agente pasa a la siguiente y sigue trabajando.","purpose":"Que tus agentes no se frenen cuando una suscripción se agota.","tech":"pool","file":"pools.json"},"def-task":{"title":"Tarea del agente","what":"Un trabajo que hacen tus agentes, como leer archivos, escribir código o revisar. Cada tarea puede usar otro modelo: barato para lo simple y fuerte para lo difícil.","purpose":"Los modelos baratos para lo simple cuidan tu uso fuerte para lo difícil.","tech":"role","file":"profiles.json"},"def-strategy":{"title":"Estrategia (cómo elegir cuál usar primero)","what":"La regla que sigue un respaldo para elegir qué suscripción responde ahora: en orden, la que más margen tiene, o una mezcla de ambas.","purpose":"Decide qué suscripción gasta su uso primero.","tech":"strategy (hybrid, waterfall, highest-quota)","file":"pools.json"},"def-main":{"title":"Agente principal","what":"El agente con el que hablás. Puede hacer el trabajo él solo o solo coordinar y repartir cada tarea a los otros agentes.","purpose":"Repartir todo distribuye el trabajo entre modelos y cuida el uso del agente principal.","tech":"orchestratorMode (organic, full-delegation)","file":"profiles.json"},"backups":{"title":"Respaldos","what":"Un respaldo es una lista ordenada de suscripciones que ofrecen el mismo modelo. Tu agente usa la primera; cuando se agota pasa a la segunda, y así.","purpose":"El orden y la forma de elegir deciden qué suscripción gasta su uso primero. Marcá o desmarcá miembros, subilos o bajalos, cambiá cómo elegir, o creá otro respaldo.","tech":"pool","file":"pools.json"},"member-0":{"title":"Claude Pro","what":"Claude Pro es miembro del respaldo Claude Sonnet 5.5.","purpose":"Responde cuando los miembros anteriores se agotaron; su lugar en la lista es su turno.","if":"Marcarla la suma al respaldo y desmarcarla la saca. Subila para usarla antes o bajala para usarla después.","tech":"pool","file":"pools.json"},"member-1":{"title":"Google AI Pro","what":"Google AI Pro es miembro del respaldo Claude Sonnet 5.5.","purpose":"Responde cuando los miembros anteriores se agotaron; su lugar en la lista es su turno.","if":"Marcarla la suma al respaldo y desmarcarla la saca. Subila para usarla antes o bajala para usarla después.","tech":"pool","file":"pools.json"},"member-2":{"title":"GitHub Copilot","what":"GitHub Copilot es miembro del respaldo Claude Sonnet 5.5.","purpose":"Responde cuando los miembros anteriores se agotaron; su lugar en la lista es su turno.","if":"Marcarla la suma al respaldo y desmarcarla la saca. Subila para usarla antes o bajala para usarla después.","tech":"pool","file":"pools.json"},"st-hybrid":{"title":"Mixto","what":"Una mezcla: arranca con la primera suscripción y pasa a una con más margen cuando la primera se está agotando.","purpose":"El valor equilibrado: respeta tu orden sin dejar que una suscripción se seque.","if":"La primera responde hasta que casi se vacía; entonces toma la que más margen tiene.","tech":"strategy: hybrid","file":"pools.json"},"st-waterfall":{"title":"En orden","what":"Usa siempre la primera suscripción hasta que se agota, después la segunda, y así.","purpose":"Usala cuando querés terminar el uso de una suscripción antes de tocar la siguiente.","if":"Se sigue estrictamente el orden que pusiste; las siguientes no se tocan hasta que las anteriores se vacían.","tech":"strategy: waterfall","file":"pools.json"},"st-highest-quota":{"title":"La que más le queda","what":"Elige siempre la suscripción con más uso disponible.","purpose":"Reparte el uso parejo para que ninguna se agote antes que las otras.","if":"El orden importa poco: responde la que más margen tiene.","tech":"strategy: highest-quota","file":"pools.json"},"tasks":{"title":"Tareas de los agentes","what":"Una tarea del agente es un tipo de trabajo que hacen tus agentes (leer archivos, escribir código, revisar...). Cada una puede usar otro modelo o respaldo.","purpose":"Los modelos baratos para lo simple cuidan tu uso fuerte para lo difícil. Asigná lo recomendado gratis, elegí un modelo por tarea, o corré el análisis profundo, que consulta a un modelo y gasta algo de su uso.","tech":"role","file":"profiles.json"},"task-read":{"title":"Leer archivos","what":"Recorre tu proyecto rápido sin cambiar nada.","purpose":"Consume poco de tu uso. Recomendado: Gemini 3.8 Flash.","if":"Marcarla asigna el modelo recomendado; Enter para elegir otro.","tech":"role: gentle-ai-explore","file":"profiles.json"},"task-write":{"title":"Escribir código","what":"Hace los cambios y corre las pruebas.","purpose":"Consume mucho de tu uso. Recomendado: Respaldo Claude Sonnet 5.5.","if":"Marcarla asigna el modelo recomendado; Enter para elegir otro.","tech":"role: gentle-ai-worker","file":"profiles.json"},"task-check":{"title":"Comprobar el resultado","what":"Confirma que lo construido funciona.","purpose":"Consume una cantidad media de tu uso. Recomendado: Gemini 3.8 Flash.","if":"Marcarla asigna el modelo recomendado; Enter para elegir otro.","tech":"role: gentle-ai-verify","file":"profiles.json"},"task-risk":{"title":"Revisar riesgos","what":"Busca cosas que podrían salir mal.","purpose":"Consume una cantidad media de tu uso. Recomendado: Claude Opus 5.5.","if":"Marcarla asigna el modelo recomendado; Enter para elegir otro.","tech":"role: review-risk","file":"profiles.json"},"deep":{"title":"Análisis profundo (gasta uso)","what":"Consulta a un modelo de verdad para proponer qué modelo conviene en cada tarea. Voy a buscar en profundidad para estas tareas: Leer archivos, Escribir código, Revisar riesgos.","purpose":"Gasta algo del uso de la suscripción que elijas y puede tardar unos minutos. Asignar lo recomendado no gasta nada.","if":"Mientras consulta, el botón queda deshabilitado: así no se gasta uso de más.","tech":"role","file":"profiles.json"},"tasks-running":{"title":"Consultando","what":"Consultando a Claude Pro. Gasta algo de su uso y puede tardar unos minutos. No vuelvas a pedirlo.","purpose":"El botón está deshabilitado y el servidor rechaza un segundo análisis mientras hay uno en curso.","if":"Si falla o se pasa del tiempo, ves un error con qué hacer; nunca queda colgado.","tech":"role","file":"profiles.json"},"summary":{"title":"Resumen","what":"Todo lo que elegiste, primero en palabras normales y después en detalle: suscripciones, respaldos con su orden, tareas de los agentes, agente principal y los archivos que van a cambiar.","purpose":"Revisalo. Enter instala, Cancelar no aplica nada y Atrás te deja cambiar cualquier decisión.","tech":"diff","file":"pools.json, integrations.json, profiles.json"},"error":{"title":"La instalación no terminó","what":"Primero se guardan copias de tus archivos, después se escriben los respaldos, las tareas de los agentes y el agente principal, y se comprueba que cada suscripción tenga la sesión iniciada.","purpose":"Esto no gasta nada de tu uso. Si algo falla podés reintentar, volver atrás o deshacer.","tech":"copias .bak","file":"pools.json.bak, integrations.json.bak, profiles.json.bak"},"tasks-done":{"title":"Tareas de los agentes (análisis listo)","what":"Una tarea del agente es un tipo de trabajo que hacen tus agentes (leer archivos, escribir código, revisar...). Cada una puede usar otro modelo o respaldo.","purpose":"Los modelos baratos para lo simple cuidan tu uso fuerte para lo difícil. Asigná lo recomendado gratis, elegí un modelo por tarea, o corré el análisis profundo, que consulta a un modelo y gasta algo de su uso.","tech":"role","file":"profiles.json"}},"defaultHelp":{"welcome":"welcome","backups":"backups","tasks":"tasks","tasks-running":"tasks-running","tasks-done":"tasks-done","summary":"summary","error":"error"},"nav":{"welcome":[["back","Atrás","x"],["next","Siguiente","p"],["cancel","Cancelar"]],"backups":[["back","Atrás"],["next","Siguiente","p"],["cancel","Cancelar"]],"tasks":[["back","Atrás"],["next","Siguiente","p"],["cancel","Cancelar"]],"tasks-running":[["back","Atrás"],["next","Siguiente","p"],["cancel","Cancelar"]],"tasks-done":[["back","Atrás"],["next","Siguiente","p"],["cancel","Cancelar"]],"summary":[["back","Atrás"],["install","Instalar","p"],["cancel","Cancelar"]],"error":[["retry","Reintentar","p"],["back","Atrás"],["undo","Deshacer todo"],["cancel","Cancelar"]]},"bubble":{"welcome":"Hola, soy tu capibara. ai-balancer vigila cuánto te queda de cada suscripción de IA. Cuando una se agota, pasa tus agentes a una de respaldo para que no dejes de trabajar. No se cambia nada hasta el final y siempre podés volver atrás.","backups":"Un respaldo junta suscripciones que ofrecen el mismo modelo. Cuando la primera se agota, tu agente pasa a la siguiente. Marcá cuáles entran, cambiá el orden y mirá el diagrama.","tasks":"Cada tarea es un trabajo de tus agentes. Elegí qué modelo la hace; la recomendación cuida tu uso. El análisis profundo consulta a un modelo de verdad y gasta uso.","tasks-running":"Consultando a Claude Pro. Gasta algo de su uso y puede tardar unos minutos. No vuelvas a pedirlo. Yo te aviso cuando termine.","tasks-done":"Listo, ya consulté. Mirá cuánto tardó y cuánto gastó; si querés, podés cambiar cualquier modelo antes de seguir.","summary":"Para que puedas revisarlo te dejo un resumen de la configuración que seleccionaste.","error":"Ups, algo falló al escribir tus archivos. No pasa nada: podés reintentar, volver atrás o deshacer."},"strats":{"hybrid":"Mixto","waterfall":"En orden","highest-quota":"La que más le queda"}};
+const helpHtml=function helpHtml(h) {
+	const e = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;');
+	return '<h2>¿Qué es esto?</h2><p class="focus">' + e(h.title) + '</p><dl><div><dt>Qué es</dt><dd>' + e(h.what) + '</dd></div>'
+		+ (h.purpose ? '<div><dt>Para qué sirve</dt><dd>' + e(h.purpose) + '</dd></div>' : '')
+		+ (h.if ? '<div><dt>Qué pasa</dt><dd>' + e(h.if) + '</dd></div>' : '') + '</dl>'
+		+ '<p class="tech">Nombre técnico: ' + e(h.tech) + '<br>Se guarda en: ' + e(h.file) + '</p>';
+};
+const $=(s,r=document)=>r.querySelector(s),$$=(s,r=document)=>[...r.querySelectorAll(s)];
+const ORDER=['welcome','backups','tasks','tasks-running','tasks-done','summary','error'];
+const NEXT={welcome:'backups',backups:'tasks',tasks:'summary','tasks-running':'summary','tasks-done':'summary',summary:'error'};
+const PREV={backups:'welcome',tasks:'backups','tasks-running':'backups','tasks-done':'backups',summary:'tasks-done',error:'summary'};
+let state='welcome',timer=null;
+function showHelp(k){const h=D.help[k];if(h)$('#help-body').innerHTML=helpHtml(h)}
+function setState(id){
+ state=id;document.body.dataset.state=id;
+ $$('[data-state]').forEach(s=>{if(s.classList.contains('stateview'))s.hidden=s.dataset.state!==id});
+ $$('.mock button').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.go===id)));
+ const cur=D.stateStep[id];
+ $$('.step').forEach(s=>{const i=+s.dataset.i;const st=i<cur?'done':i===cur?'current':'todo';s.dataset.s=st;s.querySelector('.mark').textContent=st==='done'?'✓':st==='current'?'●':'○';if(st==='current')s.setAttribute('aria-current','step');else s.removeAttribute('aria-current')});
+ $$('.stepn').forEach(e=>e.textContent='Paso '+(cur+1)+' de '+D.steps.length);
+ const nv=$('#nav');nv.innerHTML='';
+ D.nav[id].forEach(([a,l,f])=>{const b=document.createElement('button');b.type='button';b.textContent=l;b.dataset.act=a;if(f==='p')b.className='btn-primary';if(f==='x'){b.disabled=true}nv.appendChild(b)});
+ showHelp(D.defaultHelp[id]);
+ const bb=$('#bubble');if(bb)bb.textContent=D.bubble[id];
+ clearInterval(timer);
+ if(id==='tasks-running'){let n=12;timer=setInterval(()=>{n++;$$('.elapsed').forEach(e=>e.textContent=n)},1000)}
+ const m=$('.stage');if(m)m.scrollTop=0;
+}
+document.addEventListener('click',e=>{
+ const g=e.target.closest('[data-go]');if(g){setState(g.dataset.go);return}
+ const a=e.target.closest('[data-act]');if(!a||a.disabled||a.getAttribute('aria-disabled')==='true')return;
+ const act=a.dataset.act;
+ if(act==='next'||act==='install'||act==='retry')setState(NEXT[state]||state);
+ else if(act==='back')setState(PREV[state]||state);
+ else if(act==='deep'){a.disabled=true;a.setAttribute('aria-disabled','true');setState('tasks-running')}
+ else if(act==='undo')setState('summary');
+});
+document.addEventListener('focusin',e=>{const f=e.target.closest('[data-focus]');if(f)showHelp(f.dataset.focus)});
+document.addEventListener('mouseover',e=>{const f=e.target.closest('[data-focus]');if(f)showHelp(f.dataset.focus)});
+// backups: live list + diagram
+const M=[{n:'Claude Pro',on:true},{n:'Google AI Pro',on:true},{n:'GitHub Copilot',on:false}];
+const KEY={'Claude Pro':'member-0','Google AI Pro':'member-1','GitHub Copilot':'member-2'};
+function diagram(){
+ const on=M.filter(m=>m.on),H=Math.max(112,on.length*76+16),cy=H/2;
+ let s='<svg viewBox="0 0 440 '+H+'" aria-hidden="true">';
+ s+='<rect class="dg-node" x="4" y="'+(cy-24)+'" width="88" height="48"/><text class="dg-t" x="48" y="'+(cy+5)+'" text-anchor="middle">Tu agente</text>';
+ s+='<path class="dg-line" d="M96 '+cy+'H108"/>';
+ s+='<rect class="dg-node" x="112" y="'+(cy-30)+'" width="132" height="60"/><text class="dg-t" x="178" y="'+(cy-4)+'" text-anchor="middle">Respaldo</text><text class="dg-d" x="178" y="'+(cy+16)+'" text-anchor="middle">Claude Sonnet 5.5</text>';
+ if(!on.length){s+='<text class="dg-d" x="256" y="'+(cy+4)+'">Marcá al menos una suscripción</text>'}
+ on.forEach((m,i)=>{const y=8+i*76;s+='<path class="dg-line" d="M248 '+cy+'H258V'+(y+28)+'H266"/><rect class="dg-node'+(i===0?' dg-use':'')+'" x="270" y="'+y+'" width="166" height="56"/><text class="dg-t" x="280" y="'+(y+24)+'">'+(i+1)+'. '+m.n+'</text><text class="dg-d" x="280" y="'+(y+44)+'">'+(i===0?'en uso':'si se agota la '+i)+'</text>'});
+ $('#bk-diagram').innerHTML=s+'</svg>';
+}
+function members(){
+ const ul=$('#bk-list');if(!ul)return;ul.innerHTML='';
+ M.forEach((m,i)=>{
+  const li=document.createElement('li');li.className='opt';li.dataset.focus=KEY[m.n];
+  const pos=M.slice(0,i).filter(x=>x.on).length+1;
+  li.innerHTML='<input type="checkbox" id="m'+i+'"'+(m.on?' checked':'')+'><label class="txt" for="m'+i+'"><b>'+m.n+'</b><span class="pos">'+(m.on?'Posición '+pos:'fuera del respaldo')+'</span></label><span class="ord"><button type="button" class="btn-small" aria-label="Subir '+m.n+'"'+(i===0?' disabled':'')+'>Subir</button><button type="button" class="btn-small" aria-label="Bajar '+m.n+'"'+(i===M.length-1?' disabled':'')+'>Bajar</button></span>';
+  const [cb,,[up,dn]]=[li.children[0],li.children[1],li.querySelectorAll('button')];
+  cb.onchange=()=>{m.on=cb.checked;members();diagram()};
+  up.onclick=()=>{[M[i-1],M[i]]=[M[i],M[i-1]];members();diagram();$$('#bk-list button')[(i-1)*2].focus()};
+  dn.onclick=()=>{[M[i+1],M[i]]=[M[i],M[i+1]];members();diagram();$$('#bk-list button')[(i+1)*2+1].focus()};
+  ul.appendChild(li);
+ });
+}
+members();diagram();
+setState('welcome');
+</script>
+</body>
+</html>

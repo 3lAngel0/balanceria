@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "chosen": "03-guia-conversacional.html",
+  "handoffs": {
+    "03-guia-conversacional.html": {
+      "status": "implemented",
+      "queued": false,
+      "sentAt": "2026-11-10T16:31:27.964Z",
+      "startedAt": null,
+      "implementedAt": "2026-11-10T17:17:07.786Z",
+      "feature": "odd/tasks/setup-installer.md"
+    }
+  }
+}

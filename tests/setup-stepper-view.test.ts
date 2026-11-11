@@ -137,9 +137,9 @@ test("roles step: m key or selecting workflow-mode row toggles orchestratorMode"
 	const toggledBack = send(toggled.state, key("m"));
 	assert.equal(toggledBack.state.stepper.orchestratorMode, "organic");
 
-	// Moving cursor to workflow-mode (last row) and pressing enter
+	// Moving cursor to workflow-mode (followed by the auto-assign and deep-search rows) and pressing enter
 	const rows = stepRows(base.stepper);
-	const lastIndex = rows.length - 1;
+	const lastIndex = rows.length - 3;
 	assert.equal(rows[lastIndex].kind, "workflow-mode");
 	const atWorkflow = { ...base, cursor: lastIndex };
 	const activated = send(atWorkflow, key("\r"));
@@ -325,4 +325,78 @@ test("no tone mark is left behind in the stepper once the marks are painted", ()
 			}
 		}
 	}
+});
+
+const richScreen = (step: "strategy" | "roles", guided = false): StepperScreen => {
+	const rich = [{ ...provider("antigravity"), availableModels: ["gemini-3-8-flash", "gemini-4-argon"] }, { ...provider("claude-bridge"), availableModels: ["claude-sonnet-5-5"] }];
+	let screen = initScreen(initStepper(rich, pools(), {}, undefined, { guided }));
+	for (const _ of step === "strategy" ? [0] : [0, 1]) screen = { ...screen, stepper: goNext(screen.stepper) };
+	return screen;
+};
+
+test("strategy ends with a create-pool row; Enter on it and key n both add a pool", () => {
+	const screen = richScreen("strategy");
+	const rows = stepRows(screen.stepper);
+	assert.deepEqual(rows[rows.length - 1], { kind: "create-pool" });
+	assert.match(renderStepper(screen, ui).lines.join("\n"), /Create new pool/);
+	const viaKey = send(screen, key("n")).state;
+	assert.equal(viaKey.stepper.pools.length, 2);
+	const onRow = send({ ...screen, cursor: rows.length - 1 }, key("\r")).state;
+	assert.equal(onRow.stepper.pools.length, 2);
+	assert.equal(send(richScreen("roles"), key("n")).state.stepper.pools.length, 1, "n only acts in strategy");
+});
+
+test("strategy shows the cost warning in warn tone", () => {
+	const screen = richScreen("strategy");
+	const mixed = { ...screen.stepper, pools: [{ id: "mix", name: "Mix", candidates: ["antigravity/gemini-3-8-flash", "claude-bridge/claude-sonnet-5-5"], strategy: "hybrid" as const }] };
+	const view = renderStepper({ ...screen, stepper: mixed }, { ...ui, bodyRows: 20, paint: (tone, text) => `<${tone}>${text}</${tone}>` }).lines.join("\n");
+	assert.match(view, /<warn>[^\n]*mix/);
+});
+
+test("guided mode previews the pools.json block live; advanced mode does not", () => {
+	const guided = renderStepper(richScreen("strategy", true), { ...ui, bodyRows: 30 }).lines.join("\n");
+	assert.match(guided, /pools\.json/);
+	assert.match(guided, /"id": "sonnet"/);
+	assert.doesNotMatch(renderStepper(richScreen("strategy", false), { ...ui, bodyRows: 30 }).lines.join("\n"), /"id": "sonnet"/);
+});
+
+test("roles keeps orchestrator first and appends auto-assign and deep-search after workflow-mode", () => {
+	const rows = stepRows(richScreen("roles").stepper);
+	assert.deepEqual(rows[0], { kind: "role", role: "orchestrator" });
+	assert.deepEqual(rows.slice(-3), [{ kind: "workflow-mode" }, { kind: "auto-assign" }, { kind: "deep-search" }]);
+});
+
+test("key a and the auto-assign row apply the heuristic to all roles", () => {
+	const screen = richScreen("roles");
+	const viaKey = send(screen, key("a")).state;
+	assert.equal(Object.keys(viaKey.stepper.roles).length, 11);
+	assert.ok(viaKey.stepper.advisorSummary);
+	const rows = stepRows(screen.stepper);
+	const viaRow = send({ ...screen, cursor: rows.length - 2 }, key(" ")).state;
+	assert.equal(Object.keys(viaRow.stepper.roles).length, 11);
+	assert.equal(Object.keys(send(richScreen("strategy"), key("a")).state.stepper.roles).length, 0, "a only acts in roles");
+});
+
+test("key d opens a model picker with the role prompt; arrows move, Esc closes, Enter returns the deep-search effect", () => {
+	const opened = send(richScreen("roles"), key("d"));
+	assert.equal(opened.effect, "none");
+	assert.equal(opened.state.deepPickerOpen, true);
+	assert.ok(opened.state.deepPickerModels!.length >= 2);
+	const text = renderStepper({ ...opened.state, help: false }, { ...ui, bodyRows: 20 }).lines.join("\n").replace(/[│\n]/g, " ").replace(/\s+/g, " ");
+	assert.match(text, /Searching these roles in depth: orchestrator, explore, worker, verify, rev-risk, rev-rel, rev-res, rev-read, judge-a, judge-b, jd-fix\. Which model should I use\?/);
+	const moved = send(opened.state, key("j"), key("\x1b[B"), key("k"));
+	assert.equal(moved.state.deepPickerCursor, 1);
+	assert.equal(send(opened.state, key("\x1b")).state.deepPickerOpen, false);
+	assert.equal(send(opened.state, key("\x1b")).effect, "none");
+	const chosen = send(opened.state, key("j"), key("\r"));
+	assert.deepEqual(chosen.effect, { type: "deep-search", model: opened.state.deepPickerModels![1] });
+	assert.equal(chosen.state.deepPickerOpen, false);
+	const space = send(opened.state, key(" "));
+	assert.deepEqual(space.effect, { type: "deep-search", model: opened.state.deepPickerModels![0] });
+});
+
+test("the deep-search row opens the picker too", () => {
+	const screen = richScreen("roles");
+	const rows = stepRows(screen.stepper);
+	assert.equal(send({ ...screen, cursor: rows.length - 1 }, key("\r")).state.deepPickerOpen, true);
 });

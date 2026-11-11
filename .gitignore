@@ -12,7 +12,10 @@ pools.json.bak-*
 profiles.json.bak-*
 *.bak
 *.bak-*
+*.broken
+*.broken-*
 *.log
+discord-post.md
 
 # Environment & credentials
 .env

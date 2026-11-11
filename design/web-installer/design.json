@@ -1,0 +1,10 @@
+{
+  "title": "Instalador web de ai-balancer",
+  "brief": "Instalador web de ai-balancer, abierto desde la terminal en http://127.0.0.1:8787/installer, para usuarios NO técnicos. Dibuja el modelo compartido del instalador (installerScreen) con los textos reales en español: bienvenida con definiciones, link para dejar una estrella en GitHub y mascota capibara; respaldos con miembros, orden, cómo elegir y diagrama en vivo; tareas con análisis profundo (barra de progreso, botón deshabilitado) y su confirmación; resumen humano; error. Siempre visibles: pasos, ayuda a la derecha, aviso de cierre y botones Atrás/Siguiente/Cancelar.",
+  "feature": "odd/tasks/setup-installer.md",
+  "artboards": [
+    { "file": "01-asistente-tres-columnas.html", "title": "Asistente clásico de tres columnas", "tradeoff": "Es lo más parecido a un instalador de escritorio y deja a la vista pasos, pantalla y ayuda a la vez; a cambio la pantalla central queda más angosta y la ayuda ocupa un tercio del ancho aunque no se necesite.", "width": 1440, "height": 900 },
+    { "file": "02-tarjeta-con-cajon-de-ayuda.html", "title": "Tarjeta única con stepper arriba y cajón de ayuda", "tradeoff": "Una sola decisión centrada y un stepper horizontal que muestra todo el camino; la ayuda se puede ocultar para concentrarse, pero esconderla puede dejar sin explicación a quien más la necesita y el stepper apretado achica los nombres de los pasos.", "width": 1440, "height": 900 },
+    { "file": "03-guia-conversacional.html", "title": "Guía conversacional con capibara", "tradeoff": "La capibara cuenta el paso con palabras simples y se siente más cálido para quien no es técnico; la explicación vive en un globo y en el panel, así que hay algo de repetición y el control queda más abajo, con menos espacio.", "width": 1440, "height": 900 }
+  ]
+}
