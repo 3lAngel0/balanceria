@@ -12,29 +12,42 @@ export const MASCOT_WIDTH = 26;
 export const MASCOT_HEIGHT = 6;
 
 const COLORS: Readonly<Record<string, Rgb>> = {
-	b: [176, 120, 70], // fur
-	d: [104, 66, 38], // ears, nose, feet
+	b: [176, 120, 70], // fur (must match test)
+	B: [215, 150, 90], // fur highlight
+	d: [104, 66, 38], // ears, nose, feet, shadow
 	t: [226, 190, 142], // snout and belly
-	e: [20, 14, 26], // eyes
+	e: [20, 14, 26], // eyes & dark outline
 	g: [254, 174, 52], // the balance
 	s: [148, 176, 194], // its strings and pans
+	w: [255, 255, 255], // white specular glint
+	// Techwear Cyber-Gaucho: Boina & Rose
+	k: [32, 34, 46], // boina dark charcoal
+	K: [65, 72, 95], // boina highlight
+	r: [255, 45, 135], // neon magenta rose
+	p: [255, 121, 176], // rose light pink
+	c: [0, 245, 160], // cyber green leaf & HUD visor
+	// Techwear Tactical Vest
+	v: [22, 24, 34], // vest dark
+	V: [38, 42, 58], // vest armor plate
+	x: [255, 45, 135], // neon magenta seam
 };
 
 const CAPY_WIDTH = 16;
 const CAPY = [
-	"..........dd....",
-	"...bbbbbbbbbbb..",
-	"..bbbbbbbbbbbbb.",
-	".bbbbbbbbbbbbbbt",
-	".bbbbbbbbbbbbbtt",
-	".bbbbbbbbbbbbbbd",
-	".bbbbbbbbbbbbbbb",
-	"..bbtttttbbbbbb.",
-	"..dd..dd..dd.dd.",
-	"..dd..dd..dd.dd.",
+	"..kkKKrpKKKK....", // 0: Boina with neon rose (r,p) and cyber leaf (c)
+	".kkkkkrrcckkkd..", // 1: Boina lower rim & cyber leaf
+	".keeeekeeeeddBb.", // 2: Capybara head top & boina band
+	"ddddtt..bbbbBBb.", // 3: Snout top & eye (cols 6-7)
+	"ddettt..bbbbBBb.", // 4: Nostril/mouth & cheek
+	".ddddvvvvvvvBBb.", // 5: Chin & techwear collar
+	"..bbvVxxxxVvvBb.", // 6: Techwear jacket with magenta seam (x)
+	"..bbvVccccVvvBb.", // 7: Techwear pocket with cyber indicator (c)
+	"..bbvvvvvvvvvdb.", // 8: Lower jacket & sitting haunch
+	"..dd..dd..dd.dd.", // 9: Front paws & hind claws
 ] as const;
-const INHALED_EARS = "...bbbbbbbdd....";
-const EYE = { col: 12, top: 2 } as const;
+
+const INHALED_BOINA = ".kkkKKrpKKKK....";
+const EYE = { col: 6, top: 3 } as const;
 
 const BALANCE_X = 17;
 const BALANCE_WIDTH = 9;
@@ -63,7 +76,7 @@ function balanceRows(tilt: -1 | 0 | 1): string[] {
 interface Frame {
 	/** Capybara rows' vertical offset (negative = it jumps), the eyes and the balance's tilt. */
 	lift: number;
-	eyes: "open" | "blink" | "happy";
+	eyes: "open" | "blink" | "happy" | "visor";
 	tilt: -1 | 0 | 1;
 	inhale: boolean;
 }
@@ -72,13 +85,13 @@ const TILTS = [0, 1, 0, -1] as const;
 
 function frameOf(pose: MascotPose, frame: number, animate: boolean): Frame {
 	const f = Math.max(0, Math.floor(frame));
-	if (!animate) return { lift: 0, eyes: pose === "happy" ? "happy" : "open", tilt: pose === "working" ? 1 : 0, inhale: false };
-	if (pose === "working") return { lift: f % 4 < 2 ? 0 : -1, eyes: "open", tilt: TILTS[Math.floor(f / 2) % TILTS.length]!, inhale: false };
-	if (pose === "happy") return { lift: f % 2 === 0 ? -2 : 0, eyes: "happy", tilt: f % 2 === 0 ? 1 : -1, inhale: false };
+	if (!animate) return { lift: 0, eyes: pose === "happy" ? "happy" : pose === "working" ? "visor" : "open", tilt: pose === "working" ? 1 : 0, inhale: false };
+	if (pose === "working") return { lift: f % 4 < 2 ? 0 : -1, eyes: "visor", tilt: TILTS[Math.floor(f / 2) % TILTS.length]!, inhale: false };
+	if (pose === "happy") return { lift: f % 2 === 0 ? -1 : 0, eyes: "happy", tilt: f % 2 === 0 ? 1 : -1, inhale: false };
 	return { lift: 0, eyes: f % 12 === 11 ? "blink" : "open", tilt: 0, inhale: f % 8 >= 4 };
 }
 
-const GROUND = 2;
+const GROUND = 1;
 const HEIGHT_PX = MASCOT_HEIGHT * 2;
 
 function sprite(state: Frame): string[] {
@@ -87,19 +100,33 @@ function sprite(state: Frame): string[] {
 		if (key !== "." && grid[row]?.[col] !== undefined) grid[row]![col] = key;
 	};
 	const capy = CAPY.map(row => row.split(""));
-	const eye = (dy: number, dx: number, key: string) => (capy[EYE.top + dy]![EYE.col + dx] = key);
-	if (state.eyes === "blink") eye(0, 0, "b");
-	else if (state.eyes === "happy") {
-		eye(1, 0, "b");
-		eye(1, -1, "e");
-		eye(1, 1, "e");
+
+	if (state.eyes === "blink") {
+		capy[EYE.top]![EYE.col] = "b";
+		capy[EYE.top]![EYE.col + 1] = "b";
+		capy[EYE.top + 1]![EYE.col] = "d";
+		capy[EYE.top + 1]![EYE.col + 1] = "d";
+	} else if (state.eyes === "happy") {
+		capy[EYE.top]![EYE.col] = "e";
+		capy[EYE.top]![EYE.col + 1] = "e";
+		capy[EYE.top + 1]![EYE.col] = "b";
+		capy[EYE.top + 1]![EYE.col + 1] = "p"; // blush
+	} else if (state.eyes === "visor") {
+		capy[EYE.top]![EYE.col - 1] = "c";
+		capy[EYE.top]![EYE.col] = "w";
+		capy[EYE.top]![EYE.col + 1] = "c";
+		capy[EYE.top + 1]![EYE.col] = "c";
+		capy[EYE.top + 1]![EYE.col + 1] = "c";
 	} else {
-		eye(0, 0, "e");
-		eye(1, 0, "e");
+		// Open
+		capy[EYE.top]![EYE.col] = "e";
+		capy[EYE.top]![EYE.col + 1] = "w";
+		capy[EYE.top + 1]![EYE.col] = "e";
+		capy[EYE.top + 1]![EYE.col + 1] = "e";
 	}
-	if (state.eyes === "happy") eye(0, 0, "e");
+
 	const rows = capy.map(row => row.join(""));
-	if (state.inhale) rows[0] = INHALED_EARS;
+	if (state.inhale) rows[0] = INHALED_BOINA;
 	rows.forEach((row, r) => {
 		for (let c = 0; c < CAPY_WIDTH; c++) put(GROUND + r + state.lift, c, row[c]!);
 	});
@@ -129,16 +156,16 @@ function halfBlocks(rows: readonly string[]): string[] {
 	return lines;
 }
 
-const EYES = { open: "o", blink: "-", happy: "^" } as const;
+const EYES = { open: "o", blink: "-", happy: "^", visor: "=" } as const;
 const ASCII_BALANCE = {
-	"-1": ["   |   ", " \\_|_  ", "  _|_\\ ", "   |   "],
+	"-1": ["   |   ", " \_|_  ", "  _|_\\ ", "   |   "],
 	"0": ["   |   ", " _/|\\_ ", "  \\|/  ", "   |   "],
 	"1": ["   |   ", "  _|_/ ", " /_|_  ", "   |   "],
 } as const;
 
 /** The fixed-width ASCII capybara for terminals without truecolor. */
 function asciiLines(state: Frame): string[] {
-	const eye = EYES[state.eyes];
+	const eye = state.eyes === "visor" ? "o" : EYES[state.eyes];
 	const hop = state.lift < 0 ? 1 : 0;
 	const body = [
 		"        n         ",
