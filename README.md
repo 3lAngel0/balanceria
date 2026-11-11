@@ -161,6 +161,10 @@ Or install it as a standard Pi extension:
 pi install git:github.com/3lAngel0/balanceria
 ```
 
+Pi checks for a new version each time it starts and shows "Package Updates Available". Update with
+`pi update git:github.com/3lAngel0/balanceria`; the next session shows what changed (see [CHANGELOG.md](CHANGELOG.md)).
+Installing with a ref (`@v0.3.1`) pins that version and turns the check off.
+
 ### 2. Interactive Setup Hub
 
 Launch the configuration hub to auto-detect installed providers, configure pools, and assign agent roles:
