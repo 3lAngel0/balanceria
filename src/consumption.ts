@@ -111,10 +111,14 @@ function windowsOf(provider: string, samples: readonly QuotaSample[], now: numbe
 		const id = `${sample.key}\u0000${sample.window}`;
 		groups.set(id, [...(groups.get(id) ?? []), sample]);
 	}
+	// One reading writes every window it reports with the same ts. A window the
+	// provider's newest reading left out (agy disabled it) is no longer current.
+	const newestReading = Math.max(...[...groups.values()].flat().map(sample => sample.ts));
 	const windows: WindowConsumption[] = [];
 	for (const group of groups.values()) {
 		const ordered = [...group].sort((a, b) => a.ts - b.ts);
 		const latest = ordered[ordered.length - 1];
+		if (latest.ts < newestReading) continue;
 		const current = ordered.filter(sample =>
 			latest.resetAt === null || sample.resetAt === null ? sample.resetAt === latest.resetAt : Math.abs(sample.resetAt - latest.resetAt) <= SAME_RESET_MS,
 		);

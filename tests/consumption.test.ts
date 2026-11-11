@@ -184,3 +184,24 @@ test("providers and windows from other keys do not leak into a subscription", ()
 	const [claude] = summarizeConsumption(data([], samples), INTEGRATIONS, PRICES, NOW).subscriptions;
 	assert.deepEqual(claude.windows, []);
 });
+
+test("a window missing from the provider's latest reading is dropped, the others stay", () => {
+	const agy = (ts: number, key: string, window: string, usedPercent: number) =>
+		sample(ts, usedPercent, RESET, { key, window, limit: key, windowSeconds: window === "5h" ? 18000 : 604800 });
+	const samples = [
+		agy(NOW - 2 * HOUR, "antigravity/claude", "5h", 24),
+		agy(NOW - 2 * HOUR, "antigravity/claude", "week", 90),
+		agy(NOW - 2 * HOUR, "antigravity/gemini", "week", 30),
+		agy(NOW - MIN, "antigravity/claude", "week", 100),
+		agy(NOW - MIN, "antigravity/gemini", "week", 34),
+		sample(NOW - 3 * HOUR, 9),
+	];
+	const result = summarizeConsumption(data([], samples), INTEGRATIONS, PRICES, NOW);
+	const windowsOf = (provider: string) =>
+		result.subscriptions.find(item => item.provider === provider)!.windows.map(window => [window.key, window.window, window.usedPercent]);
+	assert.deepEqual(windowsOf("antigravity"), [
+		["antigravity/claude", "week", 100],
+		["antigravity/gemini", "week", 34],
+	]);
+	assert.deepEqual(windowsOf("claude-bridge"), [["claude-bridge/claude", "5h", 9]], "another provider's newer reading does not drop it");
+});
