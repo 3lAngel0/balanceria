@@ -92,7 +92,7 @@ ai-balancer v0.3.0 transforms configuration from a technical chore into a guided
 
 ## 🧪 Test Suite & Verification
 
-- **948/948 automated tests passing** across unit, integration, and TUI/web harness suites:
+- **959/959 automated tests passing** across unit, integration, and TUI/web harness suites:
   ```bash
   npm test
   ```
@@ -111,7 +111,9 @@ ai-balancer v0.3.0 transforms configuration from a technical chore into a guided
 - `fix(installer)`: Per-install timestamped backups and referenced pool preservation (`682e8c3`).
 - `feat(installer)`: Console help panel, visible shortcuts, and Capybara mascot (`9efecf9`).
 - `docs(design)`: Gentle Design system sync and web conversational guide direction (`860af7f`).
-- `feat(installer)`: Conversational web installer implementation (Design 3) with SVG sprite animations (`125df9a`).
+- `feat(installer)`: Conversational web installer implementation with Techwear Cyber-Gaucho pixel art (`125df9a`, `226d4b9`).
+- `feat(installer)`: Remote LAN web forwarding and interactive firewall configuration (`968e38d`, `ff6c48e`).
+- `fix(installer)`: Full walkthrough in fresh start mode and visible assigned models per task (`5afbf82`, `a6aef32`).
 - `docs`: Full bilingual documentation updates across README and guides (`acb6432`).
 
 ---
