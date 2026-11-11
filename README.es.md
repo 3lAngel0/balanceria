@@ -310,7 +310,7 @@ Con `hybrid` o `highest-quota`, un segundo candidato con más cuota libre respon
 
 ### ¿Qué pasa cuando se agotan todos los candidatos de un pool?
 
-- **Modelo de último recurso (si está configurado)**: cuando se agotan todos los candidatos de un pool, responde **primero y automáticamente** el modelo de último recurso, en la sesión principal y en los subagentes, con un aviso de advertencia. En la sesión principal además aparece primero en el menú de abajo. Se configura en `/installer` → **Respaldos** → **Modelo final** (atajo `l`); elegí **Ninguno** para quitarlo.
+- **Modelo final (si está configurado)**: cuando se agotan todos los candidatos de un pool, responde **primero y automáticamente** el modelo final, en la sesión principal y en los subagentes, con un aviso de advertencia. El menú de abajo solo aparece cuando el modelo final también se agotó (o no hay uno configurado). Se configura en `/installer` → **Respaldos** → **Modelo final** (atajo `l`); elegí **Ninguno** para quitarlo.
 - **Sesión principal (con pantalla)**: aparece un menú para esperar a un candidato del pool (muestra cuándo se renueva cada uno), usar un modelo disponible **de otro pool**, usar **cualquier otro modelo de tus suscripciones activas que todavía tenga cuota** (aunque ningún pool lo liste, por ejemplo tus modelos de OpenAI cuando se agota Claude), compactar la sesión o cancelar. Los modelos agotados no se ofrecen.
 - **Subagentes (sin pantalla)**: no hay menú. El pedido va al candidato que se renueva primero y falla con el mensaje de cuota del proveedor, salvo que aplique un **préstamo** (ver abajo).
 

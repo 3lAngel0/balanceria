@@ -799,4 +799,4 @@ Operational overlay showing real-time subscription burn velocity (`+X%/h`), rese
 **A**: In `~/.gentle-shell/config/gentle-ai/profiles.json`, configure the role with a direct physical model (e.g. `"model": "anthropic/claude-3-5-sonnet"`) instead of a `"pool/..."` string. Direct models bypass `ai-balancer` completely.
 
 ### Q: What happens if every provider in a pool runs out of quota?
-**A**: The Circuit Breaker activates immediately. It halts automated retries, writes an emergency checkpoint to `data/circuit-breaker-checkpoint.json`, and alerts the user with the earliest reopening time.
+**A**: First, an active automatic loan for that pool moves its tasks to the borrowed model. Otherwise the configured last-resort model (`lastResort` in `pools.json`) answers automatically with a warning notice. If that is spent too (or none is set), the main session shows a menu to wait, pick any model of your subscriptions with quota left, compact, or cancel, and the Circuit Breaker activates: it halts automated retries, writes an emergency checkpoint to `data/circuit-breaker-checkpoint.json`, and alerts the user with the earliest reopening time.

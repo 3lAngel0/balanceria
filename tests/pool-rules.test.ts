@@ -109,3 +109,14 @@ test("ignoredRuleWarnings names each pool whose rules are ignored and why", () =
 	]);
 	assert.deepEqual(ignoredRuleWarnings({ pools: [{ id: "plain", candidates: SONNET }] }), []);
 });
+
+test("validatePoolsConfig checks the lastResort model ref", () => {
+	const base = { pools: [{ id: "p", candidates: ["antigravity/claude-opus-5-5"] }] };
+	assert.equal(validatePoolsConfig({ ...base, lastResort: "antigravity/gemini-3-8-flash" }).valid, true);
+	assert.equal(validatePoolsConfig(base).valid, true);
+	for (const bad of ["pool/orchestrator", "no-slash", 3]) {
+		const result = validatePoolsConfig({ ...base, lastResort: bad });
+		assert.equal(result.valid, false);
+		assert.deepEqual(result.issues.map(issue => issue.path), ["lastResort"]);
+	}
+});

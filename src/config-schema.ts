@@ -84,6 +84,10 @@ export function validatePoolsConfig(raw: unknown): ValidationResult<Pool[]> {
 		return { valid: false, issues };
 	}
 
+	if (root.lastResort !== undefined && (typeof root.lastResort !== "string" || !/^[^/\s]+\/\S+$/.test(root.lastResort) || root.lastResort.startsWith("pool/"))) {
+		issues.push({ path: "lastResort", message: "Field 'lastResort' must be a 'provider/model' string and not a pool" });
+	}
+
 	const seenPoolIds = new Set<string>();
 
 	root.pools.forEach((item, index) => {

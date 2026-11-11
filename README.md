@@ -315,7 +315,7 @@ With `hybrid` or `highest-quota`, a second candidate with more quota left answer
 
 ### What happens when every candidate of a pool is exhausted?
 
-- **Last-resort model (if configured)**: when every candidate of a pool is spent, the configured last-resort model answers **first and automatically**, in the main session and in subagents, with a warning notice. In the main session it is also listed first in the menu below. Set it in `/installer` → **Backups** → **Last-resort model** (shortcut `l`); choose **None** to remove it.
+- **Last-resort model (if configured)**: when every candidate of a pool is spent, the configured last-resort model answers **first and automatically**, in the main session and in subagents, with a warning notice. The menu below opens only when the last-resort model is spent too (or none is set). Set it in `/installer` → **Backups** → **Last-resort model** (shortcut `l`); choose **None** to remove it.
 - **Main session (with a screen)**: a menu lets you wait for a candidate of the pool (it shows when each one resets), use an available model **from another pool**, use **any other model of your active subscriptions that still has quota** (even if no pool lists it, for example your OpenAI models when Claude runs out), compact the session, or cancel. Spent models are not offered.
 - **Subagents (no screen)**: there is no menu. The request goes to the candidate that resets first and fails with the provider's quota message, unless a **loan** applies (see below).
 

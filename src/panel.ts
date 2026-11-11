@@ -507,7 +507,7 @@ export function renderControlCenter(input: ControlCenterRenderInput): string[] {
 		recs.map((rec, idx) => {
 			const currentModel = input.roles?.[rec.role]?.model ?? UNASSIGNED;
 			const change = currentModel !== rec.recommendedModel ? `${displayModel(currentModel)} → ${rec.recommendedModel}` : pixelText("hp", `${rec.recommendedModel} (${t("setup.tag.matches")})`, mode);
-			return [first(idx === rCur, rec.role), category(rec.category), change, thinkingCell(rec.thinking)];
+			return [first(idx === rCur, roleLabel(rec.role)), category(rec.category), change, thinkingCell(rec.thinking)];
 		}),
 		wide - 4,
 		{ prefixes: recs.map((_rec, idx) => marker(idx === rCur)), head: heading },
