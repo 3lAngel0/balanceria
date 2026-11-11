@@ -625,6 +625,7 @@ function tasksContent(state: InstallerState): Content {
 							now: assigned,
 							model: recModel,
 						}),
+						...(now && now !== UNASSIGNED && !now.startsWith("pool/") ? [t("installer.tasks.noBackup")] : []),
 					].join(" "),
 					checked: Boolean(rec) && now === rec!.recommendedModel,
 					recommended: true,

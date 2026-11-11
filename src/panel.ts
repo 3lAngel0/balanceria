@@ -417,6 +417,7 @@ export function renderControlCenter(input: ControlCenterRenderInput): string[] {
 			if (idx === cur) {
 				lines.push(tone("dim", `      ${t("setup.cc.task", { purpose: row.purpose })}`));
 				lines.push(tone("dim", `      ${t("setup.cc.effective", { target: displayModel(row.effectiveTarget) })}`));
+				if (row.configuredModel !== UNASSIGNED && !row.configuredModel.startsWith("pool/")) lines.push(tone("warning", `      ${t("installer.tasks.noBackup")}`));
 				if (input.rolePickerOpen && input.rolePickerTargets && input.rolePickerTargets.length > 0) {
 					lines.push(tone("accent", `      ${t("setup.cc.pickTarget", { role: row.role })}`));
 					const pCur = Math.max(0, Math.min(input.rolePickerTargets.length - 1, input.rolePickerCursor ?? 0));

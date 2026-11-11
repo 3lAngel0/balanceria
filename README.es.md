@@ -288,7 +288,7 @@ Lo decide el **balancer**, no una IA. Es código determinístico (sin tokens, me
 
 ### Un rol apunta a un modelo directo (por ejemplo `antigravity/gemini-4-argon`). ¿Qué pasa cuando se agota?
 
-**Nadie lo redirige.** Solo se balancean los roles que apuntan a `pool/<id>`. Un rol con modelo directo llama a ese proveedor directamente, así que cuando se agota la cuota el pedido falla con el error de cuota del proveedor. ai-balancer registra que se agotó y, en la sesión principal, muestra un aviso como `antigravity/gemini-4-argon se llenó. Cambiá a <modelo disponible> o a pool/orchestrator (/balancer).` Los préstamos tampoco se aplican a modelos directos.
+**Nadie lo redirige.** Solo se balancean los roles que apuntan a `pool/<id>`. Un rol con modelo directo llama a ese proveedor directamente, así que cuando se agota la cuota el pedido falla con el error de cuota del proveedor. ai-balancer registra que se agotó y, en la sesión principal, muestra un aviso como `antigravity/gemini-4-argon se llenó. Cambiá a <modelo disponible> o a pool/orchestrator (/balancer).` El modelo sugerido es tu **Modelo final** si está configurado y tiene cuota; si no, el primer candidato de un pool con cuota. `/installer` (Tareas de los agentes) y `/balancer` → **Roles** marcan estos roles con "Sin respaldo: si este modelo se agota, esta tarea se detiene". Los préstamos tampoco se aplican a modelos directos.
 
 Si querés que un rol siga funcionando cuando se agota su modelo, apuntalo a un pool: abrí `/balancer`, entrá a **Roles**, elegí el rol y apretá Enter para asignarle un `pool/<id>` que tenga ese modelo más alternativas.
 
@@ -311,7 +311,7 @@ Con `hybrid` o `highest-quota`, un segundo candidato con más cuota libre respon
 ### ¿Qué pasa cuando se agotan todos los candidatos de un pool?
 
 - **Modelo de último recurso (si está configurado)**: cuando se agotan todos los candidatos de un pool, responde **primero y automáticamente** el modelo de último recurso, en la sesión principal y en los subagentes, con un aviso de advertencia. En la sesión principal además aparece primero en el menú de abajo. Se configura en `/installer` → **Respaldos** → **Modelo final** (atajo `l`); elegí **Ninguno** para quitarlo.
-- **Sesión principal (con pantalla)**: aparece un menú para esperar a un candidato del pool (muestra cuándo se renueva cada uno), usar un modelo disponible **de otro pool**, compactar la sesión o cancelar. Los modelos que no están en ningún pool no se ofrecen.
+- **Sesión principal (con pantalla)**: aparece un menú para esperar a un candidato del pool (muestra cuándo se renueva cada uno), usar un modelo disponible **de otro pool**, usar **cualquier otro modelo de tus suscripciones activas que todavía tenga cuota** (aunque ningún pool lo liste, por ejemplo tus modelos de OpenAI cuando se agota Claude), compactar la sesión o cancelar. Los modelos agotados no se ofrecen.
 - **Subagentes (sin pantalla)**: no hay menú. El pedido va al candidato que se renueva primero y falla con el mensaje de cuota del proveedor, salvo que aplique un **préstamo** (ver abajo).
 
 ### ¿Un respaldo puede mezclar proveedores, por ejemplo Claude primero y OpenAI cuando Claude se agota?

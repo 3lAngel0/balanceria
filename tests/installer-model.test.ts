@@ -942,3 +942,18 @@ test("S1: disabling the subscription of the chosen last-resort model drops it fr
 	assert.equal(s.draft.enabled.includes("antigravity"), false);
 	assert.match(installerScreen(act(s, next).state).body.join(" "), /Last-resort model: none\./);
 });
+
+test("tasks: a task on a direct model warns there is no backup and how to fix it; pool and unassigned tasks do not", () => {
+	let s = customAt("tasks");
+	const rows = () => (installerScreen(s).control as { items: { id: string; detail: string }[] }).items;
+	assert.ok(rows().every(i => !/No backup/.test(i.detail)));
+	s = { ...s, draft: { ...s.draft, roles: { ...s.draft.roles, orchestrator: { model: "claude-bridge/claude-opus-5-5" }, "gentle-ai-verify": { model: "pool/claude-sonnet-5-5" } } } };
+	const direct = rows().find(i => i.id === "orchestrator")!;
+	assert.match(direct.detail, /No backup: if this model runs out, this task stops\. Press Enter and pick a backup instead\./);
+	assert.doesNotMatch(rows().find(i => i.id === "gentle-ai-verify")!.detail, /No backup/);
+	assert.equal(rows().filter(i => /No backup/.test(i.detail)).length, 1);
+});
+
+test("tasks: the no-backup warning exists in Spanish", () => {
+	assert.match(installerMessages.es["installer.tasks.noBackup"], /^Sin respaldo/);
+});

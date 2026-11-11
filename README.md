@@ -293,7 +293,7 @@ The **balancer** decides, not an AI. It is deterministic code (no tokens, under 
 
 ### A role points at a direct model (for example `antigravity/gemini-4-argon`). What happens when that model runs out?
 
-**Nothing reroutes it.** Only roles that point at `pool/<id>` are balanced. A role with a direct model calls that provider directly, so when its quota runs out the request fails with the provider's quota error. ai-balancer records the exhaustion and, in the main session, shows a hint such as `antigravity/gemini-4-argon is full. Switch to <available model> or pool/orchestrator (/balancer).` Loans do not apply to direct models either.
+**Nothing reroutes it.** Only roles that point at `pool/<id>` are balanced. A role with a direct model calls that provider directly, so when its quota runs out the request fails with the provider's quota error. ai-balancer records the exhaustion and, in the main session, shows a hint such as `antigravity/gemini-4-argon is full. Switch to <available model> or pool/orchestrator (/balancer).` The suggested model is your **Last-resort model** if one is set and has quota, otherwise the first pool candidate with quota. `/installer` (Agent tasks) and `/balancer` → **Roles** flag these roles with "No backup: if this model runs out, this task stops". Loans do not apply to direct models either.
 
 If you want a role to keep working when its model runs out, point it at a pool: open `/balancer`, go to **Roles**, select the role and press Enter to choose a `pool/<id>` that contains that model plus alternatives.
 
@@ -316,7 +316,7 @@ With `hybrid` or `highest-quota`, a second candidate with more quota left answer
 ### What happens when every candidate of a pool is exhausted?
 
 - **Last-resort model (if configured)**: when every candidate of a pool is spent, the configured last-resort model answers **first and automatically**, in the main session and in subagents, with a warning notice. In the main session it is also listed first in the menu below. Set it in `/installer` → **Backups** → **Last-resort model** (shortcut `l`); choose **None** to remove it.
-- **Main session (with a screen)**: a menu lets you wait for a candidate of the pool (it shows when each one resets), use an available model **from another pool**, compact the session, or cancel. Models that are not in any pool are not offered.
+- **Main session (with a screen)**: a menu lets you wait for a candidate of the pool (it shows when each one resets), use an available model **from another pool**, use **any other model of your active subscriptions that still has quota** (even if no pool lists it, for example your OpenAI models when Claude runs out), compact the session, or cancel. Spent models are not offered.
 - **Subagents (no screen)**: there is no menu. The request goes to the candidate that resets first and fails with the provider's quota message, unless a **loan** applies (see below).
 
 ### Can a backup mix providers, for example Claude first and OpenAI when Claude runs out?

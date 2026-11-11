@@ -39,6 +39,7 @@ import { appendHistory, legacyRecords, pruneHistory, readHistory, type HistoryDa
 import { topConsumers, withAliases } from "./consumers.ts";
 import { HUD_VIEWS, hudHints, moveCursor, pressRedKey, renderHud, selectedSessionTarget, suggestionEnter, SESSIONS_PER_ROLE, visibleSessions, type HudViewName, type PendingConfirm } from "./hud.ts";
 import { runHudChoice, type HudChoice } from "./hud-actions.ts";
+import { buildExhaustedMenu, directQuotaSuggestion } from "./exhausted-menu.ts";
 import { loadIntegrations } from "./integrations.ts";
 import { renderPanel, statusLine, statusWithContext, turnTelemetry, renderControlCenter, controlCenterButtons, controlCenterTabLabels, CONTROL_CENTER_TABS, type ControlCenterTab, type OverviewSessionRow, type TurnTelemetry } from "./panel.ts";
 import { ROLE_CATALOG, buildAvailableModelTargets, recommendRolesHeuristic, recommendRolesWithAdvisor, createDefaultCliAiRunner, createModelCliAiRunner, applyRecommendationsToProfile, type AdvisorReport } from "./setup-advisor.ts";
@@ -476,35 +477,20 @@ export default function aiBalancer(pi: ExtensionAPI) {
 				let choice = choiceCandidate;
 				if (trace.decidedBy === "fallback" && ctx.hasUI) {
 					const state = fold().state;
-					const options: string[] = [];
-					const candidateMap = new Map<string, Candidate>();
-
-					for (const c of currentPool.candidates) {
-						const availAt = state.availableAt(c.quotaKey, now);
-						const timeStr = availAt ? new Date(availAt).toTimeString().slice(0, 8) : "unknown";
-						const label = `${c.provider}/${c.model} - ${t("ops.retryCandidate", { time: timeStr })}`;
-						options.push(label);
-						candidateMap.set(label, c);
-					}
-
-					for (const otherPool of currentPools) {
-						if (otherPool.id === currentPool.id) continue;
-						for (const c of otherPool.candidates) {
-							if (state.isAvailable(c.quotaKey, now)) {
-								const label = `${c.provider}/${c.model} - ${t("ops.otherPoolCandidate", { pool: otherPool.id })}`;
-								if (!candidateMap.has(label)) {
-									options.push(label);
-									candidateMap.set(label, c);
-								}
-							}
-						}
-					}
-
-					const compactOption = `[compact] ${t("ops.compactSession")}`;
-					options.push(compactOption);
-
-					const cancelOption = `[cancel] ${t("ops.cancelRequest")}`;
-					options.push(cancelOption);
+					const activeModels = detectProviders(ctx)
+						.filter(p => p.detected && p.kind === "subscription")
+						.flatMap(p => p.availableModels.map(model => ({ provider: p.id, model })));
+					const menu = buildExhaustedMenu({
+						poolId: currentPool.id,
+						poolCandidates: currentPool.candidates,
+						otherPools: currentPools.filter(p => p.id !== currentPool.id),
+						activeModels,
+						state,
+						now,
+						quotaKeyFor,
+						t,
+					});
+					const { options, candidates: candidateMap, compactOption, cancelOption } = menu;
 
 					const title = t("ops.fallbackTitle", { pool: currentPool.id });
 					const selected = await ctx.ui.select(title, options);
@@ -653,9 +639,10 @@ export default function aiBalancer(pi: ExtensionAPI) {
 		// Only sessions on a pool model are rewritten: elsewhere a retry would
 		// hit the same spent subscription again, so surface a clear status hint.
 		if (ctx.model?.provider !== POOL_PROVIDER) {
-			const fallbackCand = pools.flatMap(p => p.candidates).find(c => c.quotaKey !== key && state.isAvailable(c.quotaKey));
-			const toLabel = fallbackCand ? `${fallbackCand.provider}/${fallbackCand.model}` : "antigravity/gemini-3-8-flash";
-			const directNotice = t("ops.directQuotaHint", { from: fromLabel, to: toLabel });
+			const toLabel = directQuotaSuggestion({ exhaustedKey: key, lastResort: getLivePools().lastResort, pools, state });
+			const directNotice = toLabel
+				? t("ops.directQuotaHint", { from: fromLabel, to: toLabel })
+				: t("ops.directQuotaHintNone", { from: fromLabel });
 			lastFailoverNote = { text: directNotice, at: Date.now() };
 			registerPoolUsage();
 			refreshStatus(ctx);
