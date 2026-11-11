@@ -307,7 +307,7 @@ test("tasks: open shows a picker with the backups first, then the direct models;
 	assert.equal(screen.control.items[4]!.label, "Gemini 3.8 Flash · antigravity");
 	const rec = act(customAt("tasks"), press("assign-recommended")).state.draft.roles.orchestrator!.model;
 	assert.deepEqual(screen.control.items.filter(i => i.recommended).map(i => i.id), [rec]);
-	assert.ok(screen.body.join(" ").includes("Coordinating the work"));
+	assert.ok(screen.body.join(" ").includes("Main agent (orchestrator)"));
 	assert.deepEqual(screen.buttons.map(b => b.id), ["back", "assign-task", "cancel"]);
 });
 
@@ -956,4 +956,48 @@ test("tasks: a task on a direct model warns there is no backup and how to fix it
 
 test("tasks: the no-backup warning exists in Spanish", () => {
 	assert.match(installerMessages.es["installer.tasks.noBackup"], /^Sin respaldo/);
+});
+
+const openai = provider("openai-codex", ["gpt-5-5"]);
+const backupsScreenFor = (found: DetectedProvider[]) => {
+	let s = act(initInstaller({ detected: found }), next, { type: "select", index: 1 }, next).state;
+	s = withScanResult(s, { found });
+	while (s.step !== "backups") s = act(s, next).state;
+	return { state: s, screen: installerScreen(s) };
+};
+
+test("Backups step explains cross-provider fallback only when several provider families are enabled", () => {
+	const note = installerMessages.en["installer.backups.crossProvider"];
+	assert.ok(note, "message exists");
+	assert.match(note, /Custom backup/);
+	assert.match(note, /Space/);
+	assert.match(note, /In order/);
+	assert.ok(backupsScreenFor([claude, openai]).screen.body.includes(note));
+	assert.ok(!backupsScreenFor([claude]).screen.body.includes(note));
+});
+
+test("wizard members step says any model of the enabled subscriptions can be ticked, other providers included", () => {
+	const { state } = backupsScreenFor([claude, openai]);
+	const members = act(state, press("create-backup"), { type: "select", index: 2 }, next).state;
+	assert.equal(members.wizard?.phase, "members");
+	assert.ok(installerScreen(members).body.includes(installerMessages.en["installer.wizard.members.anyProvider"]));
+	assert.match(installerMessages.en["installer.wizard.members.anyProvider"], /other companies/i);
+});
+
+test("the orchestrator template and the Tasks step use the single name Main agent (orchestrator)", () => {
+	assert.equal(installerMessages.en["installer.wizard.template.orchestrator.label"], "Main agent (orchestrator)");
+	assert.equal(installerMessages.es["installer.wizard.template.orchestrator.label"], "Agente principal (orchestrator)");
+	assert.equal(installerMessages.en["installer.role.orchestrator.name"], "Main agent (orchestrator)");
+	assert.equal(installerMessages.es["installer.role.orchestrator.name"], "Agente principal (orchestrator)");
+});
+
+test("strategy texts describe today's routing: no 'running low' claim for Mixed, waterfall is the strict order", () => {
+	for (const lang of ["en", "es"] as const) {
+		const m = installerMessages[lang];
+		for (const key of ["installer.strategy.hybrid.desc", "installer.help.focus.strategy.hybrid.what", "installer.help.focus.strategy.hybrid.purpose", "installer.help.focus.strategy.hybrid.if"]) {
+			assert.doesNotMatch(m[key]!, /running low|almost empty|se está agotando|casi se vac/i, key);
+		}
+		assert.match(m["installer.strategy.hybrid.desc"]!, /most|más/i);
+		assert.match(m["installer.strategy.waterfall.desc"]!, /primary|principal/i);
+	}
 });

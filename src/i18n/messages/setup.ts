@@ -4,6 +4,7 @@
 export const setupMessages = {
 	en: {
 		// Role catalog purposes
+		"setup.role.orchestrator.label": "Main agent (orchestrator)",
 		"setup.role.orchestrator.purpose": "Coordinate ODD workflow, routing, and user decisions",
 		"setup.role.gentle-ai-explore.purpose": "Fast read-only codebase exploration and file search",
 		"setup.role.gentle-ai-worker.purpose": "Write code, implement features, and run unit tests",
@@ -208,6 +209,7 @@ export const setupMessages = {
 		"setup.workflow.fullDelegationDesc": "Full delegation (subagents only)",
 	},
 	es: {
+		"setup.role.orchestrator.label": "Agente principal (orchestrator)",
 		"setup.role.orchestrator.purpose": "Coordina el flujo ODD, el enrutamiento y las decisiones del usuario",
 		"setup.role.gentle-ai-explore.purpose": "Exploración rápida de solo lectura del código y búsqueda de archivos",
 		"setup.role.gentle-ai-worker.purpose": "Escribe código, implementa funcionalidades y corre los tests",

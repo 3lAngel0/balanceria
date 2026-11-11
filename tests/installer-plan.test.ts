@@ -158,7 +158,7 @@ test("summaryStory and summaryByFile say a kept backup stays because a task uses
 	const draft = initStepper([claude, agy], [], savedProfiles.profiles.balanceador_default);
 	const current = { pools: savedPools, profiles: savedProfiles };
 	const story = summaryStory(draft, current);
-	assert.match(story.narrative, /Backup Main agent is kept.*Coordinating the work/);
+	assert.match(story.narrative, /Backup Main agent \(orchestrator\) is kept.*Main agent \(orchestrator\)/);
 	assert.ok(story.detail.includes("Backup Legacy stays because these tasks use it: Writing code."));
 	const pools = summaryByFile(draft, current).find(g => g.file === "pools.json")!;
 	assert.ok(pools.lines.some(l => /stays because/.test(l)));
@@ -234,7 +234,7 @@ test("withKeptBackups reports a used backup whose subscriptions are all off as b
 	assert.deepEqual(result.blocked.map(b => [b.id, b.roles]), [["legacy", ["orchestrator"]]]);
 	assert.deepEqual(result.kept, []);
 	assert.equal(installBlockers(off, current).length, 1);
-	assert.match(installBlockers(off, current)[0]!, /Legacy.*Coordinating the work/);
+	assert.match(installBlockers(off, current)[0]!, /Legacy.*Main agent \(orchestrator\)/);
 	assert.deepEqual(installBlockers({ ...off, enabled: ["claude-bridge", "antigravity"] }, current), []);
 });
 
@@ -315,4 +315,11 @@ test("S1: writers that do not manage lastResort preserve it (bare pool list, pan
 		writeConfigSafely(root, { integrations: INTEGRATIONS, pools: doc.pools, lastResort: null });
 		assert.equal("lastResort" in writtenPools(root), false);
 	});
+});
+
+test("the orchestrator backup and role are named Main agent (orchestrator); the technical id is untouched", async () => {
+	const { backupName, roleName } = await import("../src/installer-plan.ts");
+	assert.equal(backupName({ id: "orchestrator" }), "Main agent (orchestrator)");
+	assert.equal(roleName("orchestrator"), "Main agent (orchestrator)");
+	assert.equal(targetLabel("pool/orchestrator", []), "Backup Main agent (orchestrator)");
 });

@@ -285,3 +285,12 @@ test("renderControlCenter roles tab flags the selected role on a direct model as
 	assert.match(render("antigravity/gemini-3-8-flash"), /No backup: if this model runs out/);
 	assert.doesNotMatch(render("pool/claude-opus-5-5"), /No backup/);
 });
+
+test("renderControlCenter roles tab shows the orchestrator as Main agent (orchestrator) and keeps other role ids", () => {
+	const out = renderControlCenter({
+		tab: "roles", width: 120, folded: foldEvents(EVENTS, NOW), now: NOW, activeProfile: "default", pools: [], providers: [],
+		roles: { orchestrator: { model: "pool/orchestrator" }, "gentle-ai-explore": { model: "pool/x" } } as never, cursor: 0,
+	}).join("\n");
+	assert.match(out, /Main agent \(orchestrator\)/);
+	assert.match(out, /gentle-ai-explore/);
+});

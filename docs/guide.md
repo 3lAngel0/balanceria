@@ -219,7 +219,7 @@ flowchart TD
 
 ### Terminal Pick Modes
 - **`first` (Waterfall)**: Picks the first available candidate in pool order.
-- **`highest-quota` (Hybrid default)**: Compares the remaining quota fraction (`0.0` to `1.0`) across all available candidates. The candidate with the highest remaining quota wins. Ties are broken by pool candidate order.
+- **`highest-quota` (Hybrid default; `hybrid` routes exactly like it today)**: Compares the remaining quota fraction (`0.0` to `1.0`) across all available candidates. The candidate with the highest remaining quota wins. Ties are broken by pool candidate order.
 - **`lowest-cost`**: Computes the token rate (`input + output` USD per million tokens) from `prices.json`. Picks the candidate with the lowest cost rate. Ties are broken by highest remaining quota fraction. **If any available candidate lacks a price in `prices.json`, this mode automatically falls back to `highest-quota`.**
 
 ### Built-In Fixed Guarantees
@@ -579,14 +579,16 @@ The Welcome screen also presents an upfront summary of what the installer will d
 When multiple subscriptions offer overlapping models, the installer suggests virtual backup pools and gives you full control over candidate ordering, membership, and routing algorithms:
 
 - **Mixed / Hybrid (`hybrid` - Recommended)**:
-  - Starts with the primary candidate and shifts smoothly to one with more headroom when quota drops low.
-  - *Tradeoff*: Preserves prompt cache reuse during ongoing turns while preventing mid-turn `429` quota exhaustion.
+  - Keeps the model a conversation already uses; for a new turn it picks the subscription with the most usage left. Today it routes exactly like `highest-quota` (no "running low" threshold).
+  - *Tradeoff*: Preserves prompt cache reuse during ongoing turns; a later candidate can answer a new turn before the first runs out.
 - **In Order / Waterfall (`waterfall`)**:
-  - Always routes to the primary candidate until its quota is completely exhausted, then fails over to secondary candidates in sequence.
+  - Always routes to the primary candidate until its quota is completely exhausted, then fails over to secondary candidates in sequence. This is the strategy to use for a strict primary/backup order.
   - *Tradeoff*: Simple and predictable; ideal when you want to exhaust a primary quota before touching secondary limits.
 - **Most Room Left / Highest Quota (`highest-quota`)**:
   - Always selects the candidate subscription currently reporting the highest available quota percentage.
   - *Tradeoff*: Distributes load evenly across subscriptions; may cause prompt cache rewarming when switching between providers.
+
+Automatic backups only group the same model. To fall back to another provider (for example Claude to OpenAI or Gemini), use **+ Create another backup** → **Custom backup**, tick models with `Space` (any model of your enabled subscriptions, other providers included), order them, and choose **In order**.
 
 Candidates within a pool can be reordered using `u` (up) and `d` (down) keys or interactive controls. The installer automatically warns you when mixing low-cost models (e.g., Flash) with premium models in the same backup pool without cost containment guards.
 

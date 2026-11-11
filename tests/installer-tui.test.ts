@@ -321,7 +321,7 @@ test("the tasks picker renders at the exact width, tags the recommendation and m
 	assert.deepEqual(installerKey(list, undefined, "\r").actions, [{ type: "open", index: list.cursor }]);
 	assert.deepEqual(installerKey(list, undefined, " ").actions, [{ type: "toggle", index: list.cursor }]);
 	const view = renderInstaller(list, { width: 100, mode: "none" });
-	const labelY = view.lines.findIndex(l => strip(l).includes("[ ] Coordinating the work"));
+	const labelY = view.lines.findIndex(l => strip(l).includes("[ ] Main agent (orchestrator)"));
 	assert.ok(labelY >= 0);
 	const x = strip(view.lines[labelY]!).indexOf("[ ]");
 	assert.deepEqual(hitInstaller(view.hits, x, labelY), { type: "toggle", index: 0 });

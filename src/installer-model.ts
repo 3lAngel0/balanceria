@@ -254,6 +254,15 @@ function currentPools(current: StepperCurrent): PoolConfig[] {
 const detectedOnly = (providers: readonly DetectedProvider[]) => providers.filter(p => p.detected);
 const enabledProviders = (draft: SetupStepperState) => draft.detected.filter(p => p.detected && draft.enabled.includes(p.id));
 const enabledRefs = (draft: SetupStepperState) => enabledProviders(draft).flatMap(p => p.availableModels.map(model => `${p.id}/${model}`));
+/** Model family by name (claude, openai, google); anything else counts as its own family. */
+const familyOf = (ref: string): string => {
+	const model = ref.slice(ref.indexOf("/") + 1);
+	if (/claude/i.test(model)) return "claude";
+	if (/gpt|codex|^o\d/i.test(model)) return "openai";
+	if (/gemini/i.test(model)) return "google";
+	return ref.slice(0, ref.indexOf("/"));
+};
+const hasSeveralFamilies = (draft: SetupStepperState): boolean => new Set(enabledRefs(draft).map(familyOf)).size > 1;
 const providerOf = (ref: string) => ref.slice(0, ref.indexOf("/"));
 const modelOf = (ref: string) => ref.slice(ref.indexOf("/") + 1);
 
@@ -463,7 +472,7 @@ function wizardContent(state: InstallerState, wizard: BackupWizard): Content {
 	const draft = state.draft;
 	const phaseIndex = WIZARD_PHASES.indexOf(wizard.phase);
 	const sub = Math.min(phaseIndex + 1, 3);
-	const body = [t("installer.wizard.progress", { n: sub, total: 3 }), t(`installer.wizard.${wizard.phase}.body`), ...(wizard.phase === "members" ? [t("installer.backups.limitNote")] : [])];
+	const body = [t("installer.wizard.progress", { n: sub, total: 3 }), t(`installer.wizard.${wizard.phase}.body`), ...(wizard.phase === "members" ? [t("installer.wizard.members.anyProvider"), t("installer.backups.limitNote")] : [])];
 	const last = wizard.phase === "strategy";
 	const buttons = [
 		button("back"),
@@ -707,6 +716,7 @@ function content(state: InstallerState): Content {
 				body: [
 					t("installer.backups.body"),
 					t("installer.backups.limitNote"),
+					...(hasSeveralFamilies(draft) ? [t("installer.backups.crossProvider")] : []),
 					...(items.length === 0 ? [t("installer.backups.none")] : []),
 					...single.map(s => t("installer.backups.single", { model: friendlyModel(s.model), subscription: owner(s.provider) })),
 					lastResort ? t("installer.lastResort.current", { model: refLabel(draft, lastResort) }) : t("installer.lastResort.currentNone"),

@@ -316,7 +316,7 @@ Con `hybrid` o `highest-quota`, un segundo candidato con más cuota libre respon
 
 ### ¿Un respaldo puede mezclar proveedores, por ejemplo Claude primero y OpenAI cuando Claude se agota?
 
-Sí. Abrí `/installer`, entrá a **Respaldos**, elegí **+ Crear otro respaldo** y después **Respaldo personalizado**. Las plantillas Claude Opus y Claude Sonnet solo preseleccionan modelos con ese nombre, así que ahí los de OpenAI arrancan sin marcar.
+Sí. Abrí `/installer`, entrá a **Respaldos**, elegí **+ Crear otro respaldo** y después **Respaldo propio**. Las plantillas Claude Opus y Claude Sonnet solo preseleccionan modelos con ese nombre, así que ahí los de OpenAI arrancan sin marcar.
 
 1. **Qué suscripciones**: moverte con ↑↓ y marcar con **Espacio**.
 2. **Orden**: ↑↓ sube o baja la suscripción resaltada. La primera se usa primero.
@@ -329,7 +329,7 @@ La alternativa es un **préstamo**: dejás el pool solo con Claude y autorizás 
 
 La lista solo muestra modelos de suscripciones **detectadas y activadas** en el paso **Suscripciones**. OpenAI ChatGPT Plus/Pro (`openai-codex`) se detecta cuando iniciaste sesión con `/login` de Pi; una API key no cuenta como esa suscripción. Si está detectada pero desmarcada, marcala en **Suscripciones**.
 
-Los respaldos automáticos solo agrupan suscripciones que ofrecen el **mismo** modelo, así que un modelo de OpenAI nunca termina solo en un respaldo de Claude. Creá un respaldo personalizado como se explica arriba.
+Los respaldos automáticos solo agrupan suscripciones que ofrecen el **mismo** modelo, así que un modelo de OpenAI nunca termina solo en un respaldo de Claude. Creá un respaldo propio como se explica arriba.
 
 ### ¿Conviene asignar `pool/orchestrator` a todos los roles?
 

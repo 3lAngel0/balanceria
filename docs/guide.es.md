@@ -579,14 +579,16 @@ La pantalla de bienvenida también presenta un panorama de lo que hará el insta
 Cuando varias suscripciones ofrecen modelos equivalentes, el instalador sugiere respaldos virtuales y permite configurar completamente los integrantes, su orden y el algoritmo de selección:
 
 - **Mixto / Híbrido (`hybrid` - Recomendado)**:
-  - Comienza utilizando la primera suscripción y pasa de forma gradual a una con mayor espacio libre cuando el margen de cuota se reduce.
-  - *Compromiso*: Maximiza la reutilización de la caché de prompts durante turnos activos a la vez que previene caídas `429` a mitad de turno.
+  - Mantiene el modelo que ya usa una conversación; en un turno nuevo elige la suscripción con más uso disponible. Hoy enruta exactamente igual que `highest-quota` (no tiene umbral de "queda poco").
+  - *Compromiso*: Maximiza la reutilización de la caché de prompts durante turnos activos; un candidato posterior puede responder un turno nuevo antes de que se agote el primero.
 - **En orden / Cascada (`waterfall`)**:
-  - Utiliza estrictamente la primera opción hasta agotar por completo su cuota antes de pasar a la siguiente en orden de prioridad.
+  - Utiliza estrictamente la primera opción hasta agotar por completo su cuota antes de pasar a la siguiente en orden de prioridad. Es la estrategia para un orden estricto de principal y respaldo.
   - *Compromiso*: Modelo mental predecible; ideal para consumir íntegramente una suscripción primaria antes de tocar límites secundarios.
 - **La que más le queda / Mayor cuota (`highest-quota`)**:
   - Consulta dinámicamente y asigna cada turno a la suscripción que tenga el mayor porcentaje de cuota disponible en ese momento.
   - *Compromiso*: Distribuye el consumo de manera homogénea; puede requerir regenerar la caché de prompts con mayor frecuencia al alternar entre proveedores.
+
+Los respaldos automáticos solo juntan el mismo modelo. Para pasar a otro proveedor (por ejemplo de Claude a OpenAI o Gemini), usá **+ Crear otro respaldo** → **Respaldo propio**, marcá modelos con `Espacio` (cualquier modelo de tus suscripciones activas, también de otros proveedores), ordenalos y elegí **En orden**.
 
 Los candidatos de un respaldo pueden reordenarse con las teclas `u` (subir) y `d` (bajar) o mediante controles interactivos. El instalador alerta si se mezclan modelos económicos (como Flash) con modelos premium en un mismo respaldo sin contención de costos.
 
