@@ -349,3 +349,50 @@ test("the web server, its data and its page never import permissions", () => {
 		assert.doesNotMatch(source, /permissions/, file);
 	}
 });
+
+// -- T9 (S7): grants the installer manages ------------------------------------------------------
+
+import { INSTALLER_GRANT_MS, INSTALLER_GRANT_PREFIX, installerGrantsMatch, installerLoanTargets, syncInstallerGrants } from "../src/permissions.ts";
+
+const loan = { poolId: "a", to: "openai/gpt-5", profiles: ["p"], roles: ["orchestrator", "verify"] };
+
+test("S7: syncInstallerGrants adds an auto grant for the loan, audited, with a year of life and the installer prefix", () => {
+	const dir = dataDir();
+	const { added, revoked } = syncInstallerGrants(dir, [loan], NOW);
+	assert.equal(revoked.length, 0);
+	assert.equal(added.length, 1);
+	assert.ok(added[0]!.id.startsWith(`${INSTALLER_GRANT_PREFIX}-`));
+	assert.equal(added[0]!.level, "auto");
+	assert.equal(added[0]!.expiresAt, NOW + INSTALLER_GRANT_MS);
+	assert.deepEqual(added[0]!.models, ["pool/a", "openai/gpt-5"]);
+	assert.deepEqual(installerLoanTargets(loadPermissions(dir).grants, NOW), { a: "openai/gpt-5" });
+	assert.match(readFileSync(join(dir, AUDIT_FILE), "utf8"), /"action":"grant"/);
+	// The permission is real: the loan's role may move from the backup to the target.
+	assert.equal(permissionFor(loadPermissions(dir).grants, { profile: "p", role: "verify", from: "pool/a", to: "openai/gpt-5" }, NOW).level, "auto");
+});
+
+test("S7: syncInstallerGrants is a no-op when the grants already match, replaces changed ones and never touches the user's grants", () => {
+	const dir = dataDir();
+	const own = addGrant(dir, { level: "auto", profiles: ["p"], roles: ["orchestrator"], models: ["pool/a", "openai/gpt-5"], expiresAt: NOW + HOUR }, NOW);
+	syncInstallerGrants(dir, [loan], NOW);
+	const file = readFileSync(join(dir, PERMISSIONS_FILE), "utf8");
+	assert.deepEqual(syncInstallerGrants(dir, [loan], NOW), { added: [], revoked: [] });
+	assert.equal(readFileSync(join(dir, PERMISSIONS_FILE), "utf8"), file);
+	const moved = syncInstallerGrants(dir, [{ ...loan, to: "openai/gpt-6" }], NOW);
+	assert.equal(moved.revoked.length, 1);
+	assert.equal(moved.added.length, 1);
+	assert.deepEqual(syncInstallerGrants(dir, [], NOW).revoked.length, 1);
+	assert.deepEqual(loadPermissions(dir).grants.map(g => g.id), [own.id]);
+});
+
+test("S7: installerGrantsMatch ignores expired installer grants; an unusable file with no loans stays untouched, with loans it throws", () => {
+	const dir = dataDir();
+	syncInstallerGrants(dir, [loan], NOW);
+	const grants = loadPermissions(dir).grants;
+	assert.equal(installerGrantsMatch(grants, [loan], NOW), true);
+	assert.equal(installerGrantsMatch(grants, [loan], NOW + INSTALLER_GRANT_MS + 1), false);
+	writeFileSync(join(dir, PERMISSIONS_FILE), "nope");
+	assert.deepEqual(syncInstallerGrants(dir, [], NOW), { added: [], revoked: [] });
+	assert.throws(() => syncInstallerGrants(dir, [loan], NOW), /permissions\.json/);
+	assert.equal(readFileSync(join(dir, PERMISSIONS_FILE), "utf8"), "nope");
+});

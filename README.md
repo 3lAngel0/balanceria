@@ -194,9 +194,10 @@ Launch the configuration hub to auto-detect installed providers, configure pools
   - Clear overview of installer steps and GitHub community star link: [https://github.com/3lAngel0/balanceria](https://github.com/3lAngel0/balanceria).
 - **Backup Pipeline & Routing Strategies**:
   - Full control over backup members, candidate priority ordering (`u`/`d`), and routing strategies:
-    - **Mixed (`hybrid`)**: Starts with the primary candidate, transitioning to one with more room when running low to preserve cache while avoiding exhaustion.
+    - **Mixed (`hybrid`)**: Currently routes exactly like `highest-quota` (sticky on continuation turns, otherwise the candidate with the most quota left). It has no "running low" threshold yet.
     - **In order (`waterfall`)**: Strictly uses the primary candidate until exhausted before rolling over to the second.
     - **Most room left (`highest-quota`)**: Dynamically queries quota headroom and selects the candidate with the highest remaining capacity.
+  - **Last-resort model**: in **Backups** press `l` (or the **Last-resort model** button) to pick a cheap model, or **None**. It is saved as `lastResort` in `pools.json`, shown in the summary, and dropped if its subscription is disabled.
 - **Agent Tasks & AI Deep Analysis ("Búsqueda profunda")**:
   - Assign roles instantly with zero quota consumption via **Assign recommended**, or trigger **Deep analysis** (`Realizar búsqueda profunda`).
   - Deep analysis consults an AI advisor model to evaluate task allocations against real model capabilities, reasoning benchmarks, and cost efficiency.
@@ -276,6 +277,72 @@ Select a pool model directly in chat via `/model pool/claude-sonnet-5-5` or conf
 | `/balancer lab` | Sandbox mode: create, diff, simulate, and safely apply pool rule changes. |
 | `/balancer switch-cost` | Report prompt cache retention benefits vs. provider switching costs. |
 | `/hud` | Open the high-density terminal Heads-Up Display. |
+
+---
+
+## ❓ FAQ
+
+### Who decides which model answers? Does the orchestrator agent decide?
+
+The **balancer** decides, not an AI. It is deterministic code (no tokens, under 1 ms) that reads the quota it has recorded for each subscription and picks a model for every request. It never asks the orchestrator agent or any other model.
+
+"orchestrator" means two different things:
+
+- **The orchestrator role**: the main agent you chat with. It coordinates work and delegates to subagents.
+- **The `orchestrator` pool**: just a list of models (`pools.json`) assigned to that role, balanced like any other pool. It does not choose models for other roles.
+
+### A role points at a direct model (for example `antigravity/gemini-4-argon`). What happens when that model runs out?
+
+**Nothing reroutes it.** Only roles that point at `pool/<id>` are balanced. A role with a direct model calls that provider directly, so when its quota runs out the request fails with the provider's quota error. ai-balancer records the exhaustion and, in the main session, shows a hint such as `antigravity/gemini-4-argon is full. Switch to <available model> or pool/orchestrator (/balancer).` The suggested model is your **Last-resort model** if one is set and has quota, otherwise the first pool candidate with quota. `/installer` (Agent tasks) and `/balancer` → **Roles** flag these roles with "No backup: if this model runs out, this task stops". Loans do not apply to direct models either.
+
+If you want a role to keep working when its model runs out, point it at a pool: open `/balancer`, go to **Roles**, select the role and press Enter to choose a `pool/<id>` that contains that model plus alternatives.
+
+### A role points at a pool. What happens when the model it is using runs out?
+
+The balancer marks it as exhausted until its window resets and retries the request with the next available candidate **of the same pool**. During a conversation it sticks to the model that answered the previous turn (to keep the prompt cache warm) and only switches when that model is no longer available or a new turn starts.
+
+### How does it choose among the candidates of a pool?
+
+With the pool's strategy:
+
+| Strategy | Behavior |
+|---|---|
+| **In order** (`waterfall`) | Always the first available candidate in the list. Use it for "use Claude until it runs out, then the next one". |
+| **Most room left** (`highest-quota`) | The candidate with the highest remaining quota. Candidates with unknown quota lose to any known one; ties go to the first in the list. |
+| **Mixed** (`hybrid`) | Today it behaves exactly like `highest-quota`. |
+
+With `hybrid` or `highest-quota`, a second candidate with more quota left answers **before** the first one runs out. If you want a strict primary and backup, use `waterfall`.
+
+### What happens when every candidate of a pool is exhausted?
+
+- **Last-resort model (if configured)**: when every candidate of a pool is spent, the configured last-resort model answers **first and automatically**, in the main session and in subagents, with a warning notice. The menu below opens only when the last-resort model is spent too (or none is set). Set it in `/installer` → **Backups** → **Last-resort model** (shortcut `l`); choose **None** to remove it.
+- **Main session (with a screen)**: a menu lets you wait for a candidate of the pool (it shows when each one resets), use an available model **from another pool**, use **any other model of your active subscriptions that still has quota** (even if no pool lists it, for example your OpenAI models when Claude runs out), compact the session, or cancel. Spent models are not offered.
+- **Subagents (no screen)**: there is no menu. The request goes to the candidate that resets first and fails with the provider's quota message, unless a **loan** applies (see below).
+
+### Can a backup mix providers, for example Claude first and OpenAI when Claude runs out?
+
+Yes. Run `/installer`, go to **Backups**, choose **+ Create another backup** and then **Custom backup**. The Claude Opus and Claude Sonnet templates only pre-select models whose name matches, so OpenAI models start unticked there.
+
+1. **Which subscriptions**: move with ↑↓ and tick with **Space**.
+2. **Order**: ↑↓ moves the highlighted subscription up or down. The first one is used first.
+3. **Strategy**: choose **In order** (`waterfall`).
+4. In **Agent tasks**, assign the new backup to the roles that should use it. A backup no role uses does nothing.
+
+The alternative is a **loan**: keep the pool Claude-only and grant a temporary route to another model while the pool is exhausted (`/balancer loans`, `/balancer permissions`). With an `auto` grant it switches without asking and returns when the window resets. Loans only apply to roles that point at a pool. You can set one up without typing commands: `/installer` → Backups → **Automatic loans** (key `a`) lets you pick, for each backup, the model its tasks borrow when it runs out (for example a Claude backup borrowing an OpenAI model). The installer saves it as an `auto` grant for every task that uses that backup, valid for one year (install again to renew it), and leaves any other grant untouched.
+
+### Why does the backup list show only Claude models when I have OpenAI?
+
+The list only shows models from subscriptions that are **detected and enabled** in the **Subscriptions** step. OpenAI ChatGPT Plus/Pro (`openai-codex`) is detected when you signed in with Pi's `/login`. An API key does not count as that subscription. If it is detected but unticked, tick it in **Subscriptions**.
+
+The automatic backups only group subscriptions that offer the **same** model, so an OpenAI model never ends up in a Claude backup by itself. Create a custom backup as shown above.
+
+### Should `pool/orchestrator` be assigned to every role?
+
+No. Every subagent would then spend the main agent's quota, and when it runs out your main conversation stops too. It also starts with a model chosen for coordinating, not for exploring or writing code. Give each role a pool suited to its job, with another provider last in the list or a loan.
+
+### What does "Effective routing" mean in `/balancer` → Roles?
+
+For a role on a pool it shows the model the pool **last** routed to, followed by the full candidate list in order: `claude-bridge/claude-opus-5-5 [antigravity/gemini-4-argon → …]`. Here the last request went to `claude-bridge/claude-opus-5-5`, even though `gemini-4-argon` is first in the list. For a role on a direct model it shows that model.
 
 ---
 

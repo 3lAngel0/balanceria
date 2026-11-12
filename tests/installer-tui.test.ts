@@ -321,7 +321,7 @@ test("the tasks picker renders at the exact width, tags the recommendation and m
 	assert.deepEqual(installerKey(list, undefined, "\r").actions, [{ type: "open", index: list.cursor }]);
 	assert.deepEqual(installerKey(list, undefined, " ").actions, [{ type: "toggle", index: list.cursor }]);
 	const view = renderInstaller(list, { width: 100, mode: "none" });
-	const labelY = view.lines.findIndex(l => strip(l).includes("[ ] Coordinating the work"));
+	const labelY = view.lines.findIndex(l => strip(l).includes("[ ] Main agent (orchestrator)"));
 	assert.ok(labelY >= 0);
 	const x = strip(view.lines[labelY]!).indexOf("[ ]");
 	assert.deepEqual(hitInstaller(view.hits, x, labelY), { type: "toggle", index: 0 });
@@ -445,11 +445,11 @@ test("shortcuts are drawn as a key hint line and every enabled letter maps to it
 		for (const hint of screen.shortcuts) {
 			const { key: raw, label, action, enabled } = hint;
 			const shown = raw === " " ? "Space" : raw === "enter" ? "Enter" : raw;
-			assert.ok(out.includes(`${shown} ${label}`), `${screen.step} shows "${shown} ${label}"`);
+			assert.match(out, new RegExp(`${shown} +${label.replace(/[()]/g, "\\$&")}`), `${screen.step} shows "${shown} ${label}"`);
 			if (enabled && raw !== "enter" && raw !== " ") assert.deepEqual(installerKey(screen, undefined, raw).actions, [action], `${screen.step} ${raw}`);
 		}
 	}
-	assert.match(text(renderInstaller(installerScreen(tasksState()), { width: 140, mode: "none" }).lines), /d Deep analysis/);
+	assert.match(text(renderInstaller(installerScreen(tasksState()), { width: 140, mode: "none" }).lines), /d +Deep analysis/);
 });
 
 test("the backups step is keyboard driven: tick, change how to choose, create a backup; u/j reorder the focused member", () => {
@@ -637,4 +637,122 @@ test("only the focused button is filled; the primary one is not blue at rest", (
 	assert.match(backFocused, /\x1b\[48;2;[^m]*m ◀ Back /);
 	assert.doesNotMatch(backFocused, /\x1b\[48;2;[^m]*m Next ▶ /);
 	assert.match(text(renderInstaller(screen, { width: 100, mode: "none" }).lines), /\[ Next ▶ \]/);
+});
+
+test("S7: the terminal reaches Automatic loans with the A key and a button, and draws both levels at every width", () => {
+	const backups = customRun().find(s => s.step === "backups")!;
+	const screen = installerScreen(backups);
+	assert.deepEqual(installerKey(screen, undefined, "a").actions, [{ type: "button", id: "loans" }]);
+	for (const width of WIDTHS) {
+		const lines = renderInstaller(screen, { width, mode: "none" }).lines;
+		assert.match(text(lines), /Automatic loans/);
+		for (const line of lines) assert.ok(vw(line) <= width, `${width}: ${strip(line)}`);
+	}
+	const list = step(backups, { type: "button", id: "loans" });
+	const open = step(list, { type: "open", index: 0 });
+	for (const state of [list, open]) {
+		for (const width of WIDTHS) {
+			const lines = renderInstaller(installerScreen(state), { width, mode: "none" }).lines;
+			assert.match(text(lines), /Automatic loans/);
+			for (const line of lines) assert.ok(vw(line) <= width, `${width}: ${strip(line)}`);
+		}
+	}
+	// In the list, Enter opens the highlighted backup; in its targets, Enter chooses and goes back to the list.
+	assert.deepEqual(installerKey(installerScreen(list), undefined, "\r").actions, [{ type: "open", index: 0 }]);
+});
+
+// ---------------------------------------------------------------------------------------------
+// Layout: shortcut grid and split button groups
+// ---------------------------------------------------------------------------------------------
+
+const NAV = ["back", "next", "cancel"];
+const plainLines = (view: { lines: string[] }) => view.lines.map(strip);
+const shownKey = (k: string) => (k === " " ? "Space" : k === "enter" ? "Enter" : k);
+
+/** The boxed shortcut block of the content column (sidebar and separator cut off): top border to bottom border. */
+function shortcutBox(width: number) {
+	const screen = installerScreen(backupsState());
+	const lines = plainLines(renderInstaller({ ...screen, helpOpen: true }, { width, mode: "none" })).map(l => l.replace(/^.*? │ /, "").trimEnd());
+	const top = lines.findIndex(l => l.startsWith("╭─ Keys here "));
+	assert.ok(top >= 0, "box title in the top border");
+	const bottom = lines.findIndex((l, i) => i > top && l.startsWith("╰"));
+	assert.ok(bottom > top, "bottom border");
+	return { screen, lines: lines.slice(top, bottom + 1) };
+}
+
+test("the backups shortcuts sit in a rounded box titled in its top border, one aligned grid inside", () => {
+	for (const width of [100, 170]) {
+		const { screen, lines } = shortcutBox(width);
+		const full = vw(lines[0]!);
+		assert.ok(lines[0]!.startsWith("╭─ Keys here ─") && lines[0]!.endsWith("╮"));
+		assert.ok(full <= width, "never wider than the terminal");
+		assert.equal(lines.at(-1), `╰${"─".repeat(full - 2)}╯`);
+		const body = lines.slice(1, -1);
+		for (const l of body) {
+			assert.ok(l.startsWith("│ ") && l.endsWith(" │"), `framed: ${l}`);
+			assert.equal(vw(l), full, "right border in the same column");
+		}
+		const offsets = new Set<number>();
+		for (const { label } of screen.shortcuts) {
+			const row = body.find(r => r.includes(label));
+			assert.ok(row, `${label} placed`);
+			offsets.add(row!.indexOf(label));
+		}
+		if (width === 170) {
+			assert.ok(body.length >= 2 && body.length < screen.shortcuts.length, "several columns inside the box");
+			assert.ok(offsets.size >= 2 && offsets.size <= 3, `labels align into columns, got ${[...offsets]}`);
+			const { key: k1, label: l1 } = screen.shortcuts[0]!;
+			const { key: k2, label: l2 } = screen.shortcuts[1]!;
+			assert.equal(body[0]!.indexOf(l1), body[1]!.indexOf(l2), "labels in one column start together");
+			assert.ok(body[0]!.includes(shownKey(k1)) && body[1]!.includes(shownKey(k2)), "column-major");
+		} else {
+			assert.equal(body.length, screen.shortcuts.length, "one aligned column at a narrow width");
+			assert.equal(offsets.size, 1);
+		}
+		assert.ok(!lines.some(l => l.trim() === "Keys here:"), "no separate prefix line");
+	}
+	const screen = installerScreen(backupsState());
+	assert.ok(plainLines(renderInstaller(screen, { width: 100, mode: "none" })).every(l => vw(l) <= 100));
+});
+
+test("action buttons and navigation buttons are on different rows", () => {
+	const screen = installerScreen(backupsState());
+	const lines = plainLines(renderInstaller(screen, { width: 100, mode: "none" }));
+	const rowOf = (s: string) => lines.findIndex(l => l.includes(s));
+	const nav = rowOf("[ Next ▶ ]");
+	assert.ok(nav >= 0);
+	for (const word of ["[ ◀ Back ]", "[ Next ▶ ]", "[ Cancel ]"]) assert.equal(rowOf(word), nav);
+	const actions = screen.buttons.filter(b => !NAV.includes(b.id));
+	assert.ok(actions.length > 0);
+	assert.equal((lines[nav]!.match(/\[/g) ?? []).length, 3, "three navigation buttons only");
+	for (const b of actions) {
+		const r = lines.findIndex(l => l.includes(`[ ${b.label} ]`) || l.includes(`( ${b.label} )`));
+		assert.ok(r >= 0 && r < nav, `${b.id} above the navigation row`);
+	}
+});
+
+test("every button still triggers its id when clicked and keeps its focus marker", () => {
+	for (const state of [backupsState(), tasksState(), recommendedRun()[1]!]) {
+		const screen = installerScreen(state);
+		const view = renderInstaller(screen, { width: 100, mode: "none" });
+		const lines = plainLines(view);
+		screen.buttons.forEach((b, i) => {
+			const labelled = b.id === "back" ? `◀ ${b.label}` : b.id === "next" ? `${b.label} ▶` : b.label;
+			if (b.enabled) {
+				const y = lines.findIndex(l => l.includes(`[ ${labelled} ]`));
+				assert.ok(y >= 0, `${b.id} drawn`);
+				assert.deepEqual(hitInstaller(view.hits, lines[y]!.indexOf(labelled), y), { type: "button", id: b.id });
+			}
+			const focused = plainLines(renderInstaller(screen, { width: 100, mode: "none", focus: i }));
+			assert.ok(focused.some(x => x.includes("▸") && x.includes(b.label)), `focus on ${b.id}`);
+		});
+	}
+});
+
+test("a screen with only navigation buttons keeps a single button row", () => {
+	const screen = installerScreen(recommendedRun()[1]!);
+	assert.ok(screen.buttons.every(b => NAV.includes(b.id)));
+	const rows = plainLines(renderInstaller(screen, { width: 100, mode: "none" })).filter(l => l.includes("Cancel") && l.includes("["));
+	assert.equal(rows.length, 1);
+	assert.ok(rows[0]!.includes("Back") && rows[0]!.includes("Next ▶"));
 });

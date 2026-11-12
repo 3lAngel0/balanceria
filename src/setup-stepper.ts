@@ -3,6 +3,9 @@
 
 import type { Integration } from "./integrations.ts";
 import { DEFAULT_ORCHESTRATOR_MODE, isOrchestratorMode, type OrchestratorMode, type ProfileConfig, type ProfileWorkflow } from "./profiles.ts";
+import { join } from "node:path";
+import { PERMISSIONS_FILE, installerGrantsMatch, syncInstallerGrants, type Grant, type InstallerLoan } from "./permissions.ts";
+import { lastResortRef } from "./pools.ts";
 import type { RoutingStrategy } from "./router.ts";
 import { t } from "./i18n/index.ts";
 import { applyRecommendationsToProfile, recommendRolesHeuristic, type AdvisorReport } from "./setup-advisor.ts";
@@ -26,6 +29,10 @@ interface StepperDraft {
 	pools: PoolConfig[];
 	roles: ProfileConfig;
 	orchestratorMode: OrchestratorMode;
+	/** `provider/model` used when a whole backup is spent (pools.json `lastResort`); absent when there is none. */
+	lastResort?: string;
+	/** Automatic loans the installer manages: backup id -> `provider/model` its tasks borrow while it is spent (permissions.json). */
+	loans?: Record<string, string>;
 }
 
 export interface SetupStepperState extends StepperDraft {
@@ -48,19 +55,25 @@ export interface StepperCurrent {
 	pools?: unknown;
 	integrations?: unknown;
 	profiles?: { active?: string; profiles?: Record<string, ProfileConfig> } | null;
+	/** The grants of permissions.json; absent when the host did not read them (the installer then leaves them alone). */
+	grants?: Grant[];
 }
 
 export interface StepperDeps {
 	root: string;
 	current: StepperCurrent;
 	profilesPath: string;
-	writeConfig: (root: string, configs: { integrations?: unknown; pools?: unknown }) => {
+	writeConfig: (root: string, configs: { integrations?: unknown; pools?: unknown; lastResort?: string | null }) => {
 		success: boolean;
 		integrationsPath: string;
 		poolsPath: string;
 		backupCreated: boolean;
 	};
 	writeProfiles: (profileName: string, roles: ProfileConfig, workflow?: ProfileWorkflow) => void;
+	/** Where permissions.json lives; defaults to AI_BALANCER_DATA_DIR or `<root>/data`. */
+	dataDir?: string;
+	/** The clock for grants. */
+	now?: number;
 }
 
 export interface StepperApplyResult {
@@ -69,6 +82,8 @@ export interface StepperApplyResult {
 	backups: string[];
 	error?: string;
 	profilesError?: string;
+	/** Set when the automatic loans could not be saved (the rest was written). */
+	grantsError?: string;
 }
 
 type StepperPool = PoolConfig;
@@ -79,6 +94,8 @@ const cloneDraft = (draft: StepperDraft): StepperDraft => ({
 	pools: clonePools(draft.pools),
 	roles: cloneRoles(draft.roles),
 	orchestratorMode: draft.orchestratorMode,
+	...(draft.lastResort ? { lastResort: draft.lastResort } : {}),
+	...(draft.loans ? { loans: { ...draft.loans } } : {}),
 });
 
 export function initStepper(
@@ -86,7 +103,7 @@ export function initStepper(
 	recommended: PoolConfig[],
 	existingRoles: ProfileConfig = {},
 	initialWorkflow?: ProfileWorkflow | OrchestratorMode,
-	options?: { guided?: boolean },
+	options?: { guided?: boolean; lastResort?: string; loans?: Record<string, string> },
 ): SetupStepperState {
 	const orchestratorMode: OrchestratorMode =
 		typeof initialWorkflow === "string" && isOrchestratorMode(initialWorkflow)
@@ -99,6 +116,8 @@ export function initStepper(
 		pools: clonePools(recommended),
 		roles: cloneRoles(existingRoles),
 		orchestratorMode,
+		...(options?.lastResort ? { lastResort: options.lastResort } : {}),
+		...(options?.loans ? { loans: { ...options.loans } } : {}),
 	};
 	return { step: "providers", reached: 0, detected, dirty: false, messages: {}, ...cloneDraft(baseline), baseline, guided: options?.guided ?? false };
 }
@@ -106,6 +125,54 @@ export function initStepper(
 /** The initial state again; nothing was written. */
 export function discard(state: SetupStepperState): SetupStepperState {
 	return { ...state, step: "providers", reached: 0, dirty: false, messages: {}, ...cloneDraft(state.baseline) };
+}
+
+/** The last-resort model Save would write: dropped when its subscription is disabled, like pool members. */
+export function effectiveLastResort(state: SetupStepperState): string | undefined {
+	const ref = state.lastResort;
+	return ref && state.enabled.includes(ref.slice(0, ref.indexOf("/"))) ? ref : undefined;
+}
+
+/** The automatic loans Save would write: only for backups that stay and targets whose subscription is enabled. */
+export function effectiveLoans(state: SetupStepperState): Record<string, string> {
+	const on = new Set(state.enabled);
+	const live = new Set(state.pools.filter(pool => pool.candidates.some(ref => on.has(ref.slice(0, ref.indexOf("/"))))).map(pool => pool.id));
+	return Object.fromEntries(Object.entries(state.loans ?? {}).filter(([id, to]) => live.has(id) && on.has(to.slice(0, to.indexOf("/")))));
+}
+
+/** The loans as grants: every task that uses the backup, in every saved profile that has one (the active profile with the draft's tasks). Backups no task uses get none. */
+export function planLoans(state: SetupStepperState, current: StepperCurrent): InstallerLoan[] {
+	const active = current.profiles?.active ?? buildBalancerProfileName();
+	const byProfile: Record<string, ProfileConfig> = { ...(current.profiles?.profiles ?? {}), [active]: state.roles };
+	const planned: InstallerLoan[] = [];
+	for (const [poolId, to] of Object.entries(effectiveLoans(state))) {
+		const profiles: string[] = [];
+		const roles = new Set<string>();
+		for (const [name, routes] of Object.entries(byProfile)) {
+			const used = Object.entries(routes ?? {}).filter(([, route]) => route?.model === `pool/${poolId}`).map(([role]) => role);
+			if (used.length === 0) continue;
+			profiles.push(name);
+			for (const role of used) roles.add(role);
+		}
+		if (roles.size > 0) planned.push({ poolId, to, profiles, roles: [...roles] });
+	}
+	return planned;
+}
+
+/** True when saving would change the installer's grants. Unknown (grants not read) counts as no change when there are no loans. */
+export function loansChanged(state: SetupStepperState, current: StepperCurrent, now = Date.now()): boolean {
+	const planned = planLoans(state, current);
+	if (current.grants === undefined) return planned.length > 0;
+	return !installerGrantsMatch(current.grants, planned, now);
+}
+
+/** Chooses the automatic loan of a backup (`provider/model` it borrows from while it is spent), or none with `undefined`. */
+export function setLoan(state: SetupStepperState, poolId: string, to: string | undefined): SetupStepperState {
+	const loans = { ...(state.loans ?? {}) };
+	if (loans[poolId] === to) return state;
+	if (to) loans[poolId] = to;
+	else delete loans[poolId];
+	return { ...state, loans, dirty: true };
 }
 
 /** The pools Save would write: candidates of disabled providers are left out, and emptied pools dropped. */
@@ -175,6 +242,13 @@ export function setRole(state: SetupStepperState, role: string, model: string, t
 	return edit(state, { roles: { ...state.roles, [role]: { ...previous, model, ...(thinking !== undefined ? { thinking } : {}) } } });
 }
 
+/** Chooses the last-resort model (`provider/model`), or none with `undefined`. */
+export function setLastResort(state: SetupStepperState, ref: string | undefined): SetupStepperState {
+	if (state.lastResort === ref) return state;
+	const { lastResort: _old, ...rest } = state;
+	return { ...rest, ...(ref ? { lastResort: ref } : {}), dirty: true };
+}
+
 export function setOrchestratorMode(state: SetupStepperState, mode: OrchestratorMode): SetupStepperState {
 	if (state.orchestratorMode === mode) return state;
 	return edit(state, { orchestratorMode: mode });
@@ -238,7 +312,7 @@ function roleChanges(draft: ProfileConfig, live: ProfileConfig): string[] {
 	return lines;
 }
 
-function nextConfig(state: SetupStepperState, current: StepperCurrent): { pools: PoolConfig[]; integrations: Integration[]; notes: string[] } {
+function nextConfig(state: SetupStepperState, current: StepperCurrent): { pools: PoolConfig[]; lastResort?: string; integrations: Integration[]; notes: string[] } {
 	// Same carry-over the classic wizard does: keep a pool's name and rules unless a removed candidate breaks them.
 	const live = (current.pools as { pools?: { id?: unknown; name?: unknown; rules?: unknown }[] } | null | undefined)?.pools;
 	const existing = new Map((Array.isArray(live) ? live : []).filter(pool => typeof pool?.id === "string").map(pool => [pool.id as string, pool]));
@@ -252,7 +326,7 @@ function nextConfig(state: SetupStepperState, current: StepperCurrent): { pools:
 	});
 	const used = new Set(pools.flatMap(pool => pool.candidates.map(ref => ref.slice(0, ref.indexOf("/")))));
 	const generated = generateRecommendedConfig(state.detected.filter(p => state.enabled.includes(p.id)));
-	return { pools, notes, integrations: mergeIntegrations(current.integrations ?? null, generated.integrations.filter(entry => used.has(entry.provider))) };
+	return { pools, notes, lastResort: effectiveLastResort(state), integrations: mergeIntegrations(current.integrations ?? null, generated.integrations.filter(entry => used.has(entry.provider))) };
 }
 
 /** A line-oriented summary of what Save would write, plus which files it would touch. */
@@ -260,6 +334,9 @@ export function buildStepperDiff(state: SetupStepperState, current: StepperCurre
 	const next = nextConfig(state, current);
 	const preview = generateConfigPreview({ pools: current.pools, integrations: current.integrations }, next);
 	const lines = [...preview.split("\n"), ...next.notes.map(note => `  ${note}`)];
+	const lastBefore = lastResortRef(current.pools);
+	const lastChanged = lastBefore !== next.lastResort;
+	if (lastChanged) lines.push(`  • pools.json last-resort model: ${lastBefore ?? "none"} → ${next.lastResort ?? "none"}`);
 	const { name, live } = profileTarget(state, current);
 	const roles = roleChanges(state.roles, live);
 	if (roles.length > 0) lines.push(`  • profiles.json [${name}] role assignments:`, ...roles.map(line => `      ${line}`));
@@ -268,7 +345,7 @@ export function buildStepperDiff(state: SetupStepperState, current: StepperCurre
 	return {
 		lines,
 		writes: {
-			pools: !lines.some(line => line.includes("pools.json: Unchanged")),
+			pools: lastChanged || !lines.some(line => line.includes("pools.json: Unchanged")),
 			integrations: !lines.some(line => line.includes("integrations.json: Unchanged")),
 			profiles: roles.length > 0 || workflowChanged,
 		},
@@ -282,7 +359,7 @@ export function applyStepper(state: SetupStepperState, deps: StepperDeps): Stepp
 	const next = nextConfig(state, deps.current);
 	let res: ReturnType<StepperDeps["writeConfig"]>;
 	try {
-		res = deps.writeConfig(deps.root, { pools: next.pools, integrations: next.integrations });
+		res = deps.writeConfig(deps.root, { pools: next.pools, lastResort: next.lastResort ?? null, integrations: next.integrations });
 	} catch (err) {
 		return { ok: false, written: [], backups: [], error: err instanceof Error ? err.message : String(err) };
 	}
@@ -293,6 +370,18 @@ export function applyStepper(state: SetupStepperState, deps: StepperDeps): Stepp
 	};
 	const { name, live } = profileTarget(state, deps.current);
 	const workflowChanged = state.orchestratorMode !== state.baseline.orchestratorMode;
+	// Automatic loans: only when the host read the grants (so "no loans" there never revokes what it did not see) or the draft has some.
+	const planned = planLoans(state, deps.current);
+	if (deps.current.grants !== undefined || planned.length > 0) {
+		const now = deps.now ?? Date.now();
+		const dataDir = deps.dataDir ?? process.env.AI_BALANCER_DATA_DIR ?? join(deps.root, "data");
+		try {
+			const changed = syncInstallerGrants(dataDir, planned, now, deps.current.grants !== undefined);
+			if (changed.added.length > 0 || changed.revoked.length > 0) result.written.push(join(dataDir, PERMISSIONS_FILE));
+		} catch (err) {
+			result.grantsError = err instanceof Error ? err.message : String(err);
+		}
+	}
 	if (roleChanges(state.roles, live).length > 0 || workflowChanged) {
 		try {
 			deps.writeProfiles(name, state.roles, { orchestratorMode: state.orchestratorMode });

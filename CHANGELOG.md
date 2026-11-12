@@ -3,6 +3,23 @@
 Pi shows the entries newer than your installed version after `pi update`.
 Each release bumps `version` in `package.json` and adds a `## [x.y.z]` heading here.
 
+## [0.4.0] - 2026-11-11
+
+### Added
+
+- Last-resort model: set `lastResort` in `pools.json`, or pick it in `/installer` → **Backups** → **Last-resort model** (`l`), in the terminal and the web. When every candidate of a pool is spent, it answers automatically, in the main session and in subagents, with a warning notice.
+- Automatic loans in the installer: **Backups** → **Automatic loans** (`a`) moves the tasks of a spent backup to another model until it resets. The installer only manages its own grants in `permissions.json`; undo restores the file.
+- The "pool exhausted" menu also offers any model of your subscriptions with quota left, even if it is in no pool.
+- Roles on a direct model are flagged as having no backup in the installer and in `/balancer` → Roles. The quota hint for them suggests the last-resort model.
+- README FAQ (English and Spanish): who decides routing, direct-model roles, strategies, spent pools, backups across companies, loans.
+
+### Changed
+
+- "Mixed" (`hybrid`) is described as it routes today: like "Most room left". Routing is unchanged.
+- The orchestrator is shown as "Main agent (orchestrator)" everywhere.
+- The Backups step explains how to build a backup with models from another company.
+- Terminal installer: key hints sit in a titled box as an aligned grid; action buttons and navigation buttons are on separate rows.
+
 ## [0.3.2] - 2026-11-11
 
 ### Fixed

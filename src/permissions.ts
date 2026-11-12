@@ -116,13 +116,80 @@ function loadForWrite(dataDir: string): Grant[] {
 }
 
 /** Stores a new grant and audits it. Throws, writing nothing, on an invalid draft or an unusable file. */
-export function addGrant(dataDir: string, draft: Omit<Grant, "id" | "grantedAt">, now: number): Grant {
-	const grant = parseGrant({ ...draft, id: `g-${now.toString(36)}-${randomBytes(3).toString("hex")}`, grantedAt: now });
+export function addGrant(dataDir: string, draft: Omit<Grant, "id" | "grantedAt">, now: number, idPrefix = "g"): Grant {
+	const grant = parseGrant({ ...draft, id: `${idPrefix}-${now.toString(36)}-${randomBytes(3).toString("hex")}`, grantedAt: now });
 	if (!grant) throw new Error("ai-balancer: invalid grant: level suggest|auto, nonempty explicit profiles, roles and models, expiry in the future");
 	const grants = loadForWrite(dataDir);
 	writeGrants(dataDir, [...grants, grant]);
 	appendAudit(dataDir, now, "grant", [grant]);
 	return grant;
+}
+
+/** Grants the installer created carry this id prefix; every other grant is the user's and the installer never touches it. */
+export const INSTALLER_GRANT_PREFIX = "g-inst";
+/** The installer's grants last a year; installing again renews them. */
+export const INSTALLER_GRANT_MS = 365 * 24 * 3_600_000;
+
+export const isInstallerGrant = (grant: Grant): boolean => grant.id.startsWith(`${INSTALLER_GRANT_PREFIX}-`);
+
+/** An installer `auto` loan: from `pool/<poolId>` to `to`, for these tasks of these profiles. */
+export interface InstallerLoan {
+	poolId: string;
+	to: string;
+	profiles: string[];
+	roles: string[];
+}
+
+const sameSet = (a: readonly string[], b: readonly string[]) => a.length === b.length && a.every(item => b.includes(item));
+
+const matchesLoan = (grant: Grant, loan: InstallerLoan, now: number): boolean =>
+	grant.level === "auto" &&
+	grant.expiresAt > now &&
+	sameSet(grant.models, [`pool/${loan.poolId}`, loan.to]) &&
+	sameSet(grant.profiles, loan.profiles) &&
+	sameSet(grant.roles, loan.roles);
+
+/** The loans the installer manages in `grants` (unexpired, `auto`, one backup to one model): backup id -> target. */
+export function installerLoanTargets(grants: readonly Grant[], now: number): Record<string, string> {
+	const loans: Record<string, string> = {};
+	for (const grant of grants) {
+		const [from, to] = grant.models;
+		if (!isInstallerGrant(grant) || grant.level !== "auto" || grant.expiresAt <= now || grant.models.length !== 2 || !from?.startsWith("pool/") || !to) continue;
+		loans[from.slice("pool/".length)] = to;
+	}
+	return loans;
+}
+
+/** True when the installer's grants already in `grants` are exactly `loans`. */
+export function installerGrantsMatch(grants: readonly Grant[], loans: readonly InstallerLoan[], now: number): boolean {
+	const mine = grants.filter(isInstallerGrant);
+	return mine.length === loans.length && loans.every(loan => mine.some(grant => matchesLoan(grant, loan, now)));
+}
+
+/**
+ * Makes the installer's grants in permissions.json exactly `loans`: grants that already match stay, the rest are revoked and the
+ * missing ones added (all audited). Grants without the installer prefix are never read for change or written differently.
+ * `removeOthers` false leaves installer grants that are not in `loans` alone. Throws, changing nothing, on an unusable file.
+ */
+export function syncInstallerGrants(dataDir: string, loans: readonly InstallerLoan[], now: number, removeOthers = true): { added: Grant[]; revoked: Grant[] } {
+	const loaded = loadPermissions(dataDir);
+	if (loaded.error) {
+		if (loans.length === 0) return { added: [], revoked: [] };
+		loadForWrite(dataDir);
+	}
+	const mine = loaded.grants.filter(isInstallerGrant);
+	const keep = new Set<Grant>();
+	const toAdd: InstallerLoan[] = [];
+	for (const loan of loans) {
+		const found = mine.find(grant => !keep.has(grant) && matchesLoan(grant, loan, now));
+		if (found) keep.add(found);
+		else toAdd.push(loan);
+	}
+	const poolsWanted = new Set(loans.map(loan => `pool/${loan.poolId}`));
+	const revoked = mine.filter(grant => !keep.has(grant) && (removeOthers || grant.models.some(model => poolsWanted.has(model))));
+	for (const grant of revoked) revokeGrants(dataDir, grant.id, now);
+	const added = toAdd.map(loan => addGrant(dataDir, { level: "auto", profiles: loan.profiles, roles: loan.roles, models: [`pool/${loan.poolId}`, loan.to], expiresAt: now + INSTALLER_GRANT_MS }, now, INSTALLER_GRANT_PREFIX));
+	return { added, revoked };
 }
 
 /** Removes the grant with `id`, or every grant with "all"; returns what it removed. */

@@ -9,7 +9,7 @@ import { CONTENT_X, CONTENT_Y, emphasize, hitTest, layoutButtons, sameTarget, ta
 import { applyAdvisorReport, applyStepper, initStepper, type StepperCurrent } from "./setup-stepper.ts";
 import { initScreen, renderStepper, stepperInput, type StepperEffect, type StepperEvent, type StepperTone, stepperThemeColor } from "./setup-stepper-view.ts";
 import type { InstallerAction } from "./installer-model.ts";
-import { nodeInstallFs, snapshotForInstall, undoInstall, type InstallSnapshot } from "./installer-plan.ts";
+import { installerSnapshotFiles, nodeInstallFs, snapshotForInstall, undoInstall, type InstallSnapshot } from "./installer-plan.ts";
 import { canonicalKey as installerCanonicalKey, hitInstaller, installerKey, renderInstaller, type InstallerHit } from "./installer-tui.ts";
 import { channelPromptInput, initChannelPrompt, renderChannelPrompt, type InstallChannel } from "./installer-channel.ts";
 import {
@@ -39,6 +39,7 @@ import { appendHistory, legacyRecords, pruneHistory, readHistory, type HistoryDa
 import { topConsumers, withAliases } from "./consumers.ts";
 import { HUD_VIEWS, hudHints, moveCursor, pressRedKey, renderHud, selectedSessionTarget, suggestionEnter, SESSIONS_PER_ROLE, visibleSessions, type HudViewName, type PendingConfirm } from "./hud.ts";
 import { runHudChoice, type HudChoice } from "./hud-actions.ts";
+import { buildExhaustedMenu, directQuotaSuggestion } from "./exhausted-menu.ts";
 import { loadIntegrations } from "./integrations.ts";
 import { renderPanel, statusLine, statusWithContext, turnTelemetry, renderControlCenter, controlCenterButtons, controlCenterTabLabels, CONTROL_CENTER_TABS, type ControlCenterTab, type OverviewSessionRow, type TurnTelemetry } from "./panel.ts";
 import { ROLE_CATALOG, buildAvailableModelTargets, recommendRolesHeuristic, recommendRolesWithAdvisor, createDefaultCliAiRunner, createModelCliAiRunner, applyRecommendationsToProfile, type AdvisorReport } from "./setup-advisor.ts";
@@ -440,7 +441,7 @@ export default function aiBalancer(pi: ExtensionAPI) {
 			maxTokens: 65_536,
 			async route(request, ctx) {
 				const now = Date.now();
-				const { pools: currentPools } = getLivePools();
+				const { pools: currentPools, lastResort } = getLivePools();
 				for (const p of currentPools) registerPool(p);
 				const currentPool = currentPools.find(p => p.id === pool.id) ?? pool;
 				// A stale context or an unreadable journal never blocks the request.
@@ -467,6 +468,7 @@ export default function aiBalancer(pi: ExtensionAPI) {
 					processStartedAt,
 					loans,
 					contextTokens: current?.contextTokens ?? null,
+					lastResort,
 					permissions: () => ({
 						grants: loadPermissions(DATA_DIR).grants,
 						profile: loadProfilesStore()?.active,
@@ -475,35 +477,20 @@ export default function aiBalancer(pi: ExtensionAPI) {
 				let choice = choiceCandidate;
 				if (trace.decidedBy === "fallback" && ctx.hasUI) {
 					const state = fold().state;
-					const options: string[] = [];
-					const candidateMap = new Map<string, Candidate>();
-
-					for (const c of currentPool.candidates) {
-						const availAt = state.availableAt(c.quotaKey, now);
-						const timeStr = availAt ? new Date(availAt).toTimeString().slice(0, 8) : "unknown";
-						const label = `${c.provider}/${c.model} - ${t("ops.retryCandidate", { time: timeStr })}`;
-						options.push(label);
-						candidateMap.set(label, c);
-					}
-
-					for (const otherPool of currentPools) {
-						if (otherPool.id === currentPool.id) continue;
-						for (const c of otherPool.candidates) {
-							if (state.isAvailable(c.quotaKey, now)) {
-								const label = `${c.provider}/${c.model} - ${t("ops.otherPoolCandidate", { pool: otherPool.id })}`;
-								if (!candidateMap.has(label)) {
-									options.push(label);
-									candidateMap.set(label, c);
-								}
-							}
-						}
-					}
-
-					const compactOption = `[compact] ${t("ops.compactSession")}`;
-					options.push(compactOption);
-
-					const cancelOption = `[cancel] ${t("ops.cancelRequest")}`;
-					options.push(cancelOption);
+					const activeModels = detectProviders(ctx)
+						.filter(p => p.detected && p.kind === "subscription")
+						.flatMap(p => p.availableModels.map(model => ({ provider: p.id, model })));
+					const menu = buildExhaustedMenu({
+						poolId: currentPool.id,
+						poolCandidates: currentPool.candidates,
+						otherPools: currentPools.filter(p => p.id !== currentPool.id),
+						activeModels,
+						state,
+						now,
+						quotaKeyFor,
+						t,
+					});
+					const { options, candidates: candidateMap, compactOption, cancelOption } = menu;
 
 					const title = t("ops.fallbackTitle", { pool: currentPool.id });
 					const selected = await ctx.ui.select(title, options);
@@ -576,7 +563,8 @@ export default function aiBalancer(pi: ExtensionAPI) {
 					const previous = lastRouted.get(pool.id);
 					lastRouted.set(pool.id, targetRef);
 					record({ type: "route", ts: Date.now(), pool: pool.id, provider: choice.provider, model: choice.model, reason: request.reason });
-					if (previous && ctx.hasUI) ctx.ui.notify(`ai-balancer: pool/${pool.id} ${previous} → ${targetRef}`, "info");
+					if (ctx.hasUI && trace.decidedBy === "last-resort") ctx.ui.notify(`ai-balancer: ${t("ops.lastResortRouted", { pool: pool.id, model: targetRef })}`, "warning");
+					else if (previous && ctx.hasUI) ctx.ui.notify(`ai-balancer: pool/${pool.id} ${previous} → ${targetRef}`, "info");
 					registerPoolUsage();
 					refreshStatus(ctx);
 				}
@@ -651,9 +639,10 @@ export default function aiBalancer(pi: ExtensionAPI) {
 		// Only sessions on a pool model are rewritten: elsewhere a retry would
 		// hit the same spent subscription again, so surface a clear status hint.
 		if (ctx.model?.provider !== POOL_PROVIDER) {
-			const fallbackCand = pools.flatMap(p => p.candidates).find(c => c.quotaKey !== key && state.isAvailable(c.quotaKey));
-			const toLabel = fallbackCand ? `${fallbackCand.provider}/${fallbackCand.model}` : "antigravity/gemini-3-8-flash";
-			const directNotice = t("ops.directQuotaHint", { from: fromLabel, to: toLabel });
+			const toLabel = directQuotaSuggestion({ exhaustedKey: key, lastResort: getLivePools().lastResort, pools, state });
+			const directNotice = toLabel
+				? t("ops.directQuotaHint", { from: fromLabel, to: toLabel })
+				: t("ops.directQuotaHintNone", { from: fromLabel });
 			lastFailoverNote = { text: directNotice, at: Date.now() };
 			registerPoolUsage();
 			refreshStatus(ctx);
@@ -665,7 +654,8 @@ export default function aiBalancer(pi: ExtensionAPI) {
 			refreshStatus(ctx);
 			return;
 		}
-		const alternative = failoverAlternative(pool.candidates, key, state);
+		const { lastResort } = getLivePools();
+		const alternative = failoverAlternative(lastResort ? [...pool.candidates, lastResort] : pool.candidates, key, state);
 		if (!alternative) {
 			circuitBreaker.checkAndTrip({
 				poolId: pool.id,
@@ -2027,16 +2017,17 @@ export default function aiBalancer(pi: ExtensionAPI) {
 		detect: () => detectProviders(ctx),
 		install: (draft, current) => {
 			// Each install keeps its own copies (never overwriting an older one); applyStepper's plain `.bak` is shared with other setup flows and is not reported.
-			const snapshot = snapshotForInstall([join(ROOT, "pools.json"), join(ROOT, "integrations.json"), DEFAULT_PROFILES_PATH], nodeInstallFs);
+			const snapshot = snapshotForInstall(installerSnapshotFiles(ROOT, DATA_DIR, DEFAULT_PROFILES_PATH), nodeInstallFs);
 			installerSnapshots.push(snapshot);
 			const result = applyStepper(draft, {
 				root: ROOT,
+				dataDir: DATA_DIR,
 				current,
 				profilesPath: DEFAULT_PROFILES_PATH,
 				writeConfig: writeConfigSafely,
 				writeProfiles: (name, roles, workflow) => saveProfileRoles(DEFAULT_PROFILES_PATH, name, roles, (provider, model) => Boolean(ctx.modelRegistry.find(provider, model)), workflow),
 			});
-			return result.ok ? { ok: true, written: result.written, backups: snapshot.backups, profilesError: result.profilesError } : { ok: false, error: result.error ?? "", backups: snapshot.backups };
+			return result.ok ? { ok: true, written: result.written, backups: snapshot.backups, profilesError: result.profilesError, grantsError: result.grantsError } : { ok: false, error: result.error ?? "", backups: snapshot.backups };
 		},
 		undo: backups => {
 			// The install's own record knows which files it created; a list without a record (older copies) still restores what it names.
@@ -2057,7 +2048,16 @@ export default function aiBalancer(pi: ExtensionAPI) {
 			}
 		};
 		const store = loadProfilesStore();
-		const current: StepperCurrent = { pools: readJson("pools.json"), integrations: readJson("integrations.json"), profiles: store };
+		let grants: StepperCurrent["grants"];
+		try {
+			const loaded = loadPermissions(DATA_DIR);
+			// An unusable file reads as no grants: leave it alone rather than overwrite loans the installer never saw.
+			grants = loaded.error ? undefined : loaded.grants;
+		} catch {
+			// An unreadable grants file leaves the installer's loans untouched.
+			grants = undefined;
+		}
+		const current: StepperCurrent = { pools: readJson("pools.json"), integrations: readJson("integrations.json"), profiles: store, grants };
 		return createInstallerSession({ detected: detectProviders(ctx), current, workflow: store?.workflow?.[store.active ?? ""] }, installerHost(ctx));
 	};
 

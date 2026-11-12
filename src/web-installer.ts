@@ -31,7 +31,7 @@ import type { DetectedProvider, PoolConfig } from "./setup.ts";
 export type InstallerOutcome = "panel" | "advanced" | "exit";
 
 /** A failed install may still report what it wrote or copied, so the screen can offer Undo. */
-export type InstallResult = { ok: true; written: string[]; backups: string[]; profilesError?: string } | { ok: false; error: string; written?: string[]; backups?: string[] };
+export type InstallResult = { ok: true; written: string[]; backups: string[]; profilesError?: string; grantsError?: string } | { ok: false; error: string; written?: string[]; backups?: string[] };
 
 /** What the host (Pi, or a test) does for the model's effects. */
 export interface InstallerHostDeps {
@@ -106,6 +106,7 @@ export function createInstallerSession(init: InstallerInit, deps: InstallerHostD
 			}
 			for (const id of INSTALL_PROGRESS_STEPS) state = withInstallProgress(state, id, "done");
 			if (result.profilesError) deps.notify(`ai-balancer: ${t("setup.stepper.profilesFailed", { error: result.profilesError })}`, "warning");
+			if (result.grantsError) deps.notify(`ai-balancer: ${t("setup.stepper.grantsFailed", { error: result.grantsError })}`, "warning");
 			state = withInstallResult(state, { ok: true, written: result.written, backups: result.backups });
 			deps.changed?.();
 		});
@@ -217,6 +218,8 @@ const BUTTONS: Record<ButtonId, true> = {
 	"assign-task": true,
 	"deep-analysis": true,
 	"create-backup": true,
+	"last-resort": true,
+	loans: true,
 	"move-up": true,
 	"move-down": true,
 	"cycle-method": true,

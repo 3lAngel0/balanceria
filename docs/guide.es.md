@@ -362,8 +362,14 @@ Ejemplo completo y verificado para segmentar un equipo de agentes:
 - **Revisores y jueces** (`review-risk`, `jd-judge-a`, `gentle-ai-verify`): Modelos de alto razonamiento con mayor nivel de thinking.
 
 ### `pools.json`
+
+`lastResort` (opcional, nivel superior): un `provider/model` que responde primero y automáticamente cuando se agotan todos los candidatos de un pool (sesión principal y subagentes). Se configura en `/installer` → Respaldos → "Modelo final" (tecla `l`); el instalador y las demás herramientas que editan pools lo conservan.
+
+**Préstamos automáticos desde el instalador.** `/installer` → Respaldos → "Préstamos automáticos" (tecla `a`): para cada respaldo elige Ninguno o un modelo de una suscripción activa (primero van los de otra empresa). Al instalar se escribe un permiso `auto` por respaldo en `permissions.json` (en el directorio de datos): `models` = `pool/<id>` más el modelo elegido, `profiles` = los perfiles guardados que tienen una tarea en ese respaldo, `roles` = todas las tareas de esos perfiles que apuntan a `pool/<id>` (el formato pide nombres explícitos, sin comodines, así que vuelva a instalar después de apuntar más tareas a un respaldo), vence al año. Los permisos del instalador tienen ids que empiezan con `g-inst-`; los demás nunca se tocan, y `/balancer permissions` los lista o revoca. Las copias `.bak-installer-*` y Deshacer cubren `permissions.json` igual que `pools.json`. Los préstamos solo se aplican a tareas que apuntan a un respaldo y empiezan cuando se agota su primer modelo.
+
 ```json
 {
+  "lastResort": "antigravity/gemini-3-8-flash",
   "pools": [
     {
       "id": "orchestrator-pool",
@@ -575,14 +581,16 @@ La pantalla de bienvenida también presenta un panorama de lo que hará el insta
 Cuando varias suscripciones ofrecen modelos equivalentes, el instalador sugiere respaldos virtuales y permite configurar completamente los integrantes, su orden y el algoritmo de selección:
 
 - **Mixto / Híbrido (`hybrid` - Recomendado)**:
-  - Comienza utilizando la primera suscripción y pasa de forma gradual a una con mayor espacio libre cuando el margen de cuota se reduce.
-  - *Compromiso*: Maximiza la reutilización de la caché de prompts durante turnos activos a la vez que previene caídas `429` a mitad de turno.
+  - Mantiene el modelo que ya usa una conversación; en un turno nuevo elige la suscripción con más uso disponible. Hoy enruta exactamente igual que `highest-quota` (no tiene umbral de "queda poco").
+  - *Compromiso*: Maximiza la reutilización de la caché de prompts durante turnos activos; un candidato posterior puede responder un turno nuevo antes de que se agote el primero.
 - **En orden / Cascada (`waterfall`)**:
-  - Utiliza estrictamente la primera opción hasta agotar por completo su cuota antes de pasar a la siguiente en orden de prioridad.
+  - Utiliza estrictamente la primera opción hasta agotar por completo su cuota antes de pasar a la siguiente en orden de prioridad. Es la estrategia para un orden estricto de principal y respaldo.
   - *Compromiso*: Modelo mental predecible; ideal para consumir íntegramente una suscripción primaria antes de tocar límites secundarios.
 - **La que más le queda / Mayor cuota (`highest-quota`)**:
   - Consulta dinámicamente y asigna cada turno a la suscripción que tenga el mayor porcentaje de cuota disponible en ese momento.
   - *Compromiso*: Distribuye el consumo de manera homogénea; puede requerir regenerar la caché de prompts con mayor frecuencia al alternar entre proveedores.
+
+Los respaldos automáticos solo juntan el mismo modelo. Para pasar a otro proveedor (por ejemplo de Claude a OpenAI o Gemini), use **+ Crear otro respaldo** → **Respaldo propio**, marque modelos con `Espacio` (cualquier modelo de sus suscripciones activas, también de otros proveedores), ordénelos y elija **En orden**.
 
 Los candidatos de un respaldo pueden reordenarse con las teclas `u` (subir) y `d` (bajar) o mediante controles interactivos. El instalador alerta si se mezclan modelos económicos (como Flash) con modelos premium en un mismo respaldo sin contención de costos.
 
@@ -791,4 +799,4 @@ Superposición operativa en terminal que muestra la velocidad de consumo de susc
 **R**: En `~/.gentle-shell/config/gentle-ai/profiles.json`, asigne al rol un modelo físico directo (ej. `"model": "anthropic/claude-3-5-sonnet"`) en lugar de `"pool/..."`. Los modelos directos omiten `ai-balancer` en su totalidad.
 
 ### P: ¿Qué sucede si todos los proveedores de un pool agotan su cuota?
-**R**: El Circuit Breaker se dispara de inmediato. Detiene los reintentos automáticos, registra un punto de control de emergencia en `data/circuit-breaker-checkpoint.json` y alerta al usuario indicando el tiempo más cercano de reapertura.
+**R**: Primero, si hay un préstamo automático activo para ese pool, sus tareas pasan al modelo prestado. Si no, responde automáticamente el modelo final configurado (`lastResort` en `pools.json`), con un aviso. Si también está agotado (o no hay uno), la sesión principal muestra un menú para esperar, elegir cualquier modelo de sus suscripciones con cuota, compactar o cancelar, y se dispara el Circuit Breaker: detiene los reintentos automáticos, registra un punto de control de emergencia en `data/circuit-breaker-checkpoint.json` y alerta al usuario indicando el tiempo más cercano de reapertura.

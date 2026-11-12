@@ -269,3 +269,28 @@ test("renderControlCenter overview displays active workspace sessions and keeps 
 	assert.match(joined, /▸ sess-333.*other-workspace.*claude-bridge\/claude-sonnet-5-5.*c\/Enter apply/);
 	for (const line of lines.slice(2)) assert.equal([...line].length, 90, line);
 });
+
+test("renderControlCenter roles tab flags the selected role on a direct model as having no backup", () => {
+	const render = (model: string) => renderControlCenter({
+		tab: "roles",
+		width: 100,
+		folded: foldEvents(EVENTS, NOW),
+		now: NOW,
+		activeProfile: "default",
+		pools: [],
+		providers: [],
+		roles: { "gentle-ai-explore": { model } } as never,
+		cursor: 1,
+	}).join("\n");
+	assert.match(render("antigravity/gemini-3-8-flash"), /No backup: if this model runs out/);
+	assert.doesNotMatch(render("pool/claude-opus-5-5"), /No backup/);
+});
+
+test("renderControlCenter roles tab shows the orchestrator as Main agent (orchestrator) and keeps other role ids", () => {
+	const out = renderControlCenter({
+		tab: "roles", width: 120, folded: foldEvents(EVENTS, NOW), now: NOW, activeProfile: "default", pools: [], providers: [],
+		roles: { orchestrator: { model: "pool/orchestrator" }, "gentle-ai-explore": { model: "pool/x" } } as never, cursor: 0,
+	}).join("\n");
+	assert.match(out, /Main agent \(orchestrator\)/);
+	assert.match(out, /gentle-ai-explore/);
+});

@@ -158,7 +158,7 @@ test("summaryStory and summaryByFile say a kept backup stays because a task uses
 	const draft = initStepper([claude, agy], [], savedProfiles.profiles.balanceador_default);
 	const current = { pools: savedPools, profiles: savedProfiles };
 	const story = summaryStory(draft, current);
-	assert.match(story.narrative, /Backup Main agent is kept.*Coordinating the work/);
+	assert.match(story.narrative, /Backup Main agent \(orchestrator\) is kept.*Main agent \(orchestrator\)/);
 	assert.ok(story.detail.includes("Backup Legacy stays because these tasks use it: Writing code."));
 	const pools = summaryByFile(draft, current).find(g => g.file === "pools.json")!;
 	assert.ok(pools.lines.some(l => /stays because/.test(l)));
@@ -234,7 +234,7 @@ test("withKeptBackups reports a used backup whose subscriptions are all off as b
 	assert.deepEqual(result.blocked.map(b => [b.id, b.roles]), [["legacy", ["orchestrator"]]]);
 	assert.deepEqual(result.kept, []);
 	assert.equal(installBlockers(off, current).length, 1);
-	assert.match(installBlockers(off, current)[0]!, /Legacy.*Coordinating the work/);
+	assert.match(installBlockers(off, current)[0]!, /Legacy.*Main agent \(orchestrator\)/);
 	assert.deepEqual(installBlockers({ ...off, enabled: ["claude-bridge", "antigravity"] }, current), []);
 });
 
@@ -248,4 +248,185 @@ test("bakLine describes the real copy name pattern in en and es", () => {
 	} finally {
 		setLang("en");
 	}
+});
+
+// -- T3 (S1): last-resort model through the writers -----------------------------------------------
+
+import { applyStepper, setLastResort, buildStepperDiff, type StepperCurrent } from "../src/setup-stepper.ts";
+import { writeConfigSafely } from "../src/setup.ts";
+
+const FLASH_REF = "antigravity/gemini-3-8-flash";
+const withTempRoot = (current: StepperCurrent | undefined, run: (root: string) => void) => {
+	const root = mkdtempSync(join(tmpdir(), "last-resort-"));
+	try {
+		if (current?.pools) writeFileSync(join(root, "pools.json"), JSON.stringify(current.pools));
+		run(root);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+};
+const install = (root: string, draft: ReturnType<typeof buildRecommendedDraft>, current: StepperCurrent) =>
+	applyStepper(draft, { root, current, profilesPath: join(root, "profiles.json"), writeConfig: writeConfigSafely, writeProfiles: () => {} });
+const writtenPools = (root: string) => JSON.parse(readFileSync(join(root, "pools.json"), "utf8"));
+
+test("S1: Install writes lastResort at the top level of pools.json", () => {
+	withTempRoot(undefined, root => {
+		const draft = setLastResort(buildRecommendedDraft({ detected: [claude, agy] }), FLASH_REF);
+		assert.equal(install(root, draft, {}).ok, true);
+		const doc = writtenPools(root);
+		assert.equal(doc.lastResort, FLASH_REF);
+		assert.ok(Array.isArray(doc.pools));
+	});
+});
+
+test("S1: choosing None removes an existing lastResort from pools.json", () => {
+	const current: StepperCurrent = { pools: { lastResort: FLASH_REF, pools: [{ id: "claude-sonnet-5-5", candidates: ["claude-bridge/claude-sonnet-5-5", "antigravity/claude-sonnet-5-5"] }] } };
+	withTempRoot(current, root => {
+		const draft = setLastResort(buildRecommendedDraft({ detected: [claude, agy] }), undefined);
+		assert.equal(install(root, draft, current).ok, true);
+		assert.equal("lastResort" in writtenPools(root), false);
+	});
+});
+
+test("S1: a lastResort in the draft is dropped when its subscription is disabled, and a changed lastResort counts as a pools.json change", () => {
+	const draft = setLastResort(buildRecommendedDraft({ detected: [claude, agy] }), FLASH_REF);
+	const off = { ...draft, enabled: ["claude-bridge"] };
+	withTempRoot(undefined, root => {
+		install(root, off, {});
+		assert.equal("lastResort" in writtenPools(root), false);
+	});
+	const current: StepperCurrent = { pools: { pools: [{ id: "claude-sonnet-5-5", candidates: ["claude-bridge/claude-sonnet-5-5", "antigravity/claude-sonnet-5-5"], strategy: "hybrid" }] } };
+	const same = buildRecommendedDraft({ detected: [claude, agy] });
+	assert.equal(buildStepperDiff(same, current).writes.pools, false);
+	const diff = buildStepperDiff(setLastResort(same, FLASH_REF), current);
+	assert.equal(diff.writes.pools, true);
+	assert.match(diff.lines.join("\n"), /last-resort model: none → antigravity\/gemini-3-8-flash/);
+});
+
+const INTEGRATIONS = [{ provider: "claude-bridge", kind: "subscription", label: "Claude Pro (claude-bridge)" }];
+
+test("S1: writers that do not manage lastResort preserve it (bare pool list, panel edits)", () => {
+	const current: StepperCurrent = { pools: { lastResort: FLASH_REF, pools: [{ id: "p", candidates: ["claude-bridge/claude-sonnet-5-5"] }] } };
+	withTempRoot(current, root => {
+		writeConfigSafely(root, { integrations: INTEGRATIONS, pools: [{ id: "p", candidates: ["claude-bridge/claude-opus-5-5"] }] });
+		const doc = writtenPools(root);
+		assert.equal(doc.lastResort, FLASH_REF);
+		assert.deepEqual(doc.pools[0].candidates, ["claude-bridge/claude-opus-5-5"]);
+		writeConfigSafely(root, { integrations: INTEGRATIONS, pools: doc.pools, lastResort: null });
+		assert.equal("lastResort" in writtenPools(root), false);
+	});
+});
+
+test("the orchestrator backup and role are named Main agent (orchestrator); the technical id is untouched", async () => {
+	const { backupName, roleName } = await import("../src/installer-plan.ts");
+	assert.equal(backupName({ id: "orchestrator" }), "Main agent (orchestrator)");
+	assert.equal(roleName("orchestrator"), "Main agent (orchestrator)");
+	assert.equal(targetLabel("pool/orchestrator", []), "Backup Main agent (orchestrator)");
+});
+
+// -- T9 (S7): automatic loans through the writers ---------------------------------------------------
+
+import { mkdirSync } from "node:fs";
+import { INSTALLER_GRANT_PREFIX, addGrant, loadPermissions } from "../src/permissions.ts";
+import { installerSnapshotFiles } from "../src/installer-plan.ts";
+import { setLoan } from "../src/setup-stepper.ts";
+
+const OPENAI_REF = "antigravity/gemini-3-8-flash";
+const NOW = Date.parse("2026-11-11T12:00:00Z");
+const POOL_ID = "claude-sonnet-5-5";
+const loanDraft = (to: string | null = OPENAI_REF) => {
+	let draft = buildRecommendedDraft({ detected: [claude, agy] });
+	draft = setRole(draft, "orchestrator", `pool/${POOL_ID}`);
+	draft = setRole(draft, "gentle-ai-verify", `pool/${POOL_ID}`);
+	return setLoan(draft, POOL_ID, to ?? undefined);
+};
+const loanCurrent = (extra: Partial<StepperCurrent> = {}): StepperCurrent => ({ profiles: { active: "bal", profiles: { bal: {} } }, grants: [], ...extra });
+const withLoanRoot = (run: (root: string, dataDir: string) => void) => {
+	const root = mkdtempSync(join(tmpdir(), "loans-"));
+	const dataDir = join(root, "data");
+	try {
+		run(root, dataDir);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+};
+const installLoans = (root: string, dataDir: string, draft: ReturnType<typeof loanDraft>, current: StepperCurrent) =>
+	applyStepper(draft, { root, dataDir, now: NOW, current, profilesPath: join(root, "profiles.json"), writeConfig: writeConfigSafely, writeProfiles: () => {} });
+
+test("S7: Install writes an auto grant from the backup to the chosen model for every task that uses the backup", () => {
+	withLoanRoot((root, dataDir) => {
+		const result = installLoans(root, dataDir, loanDraft(), loanCurrent());
+		assert.equal(result.ok, true);
+		assert.equal(result.grantsError, undefined);
+		assert.ok(result.written.includes(join(dataDir, "permissions.json")));
+		const { grants } = loadPermissions(dataDir);
+		assert.equal(grants.length, 1);
+		const grant = grants[0]!;
+		assert.ok(grant.id.startsWith(`${INSTALLER_GRANT_PREFIX}-`));
+		assert.equal(grant.level, "auto");
+		assert.deepEqual(grant.profiles, ["bal"]);
+		const users = Object.entries(loanDraft().roles).filter(([, route]) => route.model === `pool/${POOL_ID}`).map(([role]) => role).sort();
+		assert.ok(users.includes("orchestrator") && users.includes("gentle-ai-verify"));
+		assert.deepEqual([...grant.roles].sort(), users);
+		assert.deepEqual(grant.models, [`pool/${POOL_ID}`, OPENAI_REF]);
+		assert.ok(grant.expiresAt > NOW);
+	});
+});
+
+test("S7: grants the installer does not manage are preserved; installing again with the same loan changes nothing, None revokes only its own", () => {
+	withLoanRoot((root, dataDir) => {
+		const mine = addGrant(dataDir, { level: "suggest", profiles: ["x"], roles: ["r"], models: ["pool/a", "p/m"], expiresAt: NOW + 1e9 }, NOW);
+		const current = loanCurrent({ grants: loadPermissions(dataDir).grants });
+		installLoans(root, dataDir, loanDraft(), current);
+		const after = readFileSync(join(dataDir, "permissions.json"), "utf8");
+		assert.equal(loadPermissions(dataDir).grants.length, 2);
+		const again = installLoans(root, dataDir, loanDraft(), loanCurrent({ grants: loadPermissions(dataDir).grants }));
+		assert.equal(readFileSync(join(dataDir, "permissions.json"), "utf8"), after, "same loan: file untouched");
+		assert.equal(again.written.includes(join(dataDir, "permissions.json")), false);
+		const gone = installLoans(root, dataDir, loanDraft(null), loanCurrent({ grants: loadPermissions(dataDir).grants }));
+		assert.equal(gone.grantsError, undefined);
+		const left = loadPermissions(dataDir).grants;
+		assert.deepEqual(left.map(g => g.id), [mine.id]);
+	});
+});
+
+test("S7: a host that did not read the grants never revokes; a loan for a backup no task uses writes nothing", () => {
+	withLoanRoot((root, dataDir) => {
+		installLoans(root, dataDir, loanDraft(), loanCurrent());
+		const before = readFileSync(join(dataDir, "permissions.json"), "utf8");
+		const { grants: _unread, ...unread } = loanCurrent();
+		installLoans(root, dataDir, loanDraft(null), unread);
+		assert.equal(readFileSync(join(dataDir, "permissions.json"), "utf8"), before);
+	});
+	withLoanRoot((root, dataDir) => {
+		const unused = setLoan(buildRecommendedDraft({ detected: [claude, agy], roles: {} }), POOL_ID, OPENAI_REF);
+		const bare = { ...unused, roles: {} };
+		installLoans(root, dataDir, bare, loanCurrent());
+		assert.equal(existsSync(join(dataDir, "permissions.json")), false);
+	});
+});
+
+test("S7: an unusable permissions.json is reported as grantsError and the rest of the install still happens", () => {
+	withLoanRoot((root, dataDir) => {
+		mkdirSync(dataDir, { recursive: true });
+		writeFileSync(join(dataDir, "permissions.json"), "not json");
+		const result = installLoans(root, dataDir, loanDraft(), loanCurrent());
+		assert.equal(result.ok, true);
+		assert.match(result.grantsError ?? "", /permissions\.json/);
+		assert.equal(readFileSync(join(dataDir, "permissions.json"), "utf8"), "not json");
+		assert.ok(existsSync(join(root, "pools.json")));
+	});
+});
+
+test("S7: the install snapshot covers permissions.json like pools.json, and Undo restores or removes it", () => {
+	withLoanRoot((root, dataDir) => {
+		assert.deepEqual(installerSnapshotFiles(root, dataDir, join(root, "profiles.json")).map(f => f.slice(root.length + 1)), ["pools.json", "integrations.json", "profiles.json", join("data", "permissions.json")]);
+		const files = installerSnapshotFiles(root, dataDir, join(root, "profiles.json"));
+		const snapshot = snapshotForInstall(files, nodeInstallFs, new Date(2026, 10, 11, 12, 0, 0));
+		installLoans(root, dataDir, loanDraft(), loanCurrent());
+		assert.ok(existsSync(join(dataDir, "permissions.json")));
+		assert.ok(snapshot.created.includes(join(dataDir, "permissions.json")));
+		undoInstall(snapshot, nodeInstallFs);
+		assert.equal(existsSync(join(dataDir, "permissions.json")), false);
+	});
 });

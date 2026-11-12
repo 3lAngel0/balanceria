@@ -2,6 +2,7 @@ import { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync, renameS
 import { basename, join } from "node:path";
 import { validatePoolsConfig } from "./config-schema.ts";
 import { formatTokens } from "./panel.ts";
+import { lastResortRef } from "./pools.ts";
 import type { HistoryEntry } from "./history.ts";
 import { parseProfilesText, replaceFileSafely, saveProfilesStore, type ProfilesStore } from "./profiles.ts";
 import { ORCHESTRATOR_ROLE } from "./roles.ts";
@@ -211,6 +212,9 @@ export function diffLab(current: LabTexts, draft: LabTexts): LabDiff {
 				// An unreadable live file: every draft pool shows as added.
 			}
 			diff.changes.push(...diffPools(currentPools, draftPools));
+			const before = lastResortRef(currentPools);
+			const after = lastResortRef(draftPools);
+			if (before !== after) diff.changes.push(`last-resort model: ${before ?? "(none)"} → ${after ?? "(none)"}`);
 		}
 	}
 	if (current.profiles !== null) {

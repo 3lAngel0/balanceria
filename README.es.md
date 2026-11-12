@@ -188,9 +188,10 @@ Ejecute el centro de configuración interactivo para detectar automáticamente l
     - **Estrategia de enrutamiento** (Mixto/`hybrid`, En orden/`waterfall`, La que más le queda/`highest-quota`): Regla que define qué suscripción responde primero.
     - **Modo del agente principal** (`organic` vs `full-delegation`): Si el agente principal trabaja por su cuenta o delega todas las tareas.
   - Presenta de antemano el panorama de pasos y un enlace para apoyar el proyecto con una estrella en GitHub: [https://github.com/3lAngel0/balanceria](https://github.com/3lAngel0/balanceria).
+- **Modelo final**: en **Respaldos** pulse `l` (o el botón **Modelo final**) para elegir un modelo barato, o **Ninguno**. Se guarda como `lastResort` en `pools.json`, aparece en el resumen y se descarta si se desactiva su suscripción.
 - **Pipeline de respaldos y estrategias de enrutamiento**:
   - Control granular sobre los miembros de cada respaldo, su orden y la estrategia de selección:
-    - **Mixto (`hybrid`)**: Comienza con la primera opción y pasa fluidamente a otra cuando queda poco margen, preservando el caché de prompts y evitando cortes a mitad de turno.
+    - **Mixto (`hybrid`)**: Hoy enruta exactamente igual que `highest-quota` (se mantiene en el mismo modelo durante la conversación y, si no, elige el que tiene más cuota libre). Todavía no tiene un umbral de "queda poco".
     - **En orden (`waterfall`)**: Agota completamente la primera opción antes de pasar a la segunda.
     - **La que más le queda (`highest-quota`)**: Consulta el margen de cuota disponible en tiempo real y asigna la suscripción con mayor capacidad libre.
 - **Tareas de agentes y Búsqueda profunda ("Deep Analysis")**:
@@ -271,6 +272,72 @@ Seleccione un pool directamente en el chat mediante `/model pool/claude-sonnet-5
 | `/balancer lab` | Modo laboratorio: borrador, diferencias, simulación y aplicación segura de reglas. |
 | `/balancer switch-cost` | Reporta el beneficio de retención de caché frente al costo de conmutación de proveedor. |
 | `/hud` | Abre el Heads-Up Display de alta densidad en terminal. |
+
+---
+
+## ❓ Preguntas frecuentes
+
+### ¿Quién decide qué modelo responde? ¿Lo decide el agente orquestador?
+
+Lo decide el **balancer**, no una IA. Es código determinístico (sin tokens, menos de 1 ms) que lee la cuota registrada de cada suscripción y elige un modelo en cada pedido. Nunca le pregunta al orquestador ni a ningún otro modelo.
+
+"orchestrator" quiere decir dos cosas distintas:
+
+- **El rol orchestrator**: el agente principal con el que conversa. Coordina y delega en subagentes.
+- **El pool `orchestrator`**: solo una lista de modelos (`pools.json`) asignada a ese rol, que se balancea como cualquier otro pool. No elige modelos para otros roles.
+
+### Un rol apunta a un modelo directo (por ejemplo `antigravity/gemini-4-argon`). ¿Qué pasa cuando se agota?
+
+**Nadie lo redirige.** Solo se balancean los roles que apuntan a `pool/<id>`. Un rol con modelo directo llama a ese proveedor directamente, así que cuando se agota la cuota el pedido falla con el error de cuota del proveedor. ai-balancer registra que se agotó y, en la sesión principal, muestra un aviso como `antigravity/gemini-4-argon se llenó. Cambiá a <modelo disponible> o a pool/orchestrator (/balancer).` El modelo sugerido es su **Modelo final** si está configurado y tiene cuota; si no, el primer candidato de un pool con cuota. `/installer` (Tareas de los agentes) y `/balancer` → **Roles** marcan estos roles con "Sin respaldo: si este modelo se agota, esta tarea se detiene". Los préstamos tampoco se aplican a modelos directos.
+
+Si quiere que un rol siga funcionando cuando se agota su modelo, apúntelo a un pool: abra `/balancer`, entre a **Roles**, elija el rol y presione Enter para asignarle un `pool/<id>` que tenga ese modelo más alternativas.
+
+### Un rol apunta a un pool. ¿Qué pasa cuando se agota el modelo que está usando?
+
+El balancer lo marca como agotado hasta que se renueva su ventana y reintenta el pedido con el siguiente candidato disponible **del mismo pool**. Durante una conversación se mantiene en el modelo que respondió el turno anterior (para no perder el caché de prompts) y solo cambia cuando ese modelo deja de estar disponible o empieza un turno nuevo.
+
+### ¿Cómo elige entre los candidatos de un pool?
+
+Según la estrategia del pool:
+
+| Estrategia | Comportamiento |
+|---|---|
+| **En orden** (`waterfall`) | Siempre el primer candidato disponible de la lista. Es la que sirve para "use Claude hasta que se acabe y después el siguiente". |
+| **La que más le queda** (`highest-quota`) | El candidato con más cuota libre. Los que no tienen cuota conocida pierden contra cualquiera conocido; en empate gana el primero de la lista. |
+| **Mixto** (`hybrid`) | Hoy se comporta exactamente igual que `highest-quota`. |
+
+Con `hybrid` o `highest-quota`, un segundo candidato con más cuota libre responde **antes** de que se agote el primero. Si quiere un principal y un respaldo estrictos, use `waterfall`.
+
+### ¿Qué pasa cuando se agotan todos los candidatos de un pool?
+
+- **Modelo final (si está configurado)**: cuando se agotan todos los candidatos de un pool, responde **primero y automáticamente** el modelo final, en la sesión principal y en los subagentes, con un aviso de advertencia. El menú de abajo solo aparece cuando el modelo final también se agotó (o no hay uno configurado). Se configura en `/installer` → **Respaldos** → **Modelo final** (atajo `l`); elija **Ninguno** para quitarlo.
+- **Sesión principal (con pantalla)**: aparece un menú para esperar a un candidato del pool (muestra cuándo se renueva cada uno), usar un modelo disponible **de otro pool**, usar **cualquier otro modelo de sus suscripciones activas que todavía tenga cuota** (aunque ningún pool lo liste, por ejemplo sus modelos de OpenAI cuando se agota Claude), compactar la sesión o cancelar. Los modelos agotados no se ofrecen.
+- **Subagentes (sin pantalla)**: no hay menú. El pedido va al candidato que se renueva primero y falla con el mensaje de cuota del proveedor, salvo que aplique un **préstamo** (ver abajo).
+
+### ¿Un respaldo puede mezclar proveedores, por ejemplo Claude primero y OpenAI cuando Claude se agota?
+
+Sí. Abra `/installer`, entre a **Respaldos**, elija **+ Crear otro respaldo** y después **Respaldo propio**. Las plantillas Claude Opus y Claude Sonnet solo preseleccionan modelos con ese nombre, así que ahí los de OpenAI arrancan sin marcar.
+
+1. **Qué suscripciones**: moverse con ↑↓ y marcar con **Espacio**.
+2. **Orden**: ↑↓ sube o baja la suscripción resaltada. La primera se usa primero.
+3. **Estrategia**: elija **En orden** (`waterfall`).
+4. En **Tareas de agentes**, asigne el respaldo nuevo a los roles que lo van a usar. Un respaldo que ningún rol usa no hace nada.
+
+La alternativa es un **préstamo**: deja el pool solo con Claude y autoriza una ruta temporal a otro modelo mientras el pool está agotado (`/balancer loans`, `/balancer permissions`). Con un permiso `auto` cambia sin preguntar y vuelve cuando se renueva la ventana. Los préstamos solo se aplican a roles que apuntan a un pool. Puede configurarlo sin escribir comandos: `/installer` → Respaldos → **Préstamos automáticos** (tecla `a`) le deja elegir, para cada respaldo, el modelo que sus tareas toman prestado cuando se agota (por ejemplo un respaldo de Claude que toma un modelo de OpenAI). El instalador lo guarda como un permiso `auto` para todas las tareas que usan ese respaldo, válido por un año (vuelva a instalar para renovarlo), y no toca ningún otro permiso.
+
+### ¿Por qué la lista de respaldos solo muestra modelos de Claude si tengo OpenAI?
+
+La lista solo muestra modelos de suscripciones **detectadas y activadas** en el paso **Suscripciones**. OpenAI ChatGPT Plus/Pro (`openai-codex`) se detecta cuando inició sesión con `/login` de Pi; una API key no cuenta como esa suscripción. Si está detectada pero desmarcada, márquela en **Suscripciones**.
+
+Los respaldos automáticos solo agrupan suscripciones que ofrecen el **mismo** modelo, así que un modelo de OpenAI nunca termina solo en un respaldo de Claude. Cree un respaldo propio como se explica arriba.
+
+### ¿Conviene asignar `pool/orchestrator` a todos los roles?
+
+No. Todos los subagentes gastarían la cuota del agente principal, y cuando se agote también se corta su conversación principal. Además arranca con un modelo elegido para coordinar, no para explorar o escribir código. Dé a cada rol un pool acorde a su trabajo, con otro proveedor al final de la lista o un préstamo.
+
+### ¿Qué significa "Effective routing" en `/balancer` → Roles?
+
+Para un rol con pool muestra el modelo al que el pool enrutó **la última vez**, seguido de la lista completa de candidatos en orden: `claude-bridge/claude-opus-5-5 [antigravity/gemini-4-argon → …]`. Ahí el último pedido fue a `claude-bridge/claude-opus-5-5`, aunque `gemini-4-argon` es el primero de la lista. Para un rol con modelo directo muestra ese modelo.
 
 ---
 

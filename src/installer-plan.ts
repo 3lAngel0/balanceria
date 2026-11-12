@@ -2,10 +2,13 @@
 // No I/O: the host reads the files, writes through `applyStepper` and copies the `.bak` files back.
 
 import { copyFileSync, existsSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { installerLoanTargets, PERMISSIONS_FILE } from "./permissions.ts";
 import { t } from "./i18n/index.ts";
+import { lastResortRef } from "./pools.ts";
 import { DEFAULT_ORCHESTRATOR_MODE, type OrchestratorMode, type ProfileConfig, type ProfileWorkflow } from "./profiles.ts";
 import { UNASSIGNED } from "./setup-advisor.ts";
-import { applyAutoAssignRoles, buildStepperDiff, initStepper, type SetupStepperState, type StepperCurrent } from "./setup-stepper.ts";
+import { applyAutoAssignRoles, buildStepperDiff, effectiveLastResort, effectiveLoans, initStepper, loansChanged, planLoans, type SetupStepperState, type StepperCurrent } from "./setup-stepper.ts";
 import { buildBalancerProfileName, type DetectedProvider, type PoolConfig } from "./setup.ts";
 
 export interface SingleModel {
@@ -170,9 +173,26 @@ export function installBlockers(draft: SetupStepperState, current: StepperCurren
 const keptTasks = (kept: KeptBackup) => kept.roles.map(roleName).join(", ");
 
 export interface FileSummary {
-	file: "integrations.json" | "pools.json" | "profiles.json";
+	file: "integrations.json" | "pools.json" | "profiles.json" | "permissions.json";
 	lines: string[];
 	changed: boolean;
+}
+
+/** "Last-resort model: Gemini 3.8 Flash · Google AI Pro" / "none" (nothing when there is none and none was saved). */
+function lastResortLines(draft: SetupStepperState, current?: StepperCurrent): string[] {
+	const ref = effectiveLastResort(draft);
+	if (ref) return [t("installer.summary.lastResort", { model: refLabel(ref, draft.detected) })];
+	return current !== undefined && lastResortRef(current.pools) === undefined ? [] : [t("installer.summary.lastResortNone")];
+}
+
+/** "Automatic loan: Claude Sonnet 5.5 borrows Gemini 3.8 Flash · Google AI Pro when it runs out..." per backup; says when no task uses the backup yet. */
+function loanLines(draft: SetupStepperState, current: StepperCurrent): string[] {
+	const used = new Set(planLoans(draft, current).map(loan => loan.poolId));
+	return Object.entries(effectiveLoans(draft)).flatMap(([id, to]) => {
+		const name = backupName({ id, name: draft.pools.find(pool => pool.id === id)?.name });
+		const line = t("installer.summary.loan", { backup: name, model: refLabel(to, draft.detected) });
+		return used.has(id) ? [line] : [line, t("installer.summary.loanNoTasks", { backup: name })];
+	});
 }
 
 /** What Install would do, in plain words and grouped by file; `current` holds the live files. */
@@ -196,6 +216,7 @@ export function summaryByFile(plain: SetupStepperState, current: StepperCurrent)
 		"pools.json": [
 			...pools.map(pool => t("installer.summary.backup", { name: backupName(pool), members: pool.candidates.map(label).join(t("installer.summary.then")) })),
 			...kept.map(k => t("installer.summary.kept", { name: backupName({ id: k.id }), tasks: keptTasks(k) })),
+			...lastResortLines(draft, current),
 		],
 		"profiles.json": roleLines,
 	};
@@ -204,11 +225,21 @@ export function summaryByFile(plain: SetupStepperState, current: StepperCurrent)
 		"pools.json": writes.pools,
 		"profiles.json": writes.profiles,
 	};
-	return (["integrations.json", "pools.json", "profiles.json"] as const).map(file => ({
-		file,
+	const groups = (["integrations.json", "pools.json", "profiles.json"] as const).map(file => ({
+		file: file as FileSummary["file"],
 		changed: changed[file],
 		lines: changed[file] ? [...lines[file], t("installer.summary.bakLine", { file })] : [t("installer.summary.unchanged")],
 	}));
+	// The grants file shows only when there are loans or the installer had some before.
+	const loans = loanLines(draft, current);
+	const before = current.grants !== undefined && Object.keys(installerLoanTargets(current.grants, Date.now())).length > 0;
+	if (loans.length > 0 || before) {
+		const file = "permissions.json";
+		const grantsChanged = loansChanged(draft, current);
+		const unused = loans.length !== Object.keys(effectiveLoans(draft)).length;
+		groups.push({ file, changed: grantsChanged, lines: grantsChanged ? [...(loans.length > 0 ? loans : [t("installer.summary.loansNone")]), t("installer.summary.bakLine", { file })] : unused ? loans : [t("installer.summary.unchanged")] });
+	}
+	return groups;
 }
 
 export interface UndoStep {
@@ -239,6 +270,11 @@ export interface InstallFs {
 }
 
 export const nodeInstallFs: InstallFs = { exists: existsSync, copy: copyFileSync, remove: path => rmSync(path, { force: true }) };
+
+/** Every file an install may write, for `snapshotForInstall`: the three configs and the grants file (automatic loans). */
+export function installerSnapshotFiles(root: string, dataDir: string, profilesPath: string): string[] {
+	return [join(root, "pools.json"), join(root, "integrations.json"), profilesPath, join(dataDir, PERMISSIONS_FILE)];
+}
 
 export interface InstallSnapshot {
 	/** The copies made by this install, one per file that existed. */
@@ -329,6 +365,8 @@ export function summaryStory(plain: SetupStepperState, current: StepperCurrent):
 		...(tasks.length > 0 ? tasks.map(([role, route]) => t("installer.summary.detail.task", { task: roleName(role), model: targetLabel(route.model!, draft.detected) })) : [t("installer.summary.detail.noTasks")]),
 		...kept.map(k => t("installer.summary.kept", { name: backupName({ id: k.id }), tasks: keptTasks(k) })),
 		...blockers,
+		...lastResortLines(draft),
+		...loanLines(draft, current),
 		t("installer.summary.detail.mainAgent", { mode }),
 		files.length > 0 ? t("installer.summary.detail.files", { files: files.join(", ") }) : t("installer.summary.detail.noFiles"),
 	];

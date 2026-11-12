@@ -4,6 +4,7 @@
 export const setupMessages = {
 	en: {
 		// Role catalog purposes
+		"setup.role.orchestrator.label": "Main agent (orchestrator)",
 		"setup.role.orchestrator.purpose": "Coordinate ODD workflow, routing, and user decisions",
 		"setup.role.gentle-ai-explore.purpose": "Fast read-only codebase exploration and file search",
 		"setup.role.gentle-ai-worker.purpose": "Write code, implement features, and run unit tests",
@@ -153,6 +154,7 @@ export const setupMessages = {
 		"setup.stepper.saved": "Setup saved: {files}",
 		"setup.stepper.saveFailed": "Setup was not saved: {error}",
 		"setup.stepper.profilesFailed": "Warning: failed to save profiles.json: {error}",
+		"setup.stepper.grantsFailed": "Warning: failed to save the automatic loans (permissions.json): {error}",
 		"setup.stepper.noProviders": "No subscription providers detected (e.g. pi-claude-bridge, agy, claude-code). Nothing written.",
 		"setup.stepper.costWarning": "Pool '{pool}' mixes cheap flash models with expensive Claude quota: flash requests could drain your Claude quota.",
 		"setup.stepper.row.createPool": "[+ Create new pool]",
@@ -208,6 +210,7 @@ export const setupMessages = {
 		"setup.workflow.fullDelegationDesc": "Full delegation (subagents only)",
 	},
 	es: {
+		"setup.role.orchestrator.label": "Agente principal (orchestrator)",
 		"setup.role.orchestrator.purpose": "Coordina el flujo ODD, el enrutamiento y las decisiones del usuario",
 		"setup.role.gentle-ai-explore.purpose": "Exploración rápida de solo lectura del código y búsqueda de archivos",
 		"setup.role.gentle-ai-worker.purpose": "Escribe código, implementa funcionalidades y corre los tests",
@@ -352,6 +355,7 @@ export const setupMessages = {
 		"setup.stepper.saved": "Configuración guardada: {files}",
 		"setup.stepper.saveFailed": "No se guardó la configuración: {error}",
 		"setup.stepper.profilesFailed": "Aviso: no se pudo guardar profiles.json: {error}",
+		"setup.stepper.grantsFailed": "Aviso: no se pudieron guardar los préstamos automáticos (permissions.json): {error}",
 		"setup.stepper.noProviders": "No se detectaron providers de suscripción (p. ej. pi-claude-bridge, agy, claude-code). No se escribió nada.",
 		"setup.stepper.costWarning": "El pool '{pool}' mezcla modelos baratos (flash) con cuota cara de Claude: las peticiones flash podrían gastar tu cuota de Claude.",
 		"setup.stepper.row.createPool": "[+ Crear nuevo pool]",

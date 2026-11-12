@@ -219,7 +219,7 @@ flowchart TD
 
 ### Terminal Pick Modes
 - **`first` (Waterfall)**: Picks the first available candidate in pool order.
-- **`highest-quota` (Hybrid default)**: Compares the remaining quota fraction (`0.0` to `1.0`) across all available candidates. The candidate with the highest remaining quota wins. Ties are broken by pool candidate order.
+- **`highest-quota` (Hybrid default; `hybrid` routes exactly like it today)**: Compares the remaining quota fraction (`0.0` to `1.0`) across all available candidates. The candidate with the highest remaining quota wins. Ties are broken by pool candidate order.
 - **`lowest-cost`**: Computes the token rate (`input + output` USD per million tokens) from `prices.json`. Picks the candidate with the lowest cost rate. Ties are broken by highest remaining quota fraction. **If any available candidate lacks a price in `prices.json`, this mode automatically falls back to `highest-quota`.**
 
 ### Built-In Fixed Guarantees
@@ -362,8 +362,14 @@ Here is a complete, production-tested configuration separating an agent team int
 - **Reviewers & Judges** (`review-risk`, `jd-judge-a`, `gentle-ai-verify`): High-reasoning models with higher thinking levels.
 
 ### `pools.json`
+
+`lastResort` (optional, top level): a `provider/model` that answers first, automatically, when every candidate of a pool is exhausted (main session and subagents). Set it in `/installer` → Backups → "Last-resort model" (key `l`); installer saves and other tools that edit pools preserve it.
+
+**Automatic loans from the installer.** `/installer` → Backups → "Automatic loans" (key `a`): for each backup you pick None or a model of an enabled subscription (models of another company are listed first). Install writes one `auto` grant per backup to `permissions.json` (in the data dir): `models` = `pool/<id>` plus the chosen model, `profiles` = the saved profiles that have a task on that backup, `roles` = every task of those profiles that points at `pool/<id>` (the grant format needs explicit names, no wildcards, so install again after pointing more tasks at a backup), expiry one year. Installer grants have ids starting `g-inst-`; other grants are never changed, and `/balancer permissions` lists or revokes them. The `.bak-installer-*` copies and Undo cover `permissions.json` like `pools.json`. Loans only apply to tasks that point at a backup and start once its first model is spent.
+
 ```json
 {
+  "lastResort": "antigravity/gemini-3-8-flash",
   "pools": [
     {
       "id": "orchestrator-pool",
@@ -575,14 +581,16 @@ The Welcome screen also presents an upfront summary of what the installer will d
 When multiple subscriptions offer overlapping models, the installer suggests virtual backup pools and gives you full control over candidate ordering, membership, and routing algorithms:
 
 - **Mixed / Hybrid (`hybrid` - Recommended)**:
-  - Starts with the primary candidate and shifts smoothly to one with more headroom when quota drops low.
-  - *Tradeoff*: Preserves prompt cache reuse during ongoing turns while preventing mid-turn `429` quota exhaustion.
+  - Keeps the model a conversation already uses; for a new turn it picks the subscription with the most usage left. Today it routes exactly like `highest-quota` (no "running low" threshold).
+  - *Tradeoff*: Preserves prompt cache reuse during ongoing turns; a later candidate can answer a new turn before the first runs out.
 - **In Order / Waterfall (`waterfall`)**:
-  - Always routes to the primary candidate until its quota is completely exhausted, then fails over to secondary candidates in sequence.
+  - Always routes to the primary candidate until its quota is completely exhausted, then fails over to secondary candidates in sequence. This is the strategy to use for a strict primary/backup order.
   - *Tradeoff*: Simple and predictable; ideal when you want to exhaust a primary quota before touching secondary limits.
 - **Most Room Left / Highest Quota (`highest-quota`)**:
   - Always selects the candidate subscription currently reporting the highest available quota percentage.
   - *Tradeoff*: Distributes load evenly across subscriptions; may cause prompt cache rewarming when switching between providers.
+
+Automatic backups only group the same model. To fall back to another provider (for example Claude to OpenAI or Gemini), use **+ Create another backup** → **Custom backup**, tick models with `Space` (any model of your enabled subscriptions, other providers included), order them, and choose **In order**.
 
 Candidates within a pool can be reordered using `u` (up) and `d` (down) keys or interactive controls. The installer automatically warns you when mixing low-cost models (e.g., Flash) with premium models in the same backup pool without cost containment guards.
 
@@ -791,4 +799,4 @@ Operational overlay showing real-time subscription burn velocity (`+X%/h`), rese
 **A**: In `~/.gentle-shell/config/gentle-ai/profiles.json`, configure the role with a direct physical model (e.g. `"model": "anthropic/claude-3-5-sonnet"`) instead of a `"pool/..."` string. Direct models bypass `ai-balancer` completely.
 
 ### Q: What happens if every provider in a pool runs out of quota?
-**A**: The Circuit Breaker activates immediately. It halts automated retries, writes an emergency checkpoint to `data/circuit-breaker-checkpoint.json`, and alerts the user with the earliest reopening time.
+**A**: First, an active automatic loan for that pool moves its tasks to the borrowed model. Otherwise the configured last-resort model (`lastResort` in `pools.json`) answers automatically with a warning notice. If that is spent too (or none is set), the main session shows a menu to wait, pick any model of your subscriptions with quota left, compact, or cancel, and the Circuit Breaker activates: it halts automated retries, writes an emergency checkpoint to `data/circuit-breaker-checkpoint.json`, and alerts the user with the earliest reopening time.

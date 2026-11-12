@@ -227,6 +227,9 @@ export interface ControlCenterRenderInput {
 	progress?: number;
 }
 
+/** The orchestrator role shows under its single user-facing name; its id stays "orchestrator". */
+const roleLabel = (role: string): string => (role === "orchestrator" ? t("setup.role.orchestrator.label") : role);
+
 const CATEGORY_COLOR: Record<RoleCategory, PixelColor> = { read: "sky", write: "xp", audit: "gold", orchestrate: "hp" };
 const STRATEGY_COLOR: Record<string, PixelColor> = { hybrid: "sky", waterfall: "xp", "highest-quota": "mp" };
 const THINKING_PIPS: Record<string, { pips: number; color: PixelColor }> = {
@@ -354,7 +357,7 @@ export function renderControlCenter(input: ControlCenterRenderInput): string[] {
 			bare(t("setup.cc.rolesTitle")),
 			table(
 				[col("role"), col("type"), col("model"), col("thinking")],
-				rows.map(row => [row.role, category(row.category), modelCell(row.configuredModel), thinkingCell(row.thinking)]),
+				rows.map(row => [roleLabel(row.role), category(row.category), modelCell(row.configuredModel), thinkingCell(row.thinking)]),
 				wide - 4,
 				{ head: heading },
 			),
@@ -406,7 +409,7 @@ export function renderControlCenter(input: ControlCenterRenderInput): string[] {
 		const cur = Math.max(0, Math.min(rows.length - 1, input.cursor ?? 0));
 		const grid = table(
 			[col("role"), col("type"), col("model"), col("thinking")],
-			rows.map((row, idx) => [first(idx === cur, row.role), category(row.category), modelCell(row.configuredModel), thinkingCell(row.thinking)]),
+			rows.map((row, idx) => [first(idx === cur, roleLabel(row.role)), category(row.category), modelCell(row.configuredModel), thinkingCell(row.thinking)]),
 			wide - 4,
 			{ prefixes: rows.map((_row, idx) => marker(idx === cur)), head: heading },
 		);
@@ -417,8 +420,9 @@ export function renderControlCenter(input: ControlCenterRenderInput): string[] {
 			if (idx === cur) {
 				lines.push(tone("dim", `      ${t("setup.cc.task", { purpose: row.purpose })}`));
 				lines.push(tone("dim", `      ${t("setup.cc.effective", { target: displayModel(row.effectiveTarget) })}`));
+				if (row.configuredModel !== UNASSIGNED && !row.configuredModel.startsWith("pool/")) lines.push(tone("warning", `      ${t("installer.tasks.noBackup")}`));
 				if (input.rolePickerOpen && input.rolePickerTargets && input.rolePickerTargets.length > 0) {
-					lines.push(tone("accent", `      ${t("setup.cc.pickTarget", { role: row.role })}`));
+					lines.push(tone("accent", `      ${t("setup.cc.pickTarget", { role: roleLabel(row.role) })}`));
 					const pCur = Math.max(0, Math.min(input.rolePickerTargets.length - 1, input.rolePickerCursor ?? 0));
 					const rec = input.advisor?.recommendations.find(r => r.role === row.role);
 					input.rolePickerTargets.forEach((target, tIdx) => {
@@ -503,7 +507,7 @@ export function renderControlCenter(input: ControlCenterRenderInput): string[] {
 		recs.map((rec, idx) => {
 			const currentModel = input.roles?.[rec.role]?.model ?? UNASSIGNED;
 			const change = currentModel !== rec.recommendedModel ? `${displayModel(currentModel)} → ${rec.recommendedModel}` : pixelText("hp", `${rec.recommendedModel} (${t("setup.tag.matches")})`, mode);
-			return [first(idx === rCur, rec.role), category(rec.category), change, thinkingCell(rec.thinking)];
+			return [first(idx === rCur, roleLabel(rec.role)), category(rec.category), change, thinkingCell(rec.thinking)];
 		}),
 		wide - 4,
 		{ prefixes: recs.map((_rec, idx) => marker(idx === rCur)), head: heading },
