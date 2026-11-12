@@ -96,6 +96,16 @@ export function loadPermissions(dataDir: string): LoadedPermissions {
 	return { grants: store.grants.map(parseGrant).filter((grant): grant is Grant => grant !== undefined) };
 }
 
+/** The grants the installer starts from: none when the file is missing, undefined when it is unusable (the installer then leaves the loans alone rather than overwrite what it never saw). */
+export function installerGrants(dataDir: string): Grant[] | undefined {
+	try {
+		const loaded = loadPermissions(dataDir);
+		return loaded.error ? undefined : loaded.grants;
+	} catch {
+		return undefined;
+	}
+}
+
 function writeGrants(dataDir: string, grants: readonly Grant[]): void {
 	mkdirSync(dataDir, { recursive: true });
 	const temporary = join(dataDir, `${PERMISSIONS_FILE}.${process.pid}.tmp`);

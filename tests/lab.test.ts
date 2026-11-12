@@ -7,6 +7,7 @@ import { resolveBalancerArgs } from "../src/balancer-menu.ts";
 import type { HistoryEntry } from "../src/history.ts";
 import {
 	activeRoutes,
+	applyDraft,
 	createDraft,
 	diffLab,
 	discardDraft,
@@ -307,6 +308,27 @@ test("S1: a lab draft keeps the top-level lastResort and its diff names a change
 		const removed = diffLab({ pools: base.pools, profiles: null }, { pools: text(POOLS), profiles: null });
 		assert.deepEqual(removed.changes, ["last-resort model: agy/flash → (none)"]);
 		assert.deepEqual(removed.issues, []);
+	} finally {
+		cleanup();
+	}
+});
+
+test("P2: lab apply refuses an unknown lastResort model, and diff surfaces a malformed one", () => {
+	const { dir, paths, cleanup } = setup();
+	try {
+		const dataDir = join(dir, "data");
+		const hasModel = (provider: string, model: string) => provider === "agy" && ["sonnet", "flash", "opus"].includes(model);
+		createDraft(paths, 1);
+		const draftFile = join(paths.labDir, "pools.json");
+		const poolsBefore = readFileSync(paths.poolsPath, "utf8");
+		writeFileSync(draftFile, text({ ...POOLS, lastResort: "ghost/none" }));
+		assert.throws(() => applyDraft({ paths, dataDir, hasModel }), /ghost\/none is not in Pi's model registry/);
+		assert.equal(readFileSync(paths.poolsPath, "utf8"), poolsBefore);
+		writeFileSync(draftFile, text({ ...POOLS, lastResort: "agy/flash" }));
+		assert.equal(applyDraft({ paths, dataDir, hasModel }).files.length > 0, true);
+		assert.equal(JSON.parse(readFileSync(paths.poolsPath, "utf8")).lastResort, "agy/flash");
+		const malformed = diffLab({ pools: text(POOLS), profiles: null }, { pools: text({ ...POOLS, lastResort: "pool/opus" }), profiles: null });
+		assert.match(malformed.issues[0] ?? "", /^pools\.json lastResort: /);
 	} finally {
 		cleanup();
 	}

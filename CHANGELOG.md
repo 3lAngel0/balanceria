@@ -3,6 +3,14 @@
 Pi shows the entries newer than your installed version after `pi update`.
 Each release bumps `version` in `package.json` and adds a `## [x.y.z]` heading here.
 
+## [0.4.1] - 2026-11-12
+
+### Fixed
+
+- `/balancer lab apply` refuses a draft whose `lastResort` model is not in Pi's model registry.
+- A failed install that wrote nothing no longer leaves `.bak-installer-*` copies behind or turns on Undo; a failure after writing keeps the copies so Undo restores the files.
+- The installer leaves automatic loans untouched when `permissions.json` cannot be read (now covered by tests).
+
 ## [0.4.0] - 2026-11-11
 
 ### Added

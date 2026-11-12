@@ -663,3 +663,21 @@ test("S7: the web installer offers Automatic loans and an install writes the aut
 		await h.cleanup();
 	}
 });
+
+test("an install result with grantsError or profilesError notifies the warnings through the web installer", async () => {
+	setLang("en");
+	const h = await harness({ install: () => ({ ok: true, written: [], backups: [], profilesError: "disk full", grantsError: "permissions locked" }) });
+	try {
+		await post(h, { type: "next" });
+		await post(h, { type: "next" });
+		await settle(h);
+		await post(h, { type: "next" }); // subscriptions
+		await post(h, { type: "next" }); // summary
+		await post(h, { type: "button", id: "install" });
+		await settle(h);
+		assert.ok(h.notices.includes("ai-balancer: Warning: failed to save the automatic loans (permissions.json): permissions locked"), h.notices.join("|"));
+		assert.ok(h.notices.includes("ai-balancer: Warning: failed to save profiles.json: disk full"), h.notices.join("|"));
+	} finally {
+		await h.cleanup();
+	}
+});
