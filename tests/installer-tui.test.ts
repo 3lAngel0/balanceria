@@ -445,11 +445,11 @@ test("shortcuts are drawn as a key hint line and every enabled letter maps to it
 		for (const hint of screen.shortcuts) {
 			const { key: raw, label, action, enabled } = hint;
 			const shown = raw === " " ? "Space" : raw === "enter" ? "Enter" : raw;
-			assert.ok(out.includes(`${shown} ${label}`), `${screen.step} shows "${shown} ${label}"`);
+			assert.match(out, new RegExp(`${shown} +${label.replace(/[()]/g, "\\$&")}`), `${screen.step} shows "${shown} ${label}"`);
 			if (enabled && raw !== "enter" && raw !== " ") assert.deepEqual(installerKey(screen, undefined, raw).actions, [action], `${screen.step} ${raw}`);
 		}
 	}
-	assert.match(text(renderInstaller(installerScreen(tasksState()), { width: 140, mode: "none" }).lines), /d Deep analysis/);
+	assert.match(text(renderInstaller(installerScreen(tasksState()), { width: 140, mode: "none" }).lines), /d +Deep analysis/);
 });
 
 test("the backups step is keyboard driven: tick, change how to choose, create a backup; u/j reorder the focused member", () => {
@@ -659,4 +659,85 @@ test("S7: the terminal reaches Automatic loans with the A key and a button, and 
 	}
 	// In the list, Enter opens the highlighted backup; in its targets, Enter chooses and goes back to the list.
 	assert.deepEqual(installerKey(installerScreen(list), undefined, "\r").actions, [{ type: "open", index: 0 }]);
+});
+
+// ---------------------------------------------------------------------------------------------
+// Layout: shortcut grid and split button groups
+// ---------------------------------------------------------------------------------------------
+
+const NAV = ["back", "next", "cancel"];
+const plainLines = (view: { lines: string[] }) => view.lines.map(strip);
+const shownKey = (k: string) => (k === " " ? "Space" : k === "enter" ? "Enter" : k);
+
+test("the backups shortcuts are a grid: prefix alone on its line and labels aligned in columns", () => {
+	const screen = installerScreen(backupsState());
+	// the content column only: no help panel, sidebar cut off
+	const content = (width: number) => plainLines(renderInstaller({ ...screen, helpOpen: true }, { width, mode: "none" })).map(l => l.replace(/^[^│]*│ /, "").trimEnd());
+	const lines = content(170);
+	const at = lines.findIndex(l => l.includes("Keys here:"));
+	assert.ok(at >= 0, "prefix shown");
+	assert.equal(lines[at]!.replace(/^.*?Keys here:/, "").trim(), "", "prefix alone on its line");
+	const after = lines.slice(at + 1);
+	const rows = after.slice(0, after.findIndex(l => l.trim() === ""));
+	assert.ok(rows.length >= 2 && rows.length < screen.shortcuts.length, "several columns");
+	const offsets = new Set<number>();
+	for (const { label } of screen.shortcuts) {
+		const row = rows.find(r => r.includes(label));
+		assert.ok(row, `${label} placed`);
+		offsets.add(row!.indexOf(label));
+	}
+	assert.ok(offsets.size >= 2 && offsets.size <= 3, `labels align into columns, got ${[...offsets]}`);
+	const { key: k1, label: l1 } = screen.shortcuts[0]!;
+	const { key: k2, label: l2 } = screen.shortcuts[1]!;
+	assert.equal(rows[0]!.indexOf(l1), rows[1]!.indexOf(l2), "labels in one column start together");
+	for (const l of rows) assert.ok(vw(l) <= 170);
+	// at a narrow width the grid degrades to one aligned column, never wider than the terminal
+	const narrow = content(100);
+	const start = narrow.findIndex(l => l.includes("Keys here:")) + 1;
+	const col = narrow.slice(start, start + screen.shortcuts.length);
+	assert.equal(new Set(col.map((l, i) => l.indexOf(screen.shortcuts[i]!.label))).size, 1, "one aligned column");
+	assert.ok(plainLines(renderInstaller(screen, { width: 100, mode: "none" })).every(l => vw(l) <= 100));
+	assert.ok(rows[0]!.includes(shownKey(k1)) && rows[1]!.includes(shownKey(k2)), "column-major");
+});
+
+test("action buttons and navigation buttons are on different rows", () => {
+	const screen = installerScreen(backupsState());
+	const lines = plainLines(renderInstaller(screen, { width: 100, mode: "none" }));
+	const rowOf = (s: string) => lines.findIndex(l => l.includes(s));
+	const nav = rowOf("[ Next ▶ ]");
+	assert.ok(nav >= 0);
+	for (const word of ["[ ◀ Back ]", "[ Next ▶ ]", "[ Cancel ]"]) assert.equal(rowOf(word), nav);
+	const actions = screen.buttons.filter(b => !NAV.includes(b.id));
+	assert.ok(actions.length > 0);
+	assert.equal((lines[nav]!.match(/\[/g) ?? []).length, 3, "three navigation buttons only");
+	for (const b of actions) {
+		const r = lines.findIndex(l => l.includes(`[ ${b.label} ]`) || l.includes(`( ${b.label} )`));
+		assert.ok(r >= 0 && r < nav, `${b.id} above the navigation row`);
+	}
+});
+
+test("every button still triggers its id when clicked and keeps its focus marker", () => {
+	for (const state of [backupsState(), tasksState(), recommendedRun()[1]!]) {
+		const screen = installerScreen(state);
+		const view = renderInstaller(screen, { width: 100, mode: "none" });
+		const lines = plainLines(view);
+		screen.buttons.forEach((b, i) => {
+			const labelled = b.id === "back" ? `◀ ${b.label}` : b.id === "next" ? `${b.label} ▶` : b.label;
+			if (b.enabled) {
+				const y = lines.findIndex(l => l.includes(`[ ${labelled} ]`));
+				assert.ok(y >= 0, `${b.id} drawn`);
+				assert.deepEqual(hitInstaller(view.hits, lines[y]!.indexOf(labelled), y), { type: "button", id: b.id });
+			}
+			const focused = plainLines(renderInstaller(screen, { width: 100, mode: "none", focus: i }));
+			assert.ok(focused.some(x => x.includes("▸") && x.includes(b.label)), `focus on ${b.id}`);
+		});
+	}
+});
+
+test("a screen with only navigation buttons keeps a single button row", () => {
+	const screen = installerScreen(recommendedRun()[1]!);
+	assert.ok(screen.buttons.every(b => NAV.includes(b.id)));
+	const rows = plainLines(renderInstaller(screen, { width: 100, mode: "none" })).filter(l => l.includes("Cancel") && l.includes("["));
+	assert.equal(rows.length, 1);
+	assert.ok(rows[0]!.includes("Back") && rows[0]!.includes("Next ▶"));
 });

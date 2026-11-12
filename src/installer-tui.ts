@@ -145,24 +145,34 @@ function buttonBody(label: string, focused: boolean, enabled: boolean, mode: Col
 
 const decorate = (id: string, label: string) => (id === "back" ? `◀ ${label}` : id === "next" ? `${label} ▶` : label);
 
+const NAV_BUTTONS = ["back", "next", "cancel"];
+
+/** Action buttons on their own row(s), then the navigation row (back, next, cancel). `focus` indexes screen.buttons. */
 function buttonRows(screen: InstallerScreen, width: number, mode: ColorMode, focus: number | undefined): Row[] {
 	const rows: Row[] = [];
-	let row: Row = { text: "", hits: [] };
-	let used = 0;
-	screen.buttons.forEach((b, i) => {
-		const body = buttonBody(decorate(b.id, b.label), i === focus, b.enabled, mode);
-		const cell = `${i === focus ? pixelText("sky", "▸", mode) : " "}${body}`;
-		const cells = cellWidth(cell);
-		if (used > 0 && used + cells > width) {
-			rows.push(row);
-			row = { text: "", hits: [] };
-			used = 0;
+	const group = (indexes: number[]) => {
+		let row: Row = { text: "", hits: [] };
+		let used = 0;
+		for (const i of indexes) {
+			const b = screen.buttons[i]!;
+			const body = buttonBody(decorate(b.id, b.label), i === focus, b.enabled, mode);
+			const cell = `${i === focus ? pixelText("sky", "▸", mode) : " "}${body}`;
+			const cells = cellWidth(cell);
+			if (used > 0 && used + cells > width) {
+				rows.push(row);
+				row = { text: "", hits: [] };
+				used = 0;
+			}
+			if (b.enabled) row.hits!.push({ start: used + 1, end: used + cells, action: { type: "button", id: b.id } });
+			row.text += cell;
+			used += cells;
 		}
-		if (b.enabled) row.hits!.push({ start: used + 1, end: used + cells, action: { type: "button", id: b.id } });
-		row.text += cell;
-		used += cells;
-	});
-	rows.push(row);
+		rows.push(row);
+	};
+	const all = screen.buttons.map((_b, i) => i);
+	const actions = all.filter(i => !NAV_BUTTONS.includes(screen.buttons[i]!.id));
+	if (actions.length > 0) group(actions);
+	group(all.filter(i => NAV_BUTTONS.includes(screen.buttons[i]!.id)));
 	return rows;
 }
 
@@ -213,33 +223,35 @@ function helpBox(screen: InstallerScreen, width: number, mode: ColorMode): strin
 	return box(t("installer.tui.helpTitle"), lines, width);
 }
 
-/** Key hints packed into rows of `width`; an item is never split across rows when it fits. */
-function shortcutRows(screen: InstallerScreen, width: number, mode: ColorMode): Row[] {
+/** Key hints as an aligned grid under the prefix: keys padded to the widest, equal-width columns, filled column-major. */
+function shortcutRows(screen: InstallerScreen, width: number, mode: ColorMode, compact = false): Row[] {
 	if (screen.shortcuts.length === 0) return [];
 	const name = (key: string) => (key === " " ? t("installer.tui.key.space") : key === "enter" ? t("installer.tui.key.enter") : key);
+	const keyWidth = Math.max(...screen.shortcuts.map(h => cellWidth(name(h.key))));
 	const items = screen.shortcuts.map(h => {
-		const plain = `${name(h.key)} ${h.label}`;
-		return { plain, text: h.enabled ? `${pixelText("sky", name(h.key), mode)} ${h.label}` : pixelText("steel", plain, mode) };
+		const key = name(h.key);
+		const label = clip(h.label, Math.max(1, width - keyWidth - 1));
+		const pad = " ".repeat(keyWidth - cellWidth(key));
+		const plain = `${key}${pad} ${label}`;
+		return { width: cellWidth(plain), text: h.enabled ? `${pixelText("sky", key, mode)}${pad} ${label}` : pixelText("steel", plain, mode) };
 	});
-	const rows: Row[] = [];
-	const prefix = t("installer.tui.shortcuts");
-	let line = pixelText("steel", prefix, mode);
-	let used = cellWidth(prefix);
-	let first = true;
-	for (const item of items) {
-		const cells = cellWidth(item.plain);
-		if (!first && used + 3 + cells > width) {
-			rows.push(plainRow(line));
-			line = "";
-			used = 0;
-			first = true;
+	const GAP = 3;
+	const column = Math.max(...items.map(i => i.width));
+	const fit = Math.max(1, Math.min(items.length, Math.floor((width + GAP) / (column + GAP))));
+	const count = Math.ceil(items.length / fit);
+	const cols = Math.ceil(items.length / count);
+	// When the height is short (`compact`) the prefix line is dropped; the grid itself stays.
+	const rows: Row[] = compact ? [] : [plainRow(pixelText("steel", clip(t("installer.tui.shortcuts"), width), mode))];
+	for (let r = 0; r < count; r++) {
+		let line = "";
+		for (let c = 0; c < cols; c++) {
+			const item = items[c * count + r];
+			if (!item) break;
+			const last = (c + 1) * count + r >= items.length;
+			line += last ? item.text : item.text + " ".repeat(column - item.width + GAP);
 		}
-		const sep = first ? (used > 0 ? " " : "") : " · ";
-		line += `${first ? sep : pixelText("steel", sep, mode)}${item.text}`;
-		used += sep.length + cells;
-		first = false;
+		rows.push(plainRow(line));
 	}
-	if (used > 0) rows.push(plainRow(line));
 	return rows;
 }
 
@@ -361,8 +373,8 @@ export function renderInstaller(screen: InstallerScreen, options: InstallerRende
 		if (method.length > 0) tail.push(plainRow(""), ...method);
 		const activity = activityRows(screen, contentWidth, mode, frame, animate, options.now);
 		if (activity.length > 0) tail.push(plainRow(""), ...activity);
-		const hints = shortcutRows(screen, contentWidth, mode);
-		if (hints.length > 0) tail.push(plainRow(""), ...hints);
+		const hints = shortcutRows(screen, contentWidth, mode, tier >= 3);
+		if (hints.length > 0) tail.push(plainRow(""), ...hints, ...(screen.notice && tier < 3 ? [plainRow("")] : []));
 		if (screen.notice) wrap(screen.notice, Math.max(10, contentWidth - 2)).forEach((line, i) => tail.push(plainRow(`${i === 0 ? pixelText("gold", "ℹ", mode) : " "} ${pixelText("gold", line, mode)}`)));
 		tail.push(plainRow(""), ...buttonRows(screen, contentWidth, mode, options.focus));
 		if (!panel && !screen.helpOpen && tier < 3) tail.push(plainRow(""), ...helpBox(screen, contentWidth, mode).map(plainRow));
