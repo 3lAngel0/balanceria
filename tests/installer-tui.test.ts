@@ -669,35 +669,50 @@ const NAV = ["back", "next", "cancel"];
 const plainLines = (view: { lines: string[] }) => view.lines.map(strip);
 const shownKey = (k: string) => (k === " " ? "Space" : k === "enter" ? "Enter" : k);
 
-test("the backups shortcuts are a grid: prefix alone on its line and labels aligned in columns", () => {
+/** The boxed shortcut block of the content column (sidebar and separator cut off): top border to bottom border. */
+function shortcutBox(width: number) {
 	const screen = installerScreen(backupsState());
-	// the content column only: no help panel, sidebar cut off
-	const content = (width: number) => plainLines(renderInstaller({ ...screen, helpOpen: true }, { width, mode: "none" })).map(l => l.replace(/^[^│]*│ /, "").trimEnd());
-	const lines = content(170);
-	const at = lines.findIndex(l => l.includes("Keys here:"));
-	assert.ok(at >= 0, "prefix shown");
-	assert.equal(lines[at]!.replace(/^.*?Keys here:/, "").trim(), "", "prefix alone on its line");
-	const after = lines.slice(at + 1);
-	const rows = after.slice(0, after.findIndex(l => l.trim() === ""));
-	assert.ok(rows.length >= 2 && rows.length < screen.shortcuts.length, "several columns");
-	const offsets = new Set<number>();
-	for (const { label } of screen.shortcuts) {
-		const row = rows.find(r => r.includes(label));
-		assert.ok(row, `${label} placed`);
-		offsets.add(row!.indexOf(label));
+	const lines = plainLines(renderInstaller({ ...screen, helpOpen: true }, { width, mode: "none" })).map(l => l.replace(/^.*? │ /, "").trimEnd());
+	const top = lines.findIndex(l => l.startsWith("╭─ Keys here "));
+	assert.ok(top >= 0, "box title in the top border");
+	const bottom = lines.findIndex((l, i) => i > top && l.startsWith("╰"));
+	assert.ok(bottom > top, "bottom border");
+	return { screen, lines: lines.slice(top, bottom + 1) };
+}
+
+test("the backups shortcuts sit in a rounded box titled in its top border, one aligned grid inside", () => {
+	for (const width of [100, 170]) {
+		const { screen, lines } = shortcutBox(width);
+		const full = vw(lines[0]!);
+		assert.ok(lines[0]!.startsWith("╭─ Keys here ─") && lines[0]!.endsWith("╮"));
+		assert.ok(full <= width, "never wider than the terminal");
+		assert.equal(lines.at(-1), `╰${"─".repeat(full - 2)}╯`);
+		const body = lines.slice(1, -1);
+		for (const l of body) {
+			assert.ok(l.startsWith("│ ") && l.endsWith(" │"), `framed: ${l}`);
+			assert.equal(vw(l), full, "right border in the same column");
+		}
+		const offsets = new Set<number>();
+		for (const { label } of screen.shortcuts) {
+			const row = body.find(r => r.includes(label));
+			assert.ok(row, `${label} placed`);
+			offsets.add(row!.indexOf(label));
+		}
+		if (width === 170) {
+			assert.ok(body.length >= 2 && body.length < screen.shortcuts.length, "several columns inside the box");
+			assert.ok(offsets.size >= 2 && offsets.size <= 3, `labels align into columns, got ${[...offsets]}`);
+			const { key: k1, label: l1 } = screen.shortcuts[0]!;
+			const { key: k2, label: l2 } = screen.shortcuts[1]!;
+			assert.equal(body[0]!.indexOf(l1), body[1]!.indexOf(l2), "labels in one column start together");
+			assert.ok(body[0]!.includes(shownKey(k1)) && body[1]!.includes(shownKey(k2)), "column-major");
+		} else {
+			assert.equal(body.length, screen.shortcuts.length, "one aligned column at a narrow width");
+			assert.equal(offsets.size, 1);
+		}
+		assert.ok(!lines.some(l => l.trim() === "Keys here:"), "no separate prefix line");
 	}
-	assert.ok(offsets.size >= 2 && offsets.size <= 3, `labels align into columns, got ${[...offsets]}`);
-	const { key: k1, label: l1 } = screen.shortcuts[0]!;
-	const { key: k2, label: l2 } = screen.shortcuts[1]!;
-	assert.equal(rows[0]!.indexOf(l1), rows[1]!.indexOf(l2), "labels in one column start together");
-	for (const l of rows) assert.ok(vw(l) <= 170);
-	// at a narrow width the grid degrades to one aligned column, never wider than the terminal
-	const narrow = content(100);
-	const start = narrow.findIndex(l => l.includes("Keys here:")) + 1;
-	const col = narrow.slice(start, start + screen.shortcuts.length);
-	assert.equal(new Set(col.map((l, i) => l.indexOf(screen.shortcuts[i]!.label))).size, 1, "one aligned column");
+	const screen = installerScreen(backupsState());
 	assert.ok(plainLines(renderInstaller(screen, { width: 100, mode: "none" })).every(l => vw(l) <= 100));
-	assert.ok(rows[0]!.includes(shownKey(k1)) && rows[1]!.includes(shownKey(k2)), "column-major");
 });
 
 test("action buttons and navigation buttons are on different rows", () => {

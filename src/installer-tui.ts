@@ -223,25 +223,25 @@ function helpBox(screen: InstallerScreen, width: number, mode: ColorMode): strin
 	return box(t("installer.tui.helpTitle"), lines, width);
 }
 
-/** Key hints as an aligned grid under the prefix: keys padded to the widest, equal-width columns, filled column-major. */
+/** Key hints as an aligned grid inside a rounded box titled with the prefix: keys padded to the widest, equal-width columns, filled column-major. */
 function shortcutRows(screen: InstallerScreen, width: number, mode: ColorMode, compact = false): Row[] {
 	if (screen.shortcuts.length === 0) return [];
 	const name = (key: string) => (key === " " ? t("installer.tui.key.space") : key === "enter" ? t("installer.tui.key.enter") : key);
+	const inner = compact ? width : Math.max(4, width - 4);
 	const keyWidth = Math.max(...screen.shortcuts.map(h => cellWidth(name(h.key))));
 	const items = screen.shortcuts.map(h => {
 		const key = name(h.key);
-		const label = clip(h.label, Math.max(1, width - keyWidth - 1));
+		const label = clip(h.label, Math.max(1, inner - keyWidth - 1));
 		const pad = " ".repeat(keyWidth - cellWidth(key));
 		const plain = `${key}${pad} ${label}`;
 		return { width: cellWidth(plain), text: h.enabled ? `${pixelText("sky", key, mode)}${pad} ${label}` : pixelText("steel", plain, mode) };
 	});
 	const GAP = 3;
 	const column = Math.max(...items.map(i => i.width));
-	const fit = Math.max(1, Math.min(items.length, Math.floor((width + GAP) / (column + GAP))));
+	const fit = Math.max(1, Math.min(items.length, Math.floor((inner + GAP) / (column + GAP))));
 	const count = Math.ceil(items.length / fit);
 	const cols = Math.ceil(items.length / count);
-	// When the height is short (`compact`) the prefix line is dropped; the grid itself stays.
-	const rows: Row[] = compact ? [] : [plainRow(pixelText("steel", clip(t("installer.tui.shortcuts"), width), mode))];
+	const grid: string[] = [];
 	for (let r = 0; r < count; r++) {
 		let line = "";
 		for (let c = 0; c < cols; c++) {
@@ -250,9 +250,12 @@ function shortcutRows(screen: InstallerScreen, width: number, mode: ColorMode, c
 			const last = (c + 1) * count + r >= items.length;
 			line += last ? item.text : item.text + " ".repeat(column - item.width + GAP);
 		}
-		rows.push(plainRow(line));
+		grid.push(line);
 	}
-	return rows;
+	// When the height is short (`compact`) the frame is dropped; the grid itself stays.
+	if (compact) return grid.map(plainRow);
+	const title = t("installer.tui.shortcuts").replace(/\s*:\s*$/, "");
+	return box(title, grid, width, edge => pixelText("steel", edge, mode)).map(plainRow);
 }
 
 /** The ways of choosing which subscription goes first, for the focused backup; only the current one is explained. */
