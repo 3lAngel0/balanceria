@@ -428,6 +428,14 @@ export function applyDraft(options: ApplyDraftOptions): ApplyDraftResult {
 			}
 		}
 	}
+	const draftLast = parsedDraftPools?.lastResort;
+	const currentLast = lastResortRef((() => { try { return JSON.parse(livePools); } catch { return null; } })());
+	if (typeof draftLast === "string" && draftLast !== currentLast) {
+		const slash = draftLast.indexOf("/");
+		if (slash > 0 && slash < draftLast.length - 1 && !hasModel(draftLast.slice(0, slash), draftLast.slice(slash + 1))) {
+			unknownPoolCandidates.push(`lastResort ${draftLast} is not in Pi's model registry`);
+		}
+	}
 	if (unknownPoolCandidates.length > 0) {
 		throw new Error(`ai-balancer: refusing to apply pools.json: ${[...new Set(unknownPoolCandidates)].join("; ")}`);
 	}
