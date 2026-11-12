@@ -9,7 +9,7 @@ import { CONTENT_X, CONTENT_Y, emphasize, hitTest, layoutButtons, sameTarget, ta
 import { applyAdvisorReport, applyStepper, initStepper, type StepperCurrent } from "./setup-stepper.ts";
 import { initScreen, renderStepper, stepperInput, type StepperEffect, type StepperEvent, type StepperTone, stepperThemeColor } from "./setup-stepper-view.ts";
 import type { InstallerAction } from "./installer-model.ts";
-import { installerSnapshotFiles, nodeInstallFs, snapshotForInstall, undoInstall, type InstallSnapshot } from "./installer-plan.ts";
+import { installerSnapshotFiles, nodeInstallFs, settleInstallSnapshot, snapshotForInstall, undoInstall, type InstallSnapshot } from "./installer-plan.ts";
 import { canonicalKey as installerCanonicalKey, hitInstaller, installerKey, renderInstaller, type InstallerHit } from "./installer-tui.ts";
 import { channelPromptInput, initChannelPrompt, renderChannelPrompt, type InstallChannel } from "./installer-channel.ts";
 import {
@@ -51,7 +51,7 @@ import { readAgentTasks, resolveRole, routingRole } from "./roles.ts";
 import { validatePoolsConfig } from "./config-schema.ts";
 import { formatSimulation, poolOfSelection, readPoolSelections, simulate } from "./simulator.ts";
 import { activeRoutes, applyDraft, createDraft, diffLab, discardDraft, formatApplyConfirm, formatLabDiff, formatRoleMoves, hasDraft, hasUndo, LAB_POOLS, LAB_PROFILES, profilePoolOf, readDraft, roleMoves, undoApply, type LabTexts } from "./lab.ts";
-import { addGrant, formatGrants, loadPermissions, pruneExpired, revokeGrants, runPermissionGrant } from "./permissions.ts";
+import { addGrant, formatGrants, installerGrants, loadPermissions, pruneExpired, revokeGrants, runPermissionGrant } from "./permissions.ts";
 import { summarizeQuota } from "./quota-report.ts";
 import { paint, paint as paintTones, plain, tone } from "./style.ts";
 import { FRAME_MS, colorMode, fillProgress, frameOf, motionEnabled } from "./pixel.ts";
@@ -2018,7 +2018,6 @@ export default function aiBalancer(pi: ExtensionAPI) {
 		install: (draft, current) => {
 			// Each install keeps its own copies (never overwriting an older one); applyStepper's plain `.bak` is shared with other setup flows and is not reported.
 			const snapshot = snapshotForInstall(installerSnapshotFiles(ROOT, DATA_DIR, DEFAULT_PROFILES_PATH), nodeInstallFs);
-			installerSnapshots.push(snapshot);
 			const result = applyStepper(draft, {
 				root: ROOT,
 				dataDir: DATA_DIR,
@@ -2027,7 +2026,9 @@ export default function aiBalancer(pi: ExtensionAPI) {
 				writeConfig: writeConfigSafely,
 				writeProfiles: (name, roles, workflow) => saveProfileRoles(DEFAULT_PROFILES_PATH, name, roles, (provider, model) => Boolean(ctx.modelRegistry.find(provider, model)), workflow),
 			});
-			return result.ok ? { ok: true, written: result.written, backups: snapshot.backups, profilesError: result.profilesError, grantsError: result.grantsError } : { ok: false, error: result.error ?? "", backups: snapshot.backups };
+			const settled = settleInstallSnapshot(snapshot, result, nodeInstallFs);
+			if (settled.keep) installerSnapshots.push(snapshot);
+			return result.ok ? { ok: true, written: result.written, backups: settled.backups, profilesError: result.profilesError, grantsError: result.grantsError } : { ok: false, error: result.error ?? "", backups: settled.backups };
 		},
 		undo: backups => {
 			// The install's own record knows which files it created; a list without a record (older copies) still restores what it names.
@@ -2048,15 +2049,7 @@ export default function aiBalancer(pi: ExtensionAPI) {
 			}
 		};
 		const store = loadProfilesStore();
-		let grants: StepperCurrent["grants"];
-		try {
-			const loaded = loadPermissions(DATA_DIR);
-			// An unusable file reads as no grants: leave it alone rather than overwrite loans the installer never saw.
-			grants = loaded.error ? undefined : loaded.grants;
-		} catch {
-			// An unreadable grants file leaves the installer's loans untouched.
-			grants = undefined;
-		}
+		const grants = installerGrants(DATA_DIR);
 		const current: StepperCurrent = { pools: readJson("pools.json"), integrations: readJson("integrations.json"), profiles: store, grants };
 		return createInstallerSession({ detected: detectProviders(ctx), current, workflow: store?.workflow?.[store.active ?? ""] }, installerHost(ctx));
 	};

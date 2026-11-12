@@ -303,6 +303,15 @@ export function snapshotForInstall(files: readonly string[], fs: InstallFs, now:
 	return snapshot;
 }
 
+/** Decides what to do with an install's snapshot once the install ran. A failed install that wrote nothing has nothing to undo: its copies are removed and no backups are reported (so Undo stays off). Any other install keeps the snapshot. */
+export function settleInstallSnapshot(snapshot: InstallSnapshot, result: { ok: boolean; written: readonly string[] }, fs: InstallFs): { keep: boolean; backups: string[] } {
+	if (!result.ok && result.written.length === 0) {
+		for (const copy of snapshot.backups) fs.remove(copy);
+		return { keep: false, backups: [] };
+	}
+	return { keep: true, backups: snapshot.backups };
+}
+
 /** Puts the files back as they were before that install; returns how many files were restored or removed. Old copies are kept. */
 export function undoInstall(snapshot: InstallSnapshot, fs: InstallFs): number {
 	const steps = planUndo(snapshot.backups);

@@ -5,7 +5,7 @@ import { ROLE_CATALOG } from "../src/setup-advisor.ts";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { buildRecommendedDraft, findRepairs, friendlyModel, installBlockers, nodeInstallFs, planUndo, snapshotForInstall, suggestBackups, summaryByFile, summaryStory, targetLabel, undoInstall, withKeptBackups, type InstallFs } from "../src/installer-plan.ts";
+import { buildRecommendedDraft, findRepairs, friendlyModel, installBlockers, nodeInstallFs, planUndo, settleInstallSnapshot, snapshotForInstall, suggestBackups, summaryByFile, summaryStory, targetLabel, undoInstall, withKeptBackups, type InstallFs } from "../src/installer-plan.ts";
 import { setLang } from "../src/i18n/index.ts";
 import { initStepper, setRole } from "../src/setup-stepper.ts";
 
@@ -429,4 +429,33 @@ test("S7: the install snapshot covers permissions.json like pools.json, and Undo
 		undoInstall(snapshot, nodeInstallFs);
 		assert.equal(existsSync(join(dataDir, "permissions.json")), false);
 	});
+});
+
+test("settleInstallSnapshot: a failed install that wrote nothing discards its copies and records no backups", () => {
+	const fs = memFs({ "/r/pools.json": "v1", "/r/integrations.json": "i1" });
+	const snapshot = snapshotForInstall(["/r/pools.json", "/r/integrations.json", "/r/profiles.json"], fs, new Date(2026, 0, 2, 3, 4, 5));
+	assert.equal(Object.keys(fs.files).length, 4);
+	const settled = settleInstallSnapshot(snapshot, { ok: false, written: [] }, fs);
+	assert.equal(settled.keep, false);
+	assert.deepEqual(settled.backups, []);
+	assert.deepEqual(fs.files, { "/r/pools.json": "v1", "/r/integrations.json": "i1" });
+});
+
+test("settleInstallSnapshot: a failed install that wrote something keeps its copies so Undo can restore", () => {
+	const fs = memFs({ "/r/pools.json": "v1" });
+	const snapshot = snapshotForInstall(["/r/pools.json"], fs, new Date(2026, 0, 2, 3, 4, 5));
+	const settled = settleInstallSnapshot(snapshot, { ok: false, written: ["/r/pools.json"] }, fs);
+	assert.equal(settled.keep, true);
+	assert.deepEqual(settled.backups, snapshot.backups);
+	assert.equal(snapshot.backups.length, 1);
+	assert.ok(snapshot.backups[0]! in fs.files);
+});
+
+test("settleInstallSnapshot: a successful install keeps its snapshot", () => {
+	const fs = memFs({ "/r/pools.json": "v1" });
+	const snapshot = snapshotForInstall(["/r/pools.json"], fs);
+	const settled = settleInstallSnapshot(snapshot, { ok: true, written: [] }, fs);
+	assert.equal(settled.keep, true);
+	assert.deepEqual(settled.backups, snapshot.backups);
+	assert.ok(snapshot.backups[0]! in fs.files);
 });

@@ -8,6 +8,7 @@ import {
 	PERMISSIONS_FILE,
 	addGrant,
 	formatGrants,
+	installerGrants,
 	loadPermissions,
 	permissionFor,
 	pruneExpired,
@@ -395,4 +396,15 @@ test("S7: installerGrantsMatch ignores expired installer grants; an unusable fil
 	assert.deepEqual(syncInstallerGrants(dir, [], NOW), { added: [], revoked: [] });
 	assert.throws(() => syncInstallerGrants(dir, [loan], NOW), /permissions\.json/);
 	assert.equal(readFileSync(join(dir, PERMISSIONS_FILE), "utf8"), "nope");
+});
+
+test("installerGrants: missing file reads as no grants, a valid file as its grants, an unusable one as undefined", () => {
+	const dir = dataDir();
+	assert.deepEqual(installerGrants(dir), []);
+	const saved = addGrant(dir, draft(), NOW);
+	assert.deepEqual(installerGrants(dir), [saved]);
+	writeFileSync(join(dir, PERMISSIONS_FILE), "{not json");
+	assert.equal(installerGrants(dir), undefined);
+	writeFileSync(join(dir, PERMISSIONS_FILE), JSON.stringify({ version: 2, grants: [] }));
+	assert.equal(installerGrants(dir), undefined);
 });
