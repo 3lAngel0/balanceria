@@ -39,7 +39,7 @@ import { appendHistory, legacyRecords, pruneHistory, readHistory, type HistoryDa
 import { topConsumers, withAliases } from "./consumers.ts";
 import { HUD_VIEWS, hudHints, moveCursor, pressRedKey, renderHud, selectedSessionTarget, suggestionEnter, SESSIONS_PER_ROLE, visibleSessions, type HudViewName, type PendingConfirm } from "./hud.ts";
 import { runHudChoice, type HudChoice } from "./hud-actions.ts";
-import { buildExhaustedMenu, directQuotaSuggestion, exhaustedPoolOutcome } from "./exhausted-menu.ts";
+import { buildExhaustedMenu, exhaustedDirectOutcome, exhaustedPoolOutcome } from "./exhausted-menu.ts";
 import { loadIntegrations } from "./integrations.ts";
 import { renderPanel, statusLine, statusWithContext, turnTelemetry, renderControlCenter, controlCenterButtons, controlCenterTabLabels, CONTROL_CENTER_TABS, type ControlCenterTab, type OverviewSessionRow, type TurnTelemetry } from "./panel.ts";
 import { ROLE_CATALOG, buildAvailableModelTargets, recommendRolesHeuristic, recommendRolesWithAdvisor, createDefaultCliAiRunner, createModelCliAiRunner, applyRecommendationsToProfile, type AdvisorReport } from "./setup-advisor.ts";
@@ -632,18 +632,25 @@ export default function aiBalancer(pi: ExtensionAPI) {
 		const { pools } = getLivePools();
 		const fromLabel = friendlyModelLabel(message.provider, message.model);
 
-		// Only sessions on a pool model are rewritten: elsewhere a retry would
-		// hit the same spent subscription again, so surface a clear status hint.
+		// A direct model has no failover and a retry would hit the same spent subscription: the turn ends
+		// with a clear notice (also what a subagent hands back) that points only at ways out that exist.
 		if (ctx.model?.provider !== POOL_PROVIDER) {
-			const toLabel = directQuotaSuggestion({ exhaustedKey: key, lastResort: getLivePools().lastResort, pools, state });
-			const directNotice = toLabel
-				? t("ops.directQuotaHint", { from: fromLabel, to: toLabel })
-				: t("ops.directQuotaHintNone", { from: fromLabel });
-			lastFailoverNote = { text: directNotice, at: Date.now() };
+			const { notice, errorMessage } = exhaustedDirectOutcome({
+				model: fromLabel,
+				exhaustedKey: key,
+				until,
+				stalled: quota.isStall === true,
+				lastResort: getLivePools().lastResort,
+				pools,
+				state,
+				now: Date.now(),
+				t,
+			});
+			lastFailoverNote = { text: notice, at: Date.now() };
 			registerPoolUsage();
 			refreshStatus(ctx);
-			if (ctx.hasUI) ctx.ui.notify(`ai-balancer: ${directNotice}`, "warning");
-			return;
+			if (ctx.hasUI) ctx.ui.notify(notice, "warning");
+			return errorMessage === undefined ? undefined : { message: { ...event.message, errorMessage } as typeof event.message };
 		}
 		const pool = pools.find(candidatePool => candidatePool.id === ctx.model?.id);
 		if (!pool) {

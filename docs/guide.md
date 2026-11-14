@@ -120,7 +120,7 @@ flowchart TD
 
 > [!IMPORTANT]
 > **Only roles assigned to a virtual pool (`pool/<id>`) are balanced.**
-> If a role is configured with a direct model (e.g. `anthropic/claude-3-5-sonnet` or `antigravity/gemini-3-8-flash`), Gentle Shell calls that provider directly. `ai-balancer` is bypassed completely, and automatic quota failover will not occur.
+> If a role is configured with a direct model (e.g. `anthropic/claude-3-5-sonnet` or `antigravity/gemini-3-8-flash`), Gentle Shell calls that provider directly. `ai-balancer` is bypassed completely, and automatic quota failover will not occur. When that direct model runs out of usage, the turn ends with a clear notice (also what a subagent hands back) instead of the provider's raw text: it names the model, says when it comes back (or that no time is known), and says the session is still open. (A stall or timeout on a direct model keeps the provider's own error so Pi can retry it; you only get a "stopped responding" notice.) The way out it suggests is real: an alternative model with quota left and a pool that has a candidate left, if your `pools.json` defines one, otherwise just `/model` and `/balancer`.
 
 ### Profiles vs. Pools vs. Bridges: The Key Difference
 

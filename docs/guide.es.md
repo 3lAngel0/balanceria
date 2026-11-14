@@ -120,7 +120,7 @@ flowchart TD
 
 > [!IMPORTANT]
 > **Únicamente los roles asignados a un pool virtual (`pool/<id>`) son balanceados.**
-> Si un rol está configurado con un modelo directo (ej. `anthropic/claude-3-5-sonnet` o `antigravity/gemini-3-8-flash`), Gentle Shell invoca directamente a ese proveedor. `ai-balancer` queda fuera del flujo y no habrá failover automático ante agotamiento de cuota.
+> Si un rol está configurado con un modelo directo (ej. `anthropic/claude-3-5-sonnet` o `antigravity/gemini-3-8-flash`), Gentle Shell invoca directamente a ese proveedor. `ai-balancer` queda fuera del flujo y no habrá failover automático ante agotamiento de cuota. Cuando ese modelo directo agota su cupo, el turno termina con un aviso claro (también lo que devuelve un subagente) en lugar del texto crudo del proveedor: nombra el modelo, dice cuándo vuelve (o que no se sabe) y que la sesión sigue abierta. (Un cuelgue o timeout de un modelo directo conserva el error del proveedor para que Pi lo reintente; solo ves un aviso de "dejó de responder".) La salida que sugiere es real: un modelo alternativo con cupo y un pool con algún candidato disponible, si tu `pools.json` define alguno; si no, solo `/model` y `/balancer`.
 
 ### Perfiles vs. Pools vs. Bridges: La diferencia conceptual
 

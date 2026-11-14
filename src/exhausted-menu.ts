@@ -125,3 +125,44 @@ export function exhaustedPoolOutcome(input: ExhaustedPoolInput): { notice: strin
 	const notice = exhaustedPoolNotice(input);
 	return { notice, errorMessage: notice };
 }
+
+export interface ExhaustedDirectInput {
+	/** Spent model as the user knows it, e.g. `claude-bridge/claude-fable-5-2`. */
+	model: string;
+	exhaustedKey: string;
+	/** Return time stated by the error; falls back to what the quota state knows. */
+	until?: number;
+	/** The model stalled instead of running out of usage. */
+	stalled?: boolean;
+	lastResort?: Candidate;
+	/** Pools that really exist in the live configuration. */
+	pools: readonly { id: string; candidates: readonly Candidate[] }[];
+	state: Pick<QuotaState, "isAvailable" | "availableAt">;
+	now: number;
+	t: Translate;
+}
+
+/**
+ * What a session on a direct (non-pool) model reads when that model is spent: there is no failover, so it names the
+ * model, when it returns, and a way out that exists: an available alternative model and a pool that has
+ * something left to serve, never a pool by assumed name. A spent model's notice replaces the provider's text (so it
+ * is worded without anything Pi retries on); a stall leaves the provider's text untouched so Pi can retry it.
+ */
+export function exhaustedDirectOutcome(input: ExhaustedDirectInput): { notice: string; errorMessage?: string; suggestion?: string } {
+	const { t, now, state } = input;
+	const suggestion = directQuotaSuggestion({ exhaustedKey: input.exhaustedKey, lastResort: input.lastResort, pools: input.pools, state, now });
+	const pool = input.pools.find(p => p.candidates.some(c => c.quotaKey !== input.exhaustedKey && state.isAvailable(c.quotaKey, now)));
+	const way = !suggestion
+		? t("ops.directWayNone")
+		: pool
+			? t("ops.directWayAltPool", { to: suggestion, pool: pool.id })
+			: t("ops.directWayAlt", { to: suggestion });
+	const at = input.until ?? state.availableAt(input.exhaustedKey, now);
+	const notice = input.stalled
+		? t("ops.directStalled", { model: input.model, way })
+		: at === undefined
+			? t("ops.directExhaustedNoTime", { model: input.model, way })
+			: t("ops.directExhausted", { model: input.model, time: returnTime(at, now), way });
+	// A stall keeps the provider's own text: Pi retries it ("timed out"...), and a notice would end the turn.
+	return { notice, ...(input.stalled ? {} : { errorMessage: notice }), ...(suggestion ? { suggestion } : {}) };
+}
