@@ -54,9 +54,14 @@ export function defaultModelsPath(env: NodeJS.ProcessEnv = process.env, home = h
   return join(resolveConfigHome(env, home), "models.json");
 }
 
+export function defaultSettingsPath(env: NodeJS.ProcessEnv = process.env, home = homedir()): string {
+  return join(resolveAgentHome(env, home), "settings.json");
+}
+
 export const DEFAULT_PROFILES_PATH = defaultProfilesPath();
 export const DEFAULT_SUBAGENTS_PATH = defaultSubagentsPath();
 export const DEFAULT_MODELS_PATH = defaultModelsPath();
+export const DEFAULT_SETTINGS_PATH = defaultSettingsPath();
 
 export interface RoleRoute {
   model: string;
@@ -236,12 +241,64 @@ export interface SaveProfilesOptions {
   path?: string;
   subagentsPath?: string;
   modelsPath?: string;
+  settingsPath?: string;
   syncSubagents?: boolean;
   syncModels?: boolean;
+  syncSettings?: boolean;
   syncLiveSession?: boolean;
   now?: number;
   /** Pi's model registry lookup. */
   hasModel(provider: string, model: string): boolean;
+}
+
+/**
+ * Syncs the active profile's orchestrator model and thinking level into Pi's
+ * settings.json (defaultProvider, defaultModel, defaultThinkingLevel) so new
+ * sessions and reloads start on the configured orchestrator instead of falling
+ * back to index 0 of a provider (e.g. claude-fable-5-2).
+ */
+export function syncSettingsJson(activeConfig: ProfileConfig, settingsPath?: string): void {
+  const targetPath = settingsPath ?? defaultSettingsPath();
+  if (!existsSync(targetPath)) return;
+  const orch = activeConfig.orchestrator;
+  if (!orch || typeof orch !== "object") return;
+  const modelText = typeof orch.model === "string" ? orch.model.trim() : "";
+  const slash = modelText.indexOf("/");
+  if (slash <= 0 || slash === modelText.length - 1) return;
+
+  let raw: string;
+  try {
+    raw = readFileSync(targetPath, "utf8");
+  } catch {
+    return;
+  }
+
+  let parsed: Record<string, unknown>;
+  try {
+    const data = JSON.parse(raw);
+    if (!data || typeof data !== "object" || Array.isArray(data)) return;
+    parsed = data as Record<string, unknown>;
+  } catch {
+    return;
+  }
+
+  parsed.defaultProvider = modelText.slice(0, slash);
+  parsed.defaultModel = modelText.slice(slash + 1);
+  if (typeof orch.thinking === "string" && orch.thinking.trim()) {
+    parsed.defaultThinkingLevel = orch.thinking.trim();
+  }
+
+  const temp = `${targetPath}.${process.pid}.tmp`;
+  try {
+    writeFileSync(temp, JSON.stringify(parsed, null, 2) + "\n", { encoding: "utf8", mode: 0o600 });
+    renameSync(temp, targetPath);
+  } catch {
+    try {
+      unlinkSync(temp);
+    } catch {
+      // Ignored
+    }
+  }
 }
 
 /**
@@ -442,7 +499,22 @@ export function saveProfilesStore(next: ProfilesStore, read: ProfilesRead, optio
     const text = typeof model === "string" ? model : "";
     const slash = text.indexOf("/");
     if (slash <= 0 || slash === text.length - 1) return [`${where}: ${text} is not provider/model`];
-    return options.hasModel(text.slice(0, slash), text.slice(slash + 1)) ? [] : [`${where}: ${text} is not in Pi's model registry`];
+    const provider = text.slice(0, slash);
+    const modelId = text.slice(slash + 1);
+    if (options.hasModel(provider, modelId)) return [];
+    const base = modelId.replace(/-(acp|cli)$/i, "");
+    for (const alt of [`${base}-acp`, `${base}-cli`, base]) {
+      if (alt !== modelId && options.hasModel(provider, alt)) {
+        const dot = where.indexOf(".");
+        const prof = dot > 0 ? where.slice(0, dot) : "";
+        const role = dot > 0 ? where.slice(dot + 1) : "";
+        if (prof && role && next.profiles?.[prof]?.[role]) {
+          next.profiles[prof][role] = { ...next.profiles[prof][role], model: `${provider}/${alt}` };
+        }
+        return [];
+      }
+    }
+    return [`${where}: ${text} is not in Pi's model registry`];
   });
   if (unknown.length) throw new Error(`ai-balancer: refusing to write profiles.json: ${unknown.join("; ")}`);
   const result = replaceFileSafely(path, JSON.stringify(next, null, 1) + "\n", read.raw, now);
@@ -450,17 +522,27 @@ export function saveProfilesStore(next: ProfilesStore, read: ProfilesRead, optio
   if (options.syncSubagents !== false) {
     const activeName = next.active;
     const activeConfig = activeName ? next.profiles[activeName] : undefined;
+    const isDefaultPath = path === defaultProfilesPath();
     if (activeConfig) {
-      try {
-        syncSubagentsJson(activeConfig, options.subagentsPath);
-      } catch {
-        // Non-fatal if subagents.json sync fails.
+      if (options.subagentsPath || isDefaultPath) {
+        try {
+          syncSubagentsJson(activeConfig, options.subagentsPath);
+        } catch {
+          // Non-fatal if subagents.json sync fails.
+        }
       }
-      if (options.syncModels !== false) {
+      if (options.syncModels !== false && (options.modelsPath || isDefaultPath)) {
         try {
           syncModelsJson(activeConfig, options.modelsPath);
         } catch {
           // Non-fatal if models.json sync fails.
+        }
+      }
+      if (options.syncSettings !== false && (options.settingsPath || isDefaultPath)) {
+        try {
+          syncSettingsJson(activeConfig, options.settingsPath);
+        } catch {
+          // Non-fatal if settings.json sync fails.
         }
       }
     }

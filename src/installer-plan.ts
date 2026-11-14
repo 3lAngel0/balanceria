@@ -9,7 +9,7 @@ import { lastResortRef } from "./pools.ts";
 import { DEFAULT_ORCHESTRATOR_MODE, type OrchestratorMode, type ProfileConfig, type ProfileWorkflow } from "./profiles.ts";
 import { UNASSIGNED } from "./setup-advisor.ts";
 import { applyAutoAssignRoles, buildStepperDiff, effectiveLastResort, effectiveLoans, initStepper, loansChanged, planLoans, type SetupStepperState, type StepperCurrent } from "./setup-stepper.ts";
-import { buildBalancerProfileName, type DetectedProvider, type PoolConfig } from "./setup.ts";
+import { buildBalancerProfileName, isHighConsumptionModel, resolveProviderModelVariant, stripEngineSuffix, type DetectedProvider, type PoolConfig } from "./setup.ts";
 
 export interface SingleModel {
 	/** `provider/model`. */
@@ -23,16 +23,33 @@ const safeId = (model: string) => model.replace(/[^a-zA-Z0-9._-]/g, "-");
 
 /** One suggested backup per model that 2+ detected subscriptions offer; models of a single subscription are listed apart. */
 export function suggestBackups(providers: readonly DetectedProvider[]): { backups: PoolConfig[]; single: SingleModel[] } {
-	const byModel = new Map<string, string[]>();
+	const byBaseModel = new Map<string, { provider: string; model: string }[]>();
 	for (const p of providers) {
 		if (!p.detected) continue;
-		for (const model of p.availableModels) byModel.set(model, [...(byModel.get(model) ?? []), p.id]);
+		const seenBases = new Set<string>();
+		for (const rawModel of p.availableModels) {
+			const base = stripEngineSuffix(rawModel);
+			if (seenBases.has(base)) continue;
+			seenBases.add(base);
+			const preferredModel = resolveProviderModelVariant(p.availableModels, base, "-acp") ?? rawModel;
+			byBaseModel.set(base, [...(byBaseModel.get(base) ?? []), { provider: p.id, model: preferredModel }]);
+		}
 	}
 	const backups: PoolConfig[] = [];
 	const single: SingleModel[] = [];
-	for (const [model, owners] of byModel) {
-		if (owners.length >= 2) backups.push({ id: safeId(model), name: model, candidates: owners.map(id => refOf(id, model)), strategy: "hybrid" });
-		else single.push({ ref: refOf(owners[0]!, model), provider: owners[0]!, model });
+	for (const [baseModel, entries] of byBaseModel) {
+		if (entries.length >= 2 && !isHighConsumptionModel(baseModel)) {
+			backups.push({
+				id: safeId(baseModel),
+				name: baseModel,
+				candidates: entries.map(e => refOf(e.provider, e.model)),
+				strategy: "hybrid",
+			});
+		} else {
+			for (const entry of entries) {
+				single.push({ ref: refOf(entry.provider, entry.model), provider: entry.provider, model: entry.model });
+			}
+		}
 	}
 	return { backups, single };
 }

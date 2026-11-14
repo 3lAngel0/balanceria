@@ -96,9 +96,13 @@ export function routeWithTrace(input: RouteInput): { candidate: Candidate; trace
 	if (candidates.length === 0) throw new Error("ai-balancer: a pool needs at least one candidate");
 	const rules = input.rules ?? defaultRules(input.strategy);
 	const available = (candidate: Candidate) => state.isAvailable(candidate.quotaKey, now);
-	// A provider may serve several models of a pool: prefer the exact model, else the first of the provider.
+	// A provider may serve several models of a pool: prefer the exact model (or canonical base without -acp/-cli), else the first of the provider.
+	const stripSuffix = (id: string) => id.replace(/-(acp|cli)$/i, "");
 	const byProvider = (provider: string | undefined, model?: string) =>
-		(model === undefined ? undefined : candidates.find(candidate => candidate.provider === provider && candidate.model === model)) ??
+		(model === undefined
+			? undefined
+			: candidates.find(candidate => candidate.provider === provider && candidate.model === model) ??
+			  candidates.find(candidate => candidate.provider === provider && stripSuffix(candidate.model) === stripSuffix(model))) ??
 		candidates.find(candidate => candidate.provider === provider);
 	const spentUntil = (candidate: Candidate) => `${label(candidate)} spent until ${isoTime(state.availableAt(candidate.quotaKey, now))}`;
 	const steps: TraceStep[] = [];

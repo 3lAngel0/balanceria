@@ -496,3 +496,43 @@ test("isOrchestratorMode and get/setProfileWorkflow support Gentle Shell 4.7.0 w
   assert.deepEqual(getProfileWorkflow(updated, "balanced"), { orchestratorMode: "full-delegation" });
   assert.equal(updated.workflow?.["balanced"]?.orchestratorMode, "full-delegation");
 });
+
+test("saveProfilesStore syncs active orchestrator to settings.json and resolves -acp/-cli model variants", () => {
+  const { dir, file } = profilesFile(JSON.stringify(SAMPLE_STORE, null, 2));
+  try {
+    const settingsFile = join(dir, "settings.json");
+    writeFileSync(
+      settingsFile,
+      JSON.stringify({ defaultProvider: "claude-bridge", defaultModel: "claude-fable-5-2", defaultThinkingLevel: "low" }, null, 2),
+    );
+    const next: ProfilesStore = {
+      ...SAMPLE_STORE,
+      profiles: {
+        ...SAMPLE_STORE.profiles,
+        balanced: {
+          ...SAMPLE_STORE.profiles.balanced,
+          orchestrator: { model: "antigravity/gemini-4-argon", thinking: "high" },
+        },
+      },
+    };
+    const acpOnlyHasModel = (provider: string, model: string) =>
+      `${provider}/${model}` === "antigravity/gemini-4-argon-acp" || KNOWN.has(`${provider}/${model}`);
+
+    saveProfilesStore(next, readOk(file), {
+      path: file,
+      settingsPath: settingsFile,
+      now: NOW,
+      hasModel: acpOnlyHasModel,
+    });
+
+    const savedProfiles = JSON.parse(readFileSync(file, "utf8")) as ProfilesStore;
+    assert.equal(savedProfiles.profiles.balanced.orchestrator.model, "antigravity/gemini-4-argon-acp");
+
+    const savedSettings = JSON.parse(readFileSync(settingsFile, "utf8")) as Record<string, unknown>;
+    assert.equal(savedSettings.defaultProvider, "antigravity");
+    assert.equal(savedSettings.defaultModel, "gemini-4-argon-acp");
+    assert.equal(savedSettings.defaultThinkingLevel, "high");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

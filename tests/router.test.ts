@@ -92,3 +92,20 @@ test("waterfall strategy strictly enforces candidate order regardless of quota f
 	});
 	assert.equal(choice.provider, "antigravity");
 });
+
+test("sticky continuation matches provider candidate across -acp/-cli engine suffixes", () => {
+	const state = new QuotaState();
+	const candidates: Candidate[] = [
+		{ provider: "antigravity", model: "gemini-3-8-flash", quotaKey: "antigravity/flash" },
+		{ provider: "antigravity", model: "gemini-4-argon", quotaKey: "antigravity/pro" },
+	];
+	const choice = chooseCandidate({
+		reason: "continuation",
+		previousProvider: "antigravity",
+		previousModel: "gemini-4-argon-acp",
+		candidates,
+		state,
+		now: NOW,
+	});
+	assert.equal(choice.model, "gemini-4-argon");
+});

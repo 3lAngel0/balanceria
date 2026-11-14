@@ -78,7 +78,7 @@ import { failoverAlternative, routeWithTrace, type Candidate } from "./router.ts
 import { fitWindows, formatSwitchCostReport, routeSwitchCost, type WindowFit } from "./switch-cost.ts";
 import { DecisionChanges, routeDecision } from "./route-log.ts";
 import { CircuitBreaker } from "./circuit-breaker.ts";
-import { runSetupWizard, detectSystemProviders, generateRecommendedConfig, saveProfileRoles, writeConfigSafely, toggleCandidateInList, moveCandidateInList, type DetectedProvider, type PoolConfig } from "./setup.ts";
+import { runSetupWizard, detectSystemProviders, generateRecommendedConfig, resolveModelInCatalog, saveProfileRoles, writeConfigSafely, toggleCandidateInList, moveCandidateInList, type DetectedProvider, type PoolConfig } from "./setup.ts";
 import { buildSessionDetail, buildWebReport, readSessionCwd, snapshotSessionIds, type WebReport } from "./web-data.ts";
 import { webSnapshotHtml } from "./web-page.ts";
 import { bindWebHandlers, formatServeStart, isValidSessionId, parseServeArgs, runningWebServer, sshTunnelHint, startServing, stopServing, type WebHandlers } from "./web-serve.ts";
@@ -428,6 +428,50 @@ export default function aiBalancer(pi: ExtensionAPI) {
 
 	const registeredPools = new Set<string>();
 
+	function resolveCatalogModel(ctx: ExtensionContext, provider: string, model: string) {
+		const exact = ctx.modelRegistry.find(provider, model);
+		if (exact) return exact;
+		const resolved = resolveModelInCatalog(provider, model, (p, m) => Boolean(ctx.modelRegistry.find(p, m)), "-acp");
+		return resolved !== model ? ctx.modelRegistry.find(provider, resolved) : undefined;
+	}
+
+	function hasCatalogModel(ctx: ExtensionContext, provider: string, model: string): boolean {
+		if (provider === POOL_PROVIDER) {
+			return Boolean(ctx.modelRegistry.find(provider, model)) || getLivePools().pools.some(pool => pool.id === model);
+		}
+		return Boolean(resolveCatalogModel(ctx, provider, model));
+	}
+
+	function syncActiveOrchestratorModel(ctx: ExtensionContext, store?: ProfilesStore | null): void {
+		for (const p of getLivePools().pools) registerPool(p);
+		const activeStore = store ?? loadProfilesStore();
+		const activeName = activeStore?.active;
+		const orch = activeName ? activeStore?.profiles?.[activeName]?.orchestrator : undefined;
+		const modelText = typeof orch?.model === "string" ? orch.model.trim() : "";
+		const slash = modelText.indexOf("/");
+		if (slash > 0 && slash < modelText.length - 1) {
+			const provider = modelText.slice(0, slash);
+			const modelId = modelText.slice(slash + 1);
+			const target = provider === POOL_PROVIDER
+				? ctx.modelRegistry.find(POOL_PROVIDER, modelId)
+				: resolveCatalogModel(ctx, provider, modelId);
+			if (target && typeof pi.setModel === "function" && (ctx.model?.provider !== target.provider || ctx.model?.id !== target.id)) {
+				void Promise.resolve(pi.setModel(target)).catch(() => {});
+			}
+		}
+		const thinking = typeof orch?.thinking === "string" ? orch.thinking.trim() : "";
+		if (
+			(thinking === "off" || thinking === "minimal" || thinking === "low" || thinking === "medium" || thinking === "high" || thinking === "xhigh") &&
+			typeof pi.setThinkingLevel === "function"
+		) {
+			try {
+				pi.setThinkingLevel(thinking);
+			} catch {
+				// Ignore if host does not support setThinkingLevel in current state.
+			}
+		}
+	}
+
 	function registerPool(pool: Pool) {
 		if (registeredPools.has(pool.id)) return;
 		registeredPools.add(pool.id);
@@ -521,8 +565,9 @@ export default function aiBalancer(pi: ExtensionAPI) {
 						// A journal failure never blocks the request.
 					}
 				}
-				const model = ctx.modelRegistry.find(choice.provider, choice.model);
+				const model = resolveCatalogModel(ctx, choice.provider, choice.model);
 				if (!model) throw new Error(`ai-balancer: ${choice.provider}/${choice.model} is not in the model catalog`);
+				if (model.id !== choice.model) choice = { ...choice, model: model.id };
 				if (decisionChanges.changed(pool.id, `${choice.provider}/${choice.model}`, trace.decidedBy)) {
 					try {
 						if (!current) throw new Error("no session");
@@ -992,7 +1037,7 @@ export default function aiBalancer(pi: ExtensionAPI) {
 		const result = applySuggestionToProfile(store, base, newProfileName, { ...selected, target: { ...selected.target, cheaperModel: cheaper } });
 		if (!result.changed) return result.description;
 		try {
-			const { backup } = saveProfilesStore(result.store, read, { hasModel: (provider, model) => Boolean(ctx.modelRegistry.find(provider, model)) });
+			const { backup } = saveProfilesStore(result.store, read, { hasModel: (provider, model) => hasCatalogModel(ctx, provider, model) });
 			return `profile "${newProfileName}" created (backup: ${basename(backup)})`;
 		} catch (err) {
 			return `failed to save profile: ${err instanceof Error ? err.message : String(err)}`;
@@ -1364,7 +1409,8 @@ export default function aiBalancer(pi: ExtensionAPI) {
 											store.profiles[activeProfileName] = currentProfile;
 											try {
 												const read = readProfiles();
-												saveProfilesStore(store, read, { hasModel: (p, m) => Boolean(ctx.modelRegistry.find(p, m)) });
+												saveProfilesStore(store, read, { hasModel: (p, m) => hasCatalogModel(ctx, p, m) });
+												syncActiveOrchestratorModel(ctx, store);
 											} catch {
 												// Non-fatal if model is not in local registry.
 											}
@@ -1415,7 +1461,8 @@ export default function aiBalancer(pi: ExtensionAPI) {
 									store.profiles[activeProfileName] = currentProfile;
 									try {
 										const read = readProfiles();
-										saveProfilesStore(store, read, { hasModel: (p, m) => Boolean(ctx.modelRegistry.find(p, m)) });
+										saveProfilesStore(store, read, { hasModel: (p, m) => hasCatalogModel(ctx, p, m) });
+										syncActiveOrchestratorModel(ctx, store);
 										note = `Assigned ${currentRole.role} → ${chosenModel}`;
 									} catch (err) {
 										note = `Failed to assign model: ${err instanceof Error ? err.message : String(err)}`;
@@ -1452,7 +1499,8 @@ export default function aiBalancer(pi: ExtensionAPI) {
 								store.profiles[activeProfileName] = currentProfile;
 								try {
 									const read = readProfiles();
-									saveProfilesStore(store, read, { hasModel: (p, m) => Boolean(ctx.modelRegistry.find(p, m)) });
+									saveProfilesStore(store, read, { hasModel: (p, m) => hasCatalogModel(ctx, p, m) });
+									syncActiveOrchestratorModel(ctx, store);
 									note = `Set ${currentRole.role} thinking to ${nextThinking}`;
 								} catch (err) {
 									note = `Failed to save thinking: ${err instanceof Error ? err.message : String(err)}`;
@@ -1484,7 +1532,8 @@ export default function aiBalancer(pi: ExtensionAPI) {
 								store.profiles[activeProfileName] = currentProfile;
 								try {
 									const read = readProfiles();
-									saveProfilesStore(store, read, { hasModel: (p, m) => Boolean(ctx.modelRegistry.find(p, m)) });
+									saveProfilesStore(store, read, { hasModel: (p, m) => hasCatalogModel(ctx, p, m) });
+									syncActiveOrchestratorModel(ctx, store);
 									note = `Assigned ${currentRole.role} → ${nextModel}`;
 								} catch (err) {
 									note = `Failed to assign model: ${err instanceof Error ? err.message : String(err)}`;
@@ -1504,7 +1553,8 @@ export default function aiBalancer(pi: ExtensionAPI) {
 									store.profiles[activeProfileName] = currentProfile;
 									try {
 										const read = readProfiles();
-										saveProfilesStore(store, read, { hasModel: (p, m) => Boolean(ctx.modelRegistry.find(p, m)) });
+										saveProfilesStore(store, read, { hasModel: (p, m) => hasCatalogModel(ctx, p, m) });
+										syncActiveOrchestratorModel(ctx, store);
 										note = `Applied recommendation to ${rec.role} → ${rec.recommendedModel} (${rec.thinking})`;
 									} catch (err) {
 										note = `Failed to apply: ${err instanceof Error ? err.message : String(err)}`;
@@ -1663,7 +1713,8 @@ export default function aiBalancer(pi: ExtensionAPI) {
 									);
 									try {
 										const read = readProfiles();
-										saveProfilesStore(store, read, { hasModel: (p, m) => Boolean(ctx.modelRegistry.find(p, m)) });
+										saveProfilesStore(store, read, { hasModel: (p, m) => hasCatalogModel(ctx, p, m) });
+										syncActiveOrchestratorModel(ctx, store);
 										note = `Applied all ${advisor.recommendations.length} recommendations to profile "${activeProfileName}"!`;
 									} catch (err) {
 										note = `Failed to apply recommendations: ${err instanceof Error ? err.message : String(err)}`;
@@ -1825,7 +1876,7 @@ export default function aiBalancer(pi: ExtensionAPI) {
 
 	const runClassicSetup = (ctx: ExtensionContext): Promise<boolean> =>
 		runSetupWizard(ctx, ROOT, {
-			hasModel: (provider, model) => Boolean(ctx.modelRegistry.find(provider, model)),
+			hasModel: (provider, model) => hasCatalogModel(ctx, provider, model),
 			agyBin: AGY_BIN,
 			onOpenControlCenter: () => openControlCenter(ctx),
 		});
@@ -2028,10 +2079,11 @@ export default function aiBalancer(pi: ExtensionAPI) {
 				current,
 				profilesPath: DEFAULT_PROFILES_PATH,
 				writeConfig: writeConfigSafely,
-				writeProfiles: (name, roles, workflow) => saveProfileRoles(DEFAULT_PROFILES_PATH, name, roles, (provider, model) => Boolean(ctx.modelRegistry.find(provider, model)), workflow),
+				writeProfiles: (name, roles, workflow) => saveProfileRoles(DEFAULT_PROFILES_PATH, name, roles, (provider, model) => hasCatalogModel(ctx, provider, model), workflow),
 			});
 			const settled = settleInstallSnapshot(snapshot, result, nodeInstallFs);
 			if (settled.keep) installerSnapshots.push(snapshot);
+			if (result.ok) syncActiveOrchestratorModel(ctx);
 			return result.ok ? { ok: true, written: result.written, backups: settled.backups, profilesError: result.profilesError, grantsError: result.grantsError } : { ok: false, error: result.error ?? "", backups: settled.backups };
 		},
 		undo: backups => {
@@ -2293,7 +2345,7 @@ export default function aiBalancer(pi: ExtensionAPI) {
 		};
 		const store = loadProfilesStore();
 		const current: StepperCurrent = { pools: readJson("pools.json"), integrations: readJson("integrations.json"), profiles: store };
-		const recommended = generateRecommendedConfig(detected.filter(p => p.detected), { hasModel: (provider, model) => Boolean(ctx.modelRegistry.find(provider, model)) }).pools;
+		const recommended = generateRecommendedConfig(detected.filter(p => p.detected), { hasModel: (provider, model) => hasCatalogModel(ctx, provider, model) }).pools;
 		let screen = initScreen(initStepper(detected, recommended, store?.profiles?.[store.active ?? ""] ?? {}, store?.workflow?.[store.active ?? ""]), current);
 
 		const effect = await ctx.ui.custom<"save" | "cancel" | "discard" | "none">(
@@ -2361,12 +2413,13 @@ export default function aiBalancer(pi: ExtensionAPI) {
 			current,
 			profilesPath: DEFAULT_PROFILES_PATH,
 			writeConfig: writeConfigSafely,
-			writeProfiles: (name, roles, workflow) => saveProfileRoles(DEFAULT_PROFILES_PATH, name, roles, (provider, model) => Boolean(ctx.modelRegistry.find(provider, model)), workflow),
+			writeProfiles: (name, roles, workflow) => saveProfileRoles(DEFAULT_PROFILES_PATH, name, roles, (provider, model) => hasCatalogModel(ctx, provider, model), workflow),
 		});
 		if (!result.ok) {
 			ctx.ui.notify(`ai-balancer: ${t("setup.stepper.saveFailed", { error: result.error ?? "" })}`, "error");
 			return;
 		}
+		syncActiveOrchestratorModel(ctx);
 		if (result.profilesError) ctx.ui.notify(`ai-balancer: ${t("setup.stepper.profilesFailed", { error: result.profilesError })}`, "warning");
 		ctx.ui.notify(`ai-balancer: ${t("setup.stepper.saved", { files: result.written.join(", ") })}${result.backups.length ? ` (backups: ${result.backups.join(", ")})` : ""}`, "info");
 		refreshStatus(ctx);
@@ -2547,7 +2600,7 @@ export default function aiBalancer(pi: ExtensionAPI) {
 				const result = applyDraft({
 					paths,
 					dataDir: DATA_DIR,
-					hasModel: (p, m) => Boolean(ctx.modelRegistry.find(p, m)),
+					hasModel: (p, m) => hasCatalogModel(ctx, p, m),
 				});
 				const filesDesc = result.files.map(f => `${basename(f.path)} (backup ${basename(f.backup)})`).join(", ");
 				const poolsNote = result.files.some(f => f.path === paths.poolsPath) ? " pools.json takes effect after /reload or a Pi restart." : "";
@@ -2620,8 +2673,7 @@ export default function aiBalancer(pi: ExtensionAPI) {
 						return;
 					}
 					// A pool target is one of this balancer's virtual models.
-					const hasModel = (p: string, m: string) =>
-						p === POOL_PROVIDER ? getLivePools().pools.some(pool => pool.id === m) : ctx.modelRegistry.find(p, m) !== undefined;
+					const hasModel = (p: string, m: string) => hasCatalogModel(ctx, p, m);
 					keepLoanInProfile(loan, read, { path: DEFAULT_PROFILES_PATH, now, hasModel });
 				}
 				writeLoans(DATA_DIR, nextLoans);

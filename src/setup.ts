@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, writeFileSync, copyFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, copyFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { execSync } from "node:child_process";
 import { homedir } from "node:os";
@@ -188,6 +188,75 @@ export function normalizePackageName(pkg: string): string {
 }
 
 /**
+ * Strips engine suffixes (`-acp` or `-cli`) added by modular bridges like `@3d24rd0/pi-antigravity-bridge`.
+ */
+export function stripEngineSuffix(modelId: string): string {
+	return modelId.replace(/-(acp|cli)$/i, "");
+}
+
+/**
+ * True when a model (or `provider/model` ref) belongs to an ultra-high quota consumption family (`claude-fable-*`).
+ */
+export function isHighConsumptionModel(modelOrRef: string): boolean {
+	const model = modelOrRef.includes("/") ? modelOrRef.slice(modelOrRef.indexOf("/") + 1) : modelOrRef;
+	return /fable/i.test(model);
+}
+
+/**
+ * Resolves the concrete model id exposed by a provider for a requested model or canonical base id.
+ * Prefers `-acp` over `-cli` by default when the exact requested id is not in `availableModels`.
+ */
+export function resolveProviderModelVariant(
+	availableModels: readonly string[],
+	requestedModel: string,
+	preferredSuffix: "-acp" | "-cli" = "-acp",
+): string | undefined {
+	if (availableModels.includes(requestedModel)) return requestedModel;
+	const base = stripEngineSuffix(requestedModel);
+	const altSuffix = preferredSuffix === "-acp" ? "-cli" : "-acp";
+	for (const candidate of [`${base}${preferredSuffix}`, `${base}${altSuffix}`, base]) {
+		if (availableModels.includes(candidate)) return candidate;
+	}
+	return undefined;
+}
+
+/**
+ * Resolves a `provider/model` ref against a provider's available models (or a lookup callback),
+ * returning the matching variant (`-acp`, `-cli`, or bare) if found, or the original ref.
+ */
+export function resolveModelInCatalog(
+	provider: string,
+	model: string,
+	hasModel: (provider: string, model: string) => boolean,
+	preferredSuffix: "-acp" | "-cli" = "-acp",
+): string | undefined {
+	if (hasModel(provider, model)) return model;
+	const base = stripEngineSuffix(model);
+	const altSuffix = preferredSuffix === "-acp" ? "-cli" : "-acp";
+	for (const candidate of [`${base}${preferredSuffix}`, `${base}${altSuffix}`, base]) {
+		if (hasModel(provider, candidate)) return candidate;
+	}
+	return undefined;
+}
+
+function findInstalledBridgePackage(agentDir: string, normalizedPackages: ReadonlySet<string>, baseName: string): string | undefined {
+	const fromSettings = [...normalizedPackages].find(p => p === baseName || p.endsWith(`/${baseName}`));
+	if (fromSettings) return fromSettings;
+	const nmDir = join(agentDir, "npm", "node_modules");
+	if (!existsSync(nmDir)) return undefined;
+	if (existsSync(join(nmDir, baseName))) return baseName;
+	try {
+		for (const entry of readdirSync(nmDir)) {
+			if (!entry.startsWith("@")) continue;
+			if (existsSync(join(nmDir, entry, baseName))) return `${entry}/${baseName}`;
+		}
+	} catch {
+		// Ignore unreadable node_modules
+	}
+	return undefined;
+}
+
+/**
  * Resolves Pi agent configuration directory in priority order:
  * 1. Explicit agentDir option
  * 2. PI_CODING_AGENT_DIR environment variable
@@ -259,18 +328,20 @@ export function detectSystemProviders(options?: DetectOptions): DetectedProvider
 	// 1. Antigravity (agy)
 	let agyFound = false;
 	let agySource = "Not found in PATH or settings";
-	if (checkWhich("agy")) {
+	const agyPkg = findInstalledBridgePackage(agentDir, normalizedPackages, "pi-antigravity-bridge");
+	const agyLiveModels = options?.modelsFor?.("antigravity") ?? [];
+	if (agyPkg) {
+		agyFound = true;
+		agySource = `Pi package '${agyPkg}'`;
+	} else if (checkWhich("agy")) {
 		agyFound = true;
 		agySource = "CLI binary 'agy'";
 	} else if (existsSync(join(home, ".local", "bin", "agy"))) {
 		agyFound = true;
 		agySource = "Binary ~/.local/bin/agy";
-	} else if (normalizedPackages.has("@estebanforge/pi-antigravity-bridge")) {
+	} else if (agyLiveModels.length > 0) {
 		agyFound = true;
-		agySource = "Pi package '@estebanforge/pi-antigravity-bridge'";
-	} else if (normalizedPackages.has("pi-antigravity-bridge")) {
-		agyFound = true;
-		agySource = "Pi package 'pi-antigravity-bridge'";
+		agySource = "Pi model registry (antigravity)";
 	}
 
 	providers.push({
@@ -279,15 +350,17 @@ export function detectSystemProviders(options?: DetectOptions): DetectedProvider
 		kind: "subscription",
 		detected: agyFound,
 		source: agySource,
-		availableModels: ["claude-opus-5-5", "claude-sonnet-5-5", "gemini-4-argon", "gemini-3-8-flash"],
+		availableModels:
+			agyLiveModels.length > 0
+				? [...agyLiveModels]
+				: ["claude-opus-5-5", "claude-sonnet-5-5", "gemini-4-argon", "gemini-3-8-flash"],
 	});
 
 	// 2. Claude Bridge
 	let bridgeFound = false;
 	let bridgeSource = "Optional bridge (not installed in packages)";
-	const bridgePkg = [...normalizedPackages].find(
-		p => p === "pi-claude-bridge" || p.endsWith("/pi-claude-bridge"),
-	);
+	const bridgePkg = findInstalledBridgePackage(agentDir, normalizedPackages, "pi-claude-bridge");
+	const bridgeLiveModels = options?.modelsFor?.("claude-bridge") ?? [];
 	if (bridgePkg) {
 		bridgeFound = true;
 		bridgeSource = `Pi package '${bridgePkg}'`;
@@ -297,6 +370,9 @@ export function detectSystemProviders(options?: DetectOptions): DetectedProvider
 	} else if (existsSync(join(home, ".local", "share", "pi", "extensions", "pi-claude-bridge"))) {
 		bridgeFound = true;
 		bridgeSource = "Pi extension ~/.local/share/pi/extensions/pi-claude-bridge";
+	} else if (bridgeLiveModels.length > 0) {
+		bridgeFound = true;
+		bridgeSource = "Pi model registry (claude-bridge)";
 	}
 
 	providers.push({
@@ -305,18 +381,25 @@ export function detectSystemProviders(options?: DetectOptions): DetectedProvider
 		kind: "subscription",
 		detected: bridgeFound,
 		source: bridgeSource,
-		availableModels: ["claude-opus-5-5", "claude-sonnet-5-5", "claude-3-7-sonnet"],
+		availableModels:
+			bridgeLiveModels.length > 0
+				? [...bridgeLiveModels]
+				: ["claude-opus-5-5", "claude-sonnet-5-5", "claude-3-7-sonnet"],
 	});
 
 	// 3. Claude Code
 	let claudeCodeFound = false;
 	let claudeCodeSource = "Not found in PATH";
+	const claudeCodeLiveModels = options?.modelsFor?.("claude-code") ?? [];
 	if (checkWhich("claude")) {
 		claudeCodeFound = true;
 		claudeCodeSource = "CLI binary 'claude'";
 	} else if (normalizedPackages.has("claude-code") || normalizedPackages.has("@anthropic-ai/claude-code")) {
 		claudeCodeFound = true;
 		claudeCodeSource = "Pi package 'claude-code'";
+	} else if (claudeCodeLiveModels.length > 0) {
+		claudeCodeFound = true;
+		claudeCodeSource = "Pi model registry (claude-code)";
 	}
 
 	providers.push({
@@ -325,18 +408,22 @@ export function detectSystemProviders(options?: DetectOptions): DetectedProvider
 		kind: "subscription",
 		detected: claudeCodeFound,
 		source: claudeCodeSource,
-		availableModels: ["claude-3-7-sonnet"],
+		availableModels: claudeCodeLiveModels.length > 0 ? [...claudeCodeLiveModels] : ["claude-3-7-sonnet"],
 	});
 
 	// 4. OpenCode
 	let openCodeFound = false;
 	let openCodeSource = "Not found in PATH";
+	const openCodeLiveModels = options?.modelsFor?.("opencode") ?? [];
 	if (checkWhich("opencode")) {
 		openCodeFound = true;
 		openCodeSource = "CLI binary 'opencode'";
 	} else if (normalizedPackages.has("opencode") || normalizedPackages.has("opencode-ai")) {
 		openCodeFound = true;
 		openCodeSource = "Pi package 'opencode'";
+	} else if (openCodeLiveModels.length > 0) {
+		openCodeFound = true;
+		openCodeSource = "Pi model registry (opencode)";
 	}
 
 	providers.push({
@@ -345,7 +432,7 @@ export function detectSystemProviders(options?: DetectOptions): DetectedProvider
 		kind: "subscription",
 		detected: openCodeFound,
 		source: openCodeSource,
-		availableModels: ["opencode-code-v1"],
+		availableModels: openCodeLiveModels.length > 0 ? [...openCodeLiveModels] : ["opencode-code-v1"],
 	});
 
 	// 5. Ollama / Local
@@ -427,6 +514,13 @@ export function generateRecommendedConfig(
 		);
 	}
 
+	const byId = new Map(selected.map(p => [p.id, p]));
+	const refFor = (providerId: string, baseModel: string): string => {
+		const p = byId.get(providerId);
+		const resolved = p ? resolveProviderModelVariant(p.availableModels, baseModel, "-acp") : undefined;
+		return `${providerId}/${resolved ?? baseModel}`;
+	};
+
 	const hasAgy = selectedIds.has("antigravity");
 	const hasBridge = selectedIds.has("claude-bridge");
 	const hasClaudeCode = selectedIds.has("claude-code");
@@ -437,10 +531,10 @@ export function generateRecommendedConfig(
 
 	// 1. Opus 5.5 pool
 	const opusCandidates: string[] = [];
-	if (hasAgy) opusCandidates.push("antigravity/claude-opus-5-5");
-	if (hasBridge) opusCandidates.push("claude-bridge/claude-opus-5-5");
-	if (hasAgy) opusCandidates.push("antigravity/gemini-4-argon");
-	if (hasOllama) opusCandidates.push("ollama/qwen2.5-coder");
+	if (hasAgy) opusCandidates.push(refFor("antigravity", "claude-opus-5-5"));
+	if (hasBridge) opusCandidates.push(refFor("claude-bridge", "claude-opus-5-5"));
+	if (hasAgy) opusCandidates.push(refFor("antigravity", "gemini-4-argon"));
+	if (hasOllama) opusCandidates.push(refFor("ollama", "qwen2.5-coder"));
 
 	// If no candidates matched selected providers (e.g. empty selection), provide standard defaults
 	const finalOpusCandidates = opusCandidates.length > 0
@@ -457,10 +551,10 @@ export function generateRecommendedConfig(
 
 	// 2. Sonnet 5.5 pool
 	const sonnetCandidates: string[] = [];
-	if (hasAgy) sonnetCandidates.push("antigravity/claude-sonnet-5-5");
-	if (hasBridge) sonnetCandidates.push("claude-bridge/claude-sonnet-5-5");
-	if (hasClaudeCode) sonnetCandidates.push("claude-code/claude-3-7-sonnet");
-	if (hasAgy) sonnetCandidates.push("antigravity/gemini-3-8-flash");
+	if (hasAgy) sonnetCandidates.push(refFor("antigravity", "claude-sonnet-5-5"));
+	if (hasBridge) sonnetCandidates.push(refFor("claude-bridge", "claude-sonnet-5-5"));
+	if (hasClaudeCode) sonnetCandidates.push(refFor("claude-code", "claude-3-7-sonnet"));
+	if (hasAgy) sonnetCandidates.push(refFor("antigravity", "gemini-3-8-flash"));
 
 	const finalSonnetCandidates = sonnetCandidates.length > 0
 		? sonnetCandidates
@@ -476,11 +570,11 @@ export function generateRecommendedConfig(
 
 	// 3. Orchestrator pool
 	const orchCandidates: string[] = [];
-	if (hasAgy) orchCandidates.push("antigravity/gemini-4-argon", "antigravity/gemini-3-8-flash");
-	if (hasBridge) orchCandidates.push("claude-bridge/claude-sonnet-5-5");
-	if (hasClaudeCode) orchCandidates.push("claude-code/claude-3-7-sonnet");
-	if (hasOpenCode) orchCandidates.push("opencode/opencode-code-v1");
-	if (hasOllama) orchCandidates.push("ollama/llama3.2");
+	if (hasAgy) orchCandidates.push(refFor("antigravity", "gemini-4-argon"), refFor("antigravity", "gemini-3-8-flash"));
+	if (hasBridge) orchCandidates.push(refFor("claude-bridge", "claude-sonnet-5-5"));
+	if (hasClaudeCode) orchCandidates.push(refFor("claude-code", "claude-3-7-sonnet"));
+	if (hasOpenCode) orchCandidates.push(refFor("opencode", "opencode-code-v1"));
+	if (hasOllama) orchCandidates.push(refFor("ollama", "llama3.2"));
 
 	const finalOrchCandidates = orchCandidates.length > 0
 		? orchCandidates
@@ -496,14 +590,25 @@ export function generateRecommendedConfig(
 
 	const strategy = options.strategy ?? "hybrid";
 	const skipped: string[] = [];
-	const known = (ref: string) => {
+	const normalizeCandidate = (ref: string): string | undefined => {
 		const slash = ref.indexOf("/");
-		const ok = !options.hasModel || options.hasModel(ref.slice(0, slash), ref.slice(slash + 1));
-		if (!ok && !skipped.includes(ref)) skipped.push(ref);
-		return ok;
+		if (slash <= 0) return undefined;
+		const provider = ref.slice(0, slash);
+		const model = ref.slice(slash + 1);
+		if (!options.hasModel) return ref;
+		const resolved = resolveModelInCatalog(provider, model, options.hasModel, "-acp");
+		if (!resolved) {
+			if (!skipped.includes(ref)) skipped.push(ref);
+			return undefined;
+		}
+		return `${provider}/${resolved}`;
 	};
 	const usable = pools
-		.map(pool => ({ ...pool, candidates: pool.candidates.filter(known), strategy }))
+		.map(pool => ({
+			...pool,
+			candidates: [...new Set(pool.candidates.map(normalizeCandidate).filter((c): c is string => Boolean(c)))],
+			strategy,
+		}))
 		.filter(pool => pool.candidates.length > 0);
 	return { integrations, pools: usable, skipped };
 }

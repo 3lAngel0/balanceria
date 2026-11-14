@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import type { ProfileConfig, RoleRoute } from "./profiles.ts";
-import type { DetectedProvider, PoolConfig } from "./setup.ts";
+import { isHighConsumptionModel, stripEngineSuffix, type DetectedProvider, type PoolConfig } from "./setup.ts";
 import { t } from "./i18n/index.ts";
 
 export type RoleCategory = "read" | "write" | "audit" | "orchestrate";
@@ -180,8 +180,20 @@ export function buildAvailableModelTargets(
 function firstAvailable(preferred: readonly string[], available: ReadonlySet<string>, fallback: string): string {
 	for (const item of preferred) {
 		if (available.has(item)) return item;
+		if (!item.startsWith("pool/")) {
+			const slash = item.indexOf("/");
+			if (slash > 0) {
+				const provider = item.slice(0, slash);
+				const base = stripEngineSuffix(item.slice(slash + 1));
+				for (const suffix of ["-acp", "-cli", ""]) {
+					const candidate = `${provider}/${base}${suffix}`;
+					if (available.has(candidate)) return candidate;
+				}
+			}
+		}
 	}
-	return [...available][0] ?? fallback;
+	const nonFable = [...available].find(ref => !isHighConsumptionModel(ref));
+	return nonFable ?? [...available][0] ?? fallback;
 }
 
 /**
