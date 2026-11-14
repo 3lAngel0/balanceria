@@ -342,6 +342,17 @@ function buildCompactAdvisorPrompt(input: AdvisorInput, availableTargets: readon
 }
 
 /**
+ * Converts a Pi model ref or id (`antigravity/gemini-3-8-flash-acp`, `gemini-3-8-flash`)
+ * into the model identifier `agy --model` accepts (`gemini-3.8-flash`, without `-acp`/`-cli`).
+ */
+export function toAgyModelId(modelOrRef: string): string {
+	const slash = modelOrRef.indexOf("/");
+	const raw = slash >= 0 ? modelOrRef.slice(slash + 1) : modelOrRef;
+	const base = stripEngineSuffix(raw);
+	return base.replace(/^gemini-(\d+)-(\d+)-/i, "gemini-$1.$2-");
+}
+
+/**
  * Runs a minimal-token (~300-500 tokens) CLI/LLM query via `agy` when available,
  * or a caller-provided runner, merging validated model recommendations over the
  * heuristic baseline. Never throws; falls back to heuristic on any error.
@@ -351,7 +362,7 @@ export function createDefaultCliAiRunner(agyBin = "agy", timeoutMs = 12_000): Li
 		new Promise((resolve, reject) => {
 			execFile(
 				agyBin,
-				["--model", "gemini-3-8-flash", "--print", prompt],
+				["--model", toAgyModelId("gemini-3-8-flash"), "--print", prompt],
 				{ timeout: timeoutMs },
 				(err, stdout) => {
 					if (err) return reject(err);
@@ -443,8 +454,7 @@ export function parseCliOutput(stdout: string): { text: string; tokens?: number 
  * can be read; without it the tokens are an estimate (`tokensExact` false). No shell is involved.
  */
 export function createModelCliAiRunner(modelRef: string, agyBin = "agy", timeoutMs = deepTimeoutMs(), claudeBin = "claude"): LightweightAiRunner {
-	const slash = modelRef.indexOf("/");
-	const model = slash >= 0 ? modelRef.slice(slash + 1) : modelRef;
+	const model = toAgyModelId(modelRef);
 	const run = (bin: string, args: string[], prompt: string) =>
 		new Promise<LightweightAiResponse>((resolve, reject) => {
 			execFile(bin, args, { timeout: timeoutMs, maxBuffer: 16 * 1024 * 1024 }, (err, stdout) => {

@@ -255,7 +255,7 @@ test("renderPanel and renderControlCenter display active profile, pool assignmen
 import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createModelCliAiRunner, parseCliOutput } from "../src/setup-advisor.ts";
+import { createDefaultCliAiRunner, createModelCliAiRunner, parseCliOutput, toAgyModelId } from "../src/setup-advisor.ts";
 
 /** A fake CLI: records its arguments next to itself, then runs `body` (a shell snippet). */
 function fakeCli(body: string): { bin: string; args(): string[]; cleanup(): void } {
@@ -268,14 +268,30 @@ function fakeCli(body: string): { bin: string; args(): string[]; cleanup(): void
 
 const ANSWER = '{"summary":"s","roles":{}}';
 
-test("the agy runner asks for JSON output and reports the exact usage the CLI gives", async () => {
+test("the agy runner asks for JSON output, normalizes Pi model ids for agy CLI, and reports the exact usage the CLI gives", async () => {
 	const cli = fakeCli(`cat <<'EOF'\n${JSON.stringify({ response: ANSWER, usageMetadata: { promptTokenCount: 700, candidatesTokenCount: 142, totalTokenCount: 842 } })}\nEOF`);
 	try {
-		const out = await createModelCliAiRunner("antigravity/gemini-3-8-flash", cli.bin, 5000)("the prompt");
+		const out = await createModelCliAiRunner("antigravity/gemini-3-8-flash-acp", cli.bin, 5000)("the prompt");
 		assert.deepEqual(out, { text: ANSWER, tokensUsed: 842, tokensExact: true });
 		const args = cli.args();
-		assert.deepEqual(args.slice(0, 4), ["--model", "gemini-3-8-flash", "--output-format", "json"]);
+		assert.deepEqual(args.slice(0, 4), ["--model", "gemini-3.8-flash", "--output-format", "json"]);
 		assert.ok(args.includes("--print") && args.includes("the prompt"));
+	} finally {
+		cli.cleanup();
+	}
+});
+
+test("toAgyModelId and createDefaultCliAiRunner translate Pi model ids to agy CLI model ids", async () => {
+	assert.equal(toAgyModelId("antigravity/gemini-3-8-flash"), "gemini-3.8-flash");
+	assert.equal(toAgyModelId("antigravity/gemini-3-8-flash-acp"), "gemini-3.8-flash");
+	assert.equal(toAgyModelId("gemini-3-8-flash-cli"), "gemini-3.8-flash");
+	assert.equal(toAgyModelId("antigravity/gemini-4-argon-acp"), "gemini-4-argon");
+	assert.equal(toAgyModelId("antigravity/claude-sonnet-5-5-cli"), "claude-sonnet-5-5");
+
+	const cli = fakeCli(`printf '%s' '${ANSWER}'`);
+	try {
+		await createDefaultCliAiRunner(cli.bin, 5000)("p");
+		assert.deepEqual(cli.args().slice(0, 2), ["--model", "gemini-3.8-flash"]);
 	} finally {
 		cli.cleanup();
 	}
