@@ -7,6 +7,7 @@ Each release bumps `version` in `package.json` and adds a `## [x.y.z]` heading h
 
 ### Fixed
 
+- False blocks: a quota error that states no reset (for example `RESOURCE_EXHAUSTED (code 429)` from Antigravity) on a key whose latest usage reading still shows margin no longer locks the model until the weekly reset. It gets a short cooldown of 6 minutes, then 30 minutes, then 2 hours, and a usage reading with margin no longer lifts it, which stops the model from being retried every few minutes. The pool still fails over to the next candidate immediately. Errors that state their reset keep locking until it.
 - When every candidate of a pool is spent and nothing can take over, the turn ends with a clear notice (English and Spanish) that names the pool and when the soonest candidate comes back, instead of the provider's raw quota text. It reaches subagents too, since it is the error they hand back. The session stays open and routes normally once a candidate reopens.
 
 ## [0.4.1] - 2026-11-12

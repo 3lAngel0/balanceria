@@ -613,12 +613,8 @@ export default function aiBalancer(pi: ExtensionAPI) {
 		const quota = classifyQuotaError(message.errorMessage);
 		if (!quota) return;
 		const key = quotaKeyFor(message.provider, message.model);
-		const knownReset = fold().state.snapshot().get(key)?.resetAt;
-		const until =
-			quota.resetInMs !== undefined ? Date.now() + quota.resetInMs :
-			knownReset !== undefined && knownReset > Date.now() ? knownReset :
-			undefined;
-		record({ type: "exhausted", ts: Date.now(), key, until, reason: (message.errorMessage ?? "").slice(0, 200) });
+		const { until, shortCooldown } = fold().state.quotaExhaustionFor(key, quota.resetInMs, Date.now(), quota.noStatedReset === true);
+		record({ type: "exhausted", ts: Date.now(), key, until, ...(shortCooldown ? { shortCooldown } : {}), reason: (message.errorMessage ?? "").slice(0, 200) });
 		try {
 			appendHistory(DATA_DIR, {
 				kind: "quota-error",
