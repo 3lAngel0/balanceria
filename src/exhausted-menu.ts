@@ -83,3 +83,45 @@ export function directQuotaSuggestion(input: {
 		?? input.pools.flatMap(p => p.candidates).find(usable);
 	return pick ? `${pick.provider}/${pick.model}` : undefined;
 }
+
+export interface ExhaustedPoolInput {
+	poolId: string;
+	/** Candidates of the pool, every one of them spent. */
+	candidates: readonly Candidate[];
+	state: Pick<QuotaState, "availableAt">;
+	now: number;
+	t: Translate;
+}
+
+const two = (n: number) => String(n).padStart(2, "0");
+
+/** Local time of day, with the date when it is not today. */
+function returnTime(at: number, now: number): string {
+	const date = new Date(at);
+	const clock = `${two(date.getHours())}:${two(date.getMinutes())}`;
+	const today = new Date(now);
+	const sameDay = date.getFullYear() === today.getFullYear() && date.getMonth() === today.getMonth() && date.getDate() === today.getDate();
+	return sameDay ? clock : `${date.getFullYear()}-${two(date.getMonth() + 1)}-${two(date.getDate())} ${clock}`;
+}
+
+/**
+ * What the user reads when every candidate of a pool is spent and nothing can take over: the pool and when the
+ * soonest candidate comes back. Worded without anything Pi retries on (rate limit, 429, timeout...), so the turn
+ * ends instead of looping on the spent pool.
+ */
+export function exhaustedPoolNotice(input: ExhaustedPoolInput): string {
+	let soonest: number | undefined;
+	for (const c of input.candidates) {
+		const at = input.state.availableAt(c.quotaKey, input.now);
+		if (at !== undefined && (soonest === undefined || at < soonest)) soonest = at;
+	}
+	return soonest === undefined
+		? input.t("ops.poolExhaustedNoTime", { pool: input.poolId })
+		: input.t("ops.poolExhausted", { pool: input.poolId, time: returnTime(soonest, input.now) });
+}
+
+/** The notice, and the error text the turn ends with: the notice replaces the provider's own text. */
+export function exhaustedPoolOutcome(input: ExhaustedPoolInput): { notice: string; errorMessage: string } {
+	const notice = exhaustedPoolNotice(input);
+	return { notice, errorMessage: notice };
+}

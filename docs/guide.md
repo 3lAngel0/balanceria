@@ -241,7 +241,7 @@ flowchart TD
     
     AltCheck -- No: All exhausted --> TripCB[Trip Circuit Breaker]
     TripCB --> SaveCkpt[Save checkpoint to data/circuit-breaker-checkpoint.json]
-    SaveCkpt --> NotifyUser[Notify User: All providers spent · Retries halted]
+    SaveCkpt --> NotifyUser[Replace the error with the pool-spent notice:<br>pool name + soonest return time · Retries halted]
     
     AltCheck -- Yes: Alternative found --> Rewrite[Rewrite error to retryable 429:<br><i>429 rate limit: ai-balancer failover, provider spent</i>]
     Rewrite --> PiRetry[Pi native retry engine triggers]
@@ -286,7 +286,7 @@ If all candidates in a pool are exhausted simultaneously, automated retries woul
 1. Detects that `failoverAlternative` returned `undefined`.
 2. Trips into `tripped = true`.
 3. Saves a persistent checkpoint in `data/circuit-breaker-checkpoint.json` with the session ID, project name, timestamp, and earliest reset deadline.
-4. Halts the retry loop and alerts the user in the UI.
+4. Ends the turn with a clear notice naming the pool and when the soonest candidate comes back (`ops.poolExhausted`), in place of the provider's own error text. The notice is shown in the UI and is also the error a subagent hands back, so it works without a UI. It avoids every word Pi retries on, so the turn ends instead of looping, and the session stays open: the next turn routes normally once a candidate reopens, with no reload.
 
 ---
 
@@ -799,4 +799,4 @@ Operational overlay showing real-time subscription burn velocity (`+X%/h`), rese
 **A**: In `~/.gentle-shell/config/gentle-ai/profiles.json`, configure the role with a direct physical model (e.g. `"model": "anthropic/claude-3-5-sonnet"`) instead of a `"pool/..."` string. Direct models bypass `ai-balancer` completely.
 
 ### Q: What happens if every provider in a pool runs out of quota?
-**A**: First, an active automatic loan for that pool moves its tasks to the borrowed model. Otherwise the configured last-resort model (`lastResort` in `pools.json`) answers automatically with a warning notice. If that is spent too (or none is set), the main session shows a menu to wait, pick any model of your subscriptions with quota left, compact, or cancel, and the Circuit Breaker activates: it halts automated retries, writes an emergency checkpoint to `data/circuit-breaker-checkpoint.json`, and alerts the user with the earliest reopening time.
+**A**: First, an active automatic loan for that pool moves its tasks to the borrowed model. Otherwise the configured last-resort model (`lastResort` in `pools.json`) answers automatically with a warning notice. If that is spent too (or none is set), the main session shows a menu to wait, pick any model of your subscriptions with quota left, compact, or cancel, and the Circuit Breaker activates: it halts automated retries, writes an emergency checkpoint to `data/circuit-breaker-checkpoint.json`, and ends the turn with a notice that names the pool and the earliest reopening time, also when there is no UI (subagents).

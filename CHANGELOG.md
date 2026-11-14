@@ -3,6 +3,12 @@
 Pi shows the entries newer than your installed version after `pi update`.
 Each release bumps `version` in `package.json` and adds a `## [x.y.z]` heading here.
 
+## [Unreleased]
+
+### Fixed
+
+- When every candidate of a pool is spent and nothing can take over, the turn ends with a clear notice (English and Spanish) that names the pool and when the soonest candidate comes back, instead of the provider's raw quota text. It reaches subagents too, since it is the error they hand back. The session stays open and routes normally once a candidate reopens.
+
 ## [0.4.1] - 2026-11-12
 
 ### Fixed

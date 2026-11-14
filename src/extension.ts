@@ -39,7 +39,7 @@ import { appendHistory, legacyRecords, pruneHistory, readHistory, type HistoryDa
 import { topConsumers, withAliases } from "./consumers.ts";
 import { HUD_VIEWS, hudHints, moveCursor, pressRedKey, renderHud, selectedSessionTarget, suggestionEnter, SESSIONS_PER_ROLE, visibleSessions, type HudViewName, type PendingConfirm } from "./hud.ts";
 import { runHudChoice, type HudChoice } from "./hud-actions.ts";
-import { buildExhaustedMenu, directQuotaSuggestion } from "./exhausted-menu.ts";
+import { buildExhaustedMenu, directQuotaSuggestion, exhaustedPoolOutcome } from "./exhausted-menu.ts";
 import { loadIntegrations } from "./integrations.ts";
 import { renderPanel, statusLine, statusWithContext, turnTelemetry, renderControlCenter, controlCenterButtons, controlCenterTabLabels, CONTROL_CENTER_TABS, type ControlCenterTab, type OverviewSessionRow, type TurnTelemetry } from "./panel.ts";
 import { ROLE_CATALOG, buildAvailableModelTargets, recommendRolesHeuristic, recommendRolesWithAdvisor, createDefaultCliAiRunner, createModelCliAiRunner, applyRecommendationsToProfile, type AdvisorReport } from "./setup-advisor.ts";
@@ -665,12 +665,13 @@ export default function aiBalancer(pi: ExtensionAPI) {
 				project: basename(ctx.sessionManager.getCwd()),
 				now: Date.now(),
 			});
-			if (ctx.hasUI) {
-				ctx.ui.notify(`ai-balancer: ALL CANDIDATES in pool/${pool.id} are exhausted! Circuit breaker tripped, session checkpointed.`, "error");
-			}
+			// Nothing can take over: the turn ends with a clear notice, in the UI and in the error a
+			// subagent hands back, instead of the provider's own text. Not retryable, so Pi does not loop.
+			const { notice, errorMessage } = exhaustedPoolOutcome({ poolId: pool.id, candidates: pool.candidates, state, now: Date.now(), t });
+			if (ctx.hasUI) ctx.ui.notify(notice, "error");
 			registerPoolUsage();
 			refreshStatus(ctx);
-			return;
+			return { message: { ...event.message, errorMessage } as typeof event.message };
 		}
 		const toLabel = `${alternative.provider}/${alternative.model}`;
 		const failoverNotice = t(quota.isStall ? "ops.failoverStall" : "ops.failoverQuota", {
