@@ -261,7 +261,13 @@ export async function startLanForwarder(targetPort: number, requestedPort = 0): 
 }
 
 /** Applies firewall rule if on Linux (firewalld / ufw) for the LAN network (non-interactive fallback). */
-export async function applyLanFirewall(port: number): Promise<{ success: boolean; command?: string; message: string }> {
+export async function applyLanFirewall(
+	port: number,
+	runner: (commandString: string) => Promise<void> = async cmd => {
+		const nonInteractive = cmd.replace(/\bsudo\s+/g, "sudo -n ");
+		await execFileAsync("sh", ["-c", nonInteractive]);
+	},
+): Promise<{ success: boolean; command?: string; message: string }> {
 	try {
 		const details = await getFirewallDetails(port);
 		if (details.kind === "none" || details.kind === "unknown") {
@@ -270,7 +276,7 @@ export async function applyLanFirewall(port: number): Promise<{ success: boolean
 		if (details.commands.length === 0) return { success: true, message: "No firewall commands needed." };
 
 		try {
-			await execFileAsync("sh", ["-c", details.commandString]);
+			await runner(details.commandString);
 			return { success: true, command: details.commandString, message: "Firewall rule applied successfully." };
 		} catch (err) {
 			return { success: false, command: details.commandString, message: err instanceof Error ? err.message : String(err) };
