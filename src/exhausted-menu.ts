@@ -83,3 +83,86 @@ export function directQuotaSuggestion(input: {
 		?? input.pools.flatMap(p => p.candidates).find(usable);
 	return pick ? `${pick.provider}/${pick.model}` : undefined;
 }
+
+export interface ExhaustedPoolInput {
+	poolId: string;
+	/** Candidates of the pool, every one of them spent. */
+	candidates: readonly Candidate[];
+	state: Pick<QuotaState, "availableAt">;
+	now: number;
+	t: Translate;
+}
+
+const two = (n: number) => String(n).padStart(2, "0");
+
+/** Local time of day, with the date when it is not today. */
+function returnTime(at: number, now: number): string {
+	const date = new Date(at);
+	const clock = `${two(date.getHours())}:${two(date.getMinutes())}`;
+	const today = new Date(now);
+	const sameDay = date.getFullYear() === today.getFullYear() && date.getMonth() === today.getMonth() && date.getDate() === today.getDate();
+	return sameDay ? clock : `${date.getFullYear()}-${two(date.getMonth() + 1)}-${two(date.getDate())} ${clock}`;
+}
+
+/**
+ * What the user reads when every candidate of a pool is spent and nothing can take over: the pool and when the
+ * soonest candidate comes back. Worded without anything Pi retries on (rate limit, 429, timeout...), so the turn
+ * ends instead of looping on the spent pool.
+ */
+export function exhaustedPoolNotice(input: ExhaustedPoolInput): string {
+	let soonest: number | undefined;
+	for (const c of input.candidates) {
+		const at = input.state.availableAt(c.quotaKey, input.now);
+		if (at !== undefined && (soonest === undefined || at < soonest)) soonest = at;
+	}
+	return soonest === undefined
+		? input.t("ops.poolExhaustedNoTime", { pool: input.poolId })
+		: input.t("ops.poolExhausted", { pool: input.poolId, time: returnTime(soonest, input.now) });
+}
+
+/** The notice, and the error text the turn ends with: the notice replaces the provider's own text. */
+export function exhaustedPoolOutcome(input: ExhaustedPoolInput): { notice: string; errorMessage: string } {
+	const notice = exhaustedPoolNotice(input);
+	return { notice, errorMessage: notice };
+}
+
+export interface ExhaustedDirectInput {
+	/** Spent model as the user knows it, e.g. `claude-bridge/claude-fable-5-2`. */
+	model: string;
+	exhaustedKey: string;
+	/** Return time stated by the error; falls back to what the quota state knows. */
+	until?: number;
+	/** The model stalled instead of running out of usage. */
+	stalled?: boolean;
+	lastResort?: Candidate;
+	/** Pools that really exist in the live configuration. */
+	pools: readonly { id: string; candidates: readonly Candidate[] }[];
+	state: Pick<QuotaState, "isAvailable" | "availableAt">;
+	now: number;
+	t: Translate;
+}
+
+/**
+ * What a session on a direct (non-pool) model reads when that model is spent: there is no failover, so it names the
+ * model, when it returns, and a way out that exists: an available alternative model and a pool that has
+ * something left to serve, never a pool by assumed name. A spent model's notice replaces the provider's text (so it
+ * is worded without anything Pi retries on); a stall leaves the provider's text untouched so Pi can retry it.
+ */
+export function exhaustedDirectOutcome(input: ExhaustedDirectInput): { notice: string; errorMessage?: string; suggestion?: string } {
+	const { t, now, state } = input;
+	const suggestion = directQuotaSuggestion({ exhaustedKey: input.exhaustedKey, lastResort: input.lastResort, pools: input.pools, state, now });
+	const pool = input.pools.find(p => p.candidates.some(c => c.quotaKey !== input.exhaustedKey && state.isAvailable(c.quotaKey, now)));
+	const way = !suggestion
+		? t("ops.directWayNone")
+		: pool
+			? t("ops.directWayAltPool", { to: suggestion, pool: pool.id })
+			: t("ops.directWayAlt", { to: suggestion });
+	const at = input.until ?? state.availableAt(input.exhaustedKey, now);
+	const notice = input.stalled
+		? t("ops.directStalled", { model: input.model, way })
+		: at === undefined
+			? t("ops.directExhaustedNoTime", { model: input.model, way })
+			: t("ops.directExhausted", { model: input.model, time: returnTime(at, now), way });
+	// A stall keeps the provider's own text: Pi retries it ("timed out"...), and a notice would end the turn.
+	return { notice, ...(input.stalled ? {} : { errorMessage: notice }), ...(suggestion ? { suggestion } : {}) };
+}

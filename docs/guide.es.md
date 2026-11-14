@@ -120,7 +120,7 @@ flowchart TD
 
 > [!IMPORTANT]
 > **Únicamente los roles asignados a un pool virtual (`pool/<id>`) son balanceados.**
-> Si un rol está configurado con un modelo directo (ej. `anthropic/claude-3-5-sonnet` o `antigravity/gemini-3-8-flash`), Gentle Shell invoca directamente a ese proveedor. `ai-balancer` queda fuera del flujo y no habrá failover automático ante agotamiento de cuota.
+> Si un rol está configurado con un modelo directo (ej. `anthropic/claude-3-5-sonnet` o `antigravity/gemini-3-8-flash`), Gentle Shell invoca directamente a ese proveedor. `ai-balancer` queda fuera del flujo y no habrá failover automático ante agotamiento de cuota. Cuando ese modelo directo agota su cupo, el turno termina con un aviso claro (también lo que devuelve un subagente) en lugar del texto crudo del proveedor: nombra el modelo, dice cuándo vuelve (o que no se sabe) y que la sesión sigue abierta. (Un cuelgue o timeout de un modelo directo conserva el error del proveedor para que Pi lo reintente; solo ves un aviso de "dejó de responder".) La salida que sugiere es real: un modelo alternativo con cupo y un pool con algún candidato disponible, si tu `pools.json` define alguno; si no, solo `/model` y `/balancer`.
 
 ### Perfiles vs. Pools vs. Bridges: La diferencia conceptual
 
@@ -241,7 +241,7 @@ flowchart TD
     
     AltCheck -- No: Todos agotados --> TripCB[Dispara Circuit Breaker]
     TripCB --> SaveCkpt[Guarda checkpoint en data/circuit-breaker-checkpoint.json]
-    SaveCkpt --> NotifyUser[Notifica a usuario: Proveedores agotados · Reintentos detenidos]
+    SaveCkpt --> NotifyUser[Reemplaza el error por el aviso de pool agotado:<br>nombre del pool + hora de reapertura · Reintentos detenidos]
     
     AltCheck -- Sí: Alternativa encontrada --> Rewrite[Reescribe error a 429 reintentable:<br><i>429 rate limit: ai-balancer failover, provider spent</i>]
     Rewrite --> PiRetry[Motor de reintento nativo de Pi se activa]
@@ -266,6 +266,7 @@ Patrones reconocidos:
 - **Claude Code CLI**: `"You're out of extra usage · resets 6:30pm"`.
 - **Límites de ritmo genéricos**: `"resource_exhausted"`, `"usage limit reached"`.
 - **Bloqueos de proceso y tiempos de espera (stalls)**: Procesos de CLI o bridges que se cuelgan sin emitir salida activan una clasificación de stall con un enfriamiento de 6 minutos (`DEFAULT_STALL_COOLDOWN_MS = 360_000`).
+- **Errores que no indican reset** (el genérico `RESOURCE_EXHAUSTED (code 429): Resource has been exhausted (e.g. check quota).`): si la última lectura de uso de esa clave de cuota todavía muestra margen, el 429 probablemente es momentáneo (capacidad del servidor o un tope que `agy /usage` no informa), así que la clave no se bloquea hasta el reset semanal/de 5 h. Recibe un enfriamiento corto y escalonado: 6 minutos, luego 30 minutos y 2 horas desde el tercer error consecutivo, la misma escalera que los stalls. Una lectura de uso con margen no lo levanta; un turno exitoso lo limpia y reinicia la escalera. El evento `exhausted` lleva `shortCooldown: true` para que todas las sesiones que pliegan `events.jsonl` coincidan. Los errores que indican su reset (`Resets in 154h55m28s`, `resets 1:50:00 AM`) siguen bloqueados hasta ese momento, y una clave sin margen (0 %) sigue adoptando el reset conocido. El modelo sigue pasando de inmediato al siguiente candidato.
 - **Qué tan rápido se detecta un stall**: lo decide el bridge de Antigravity, no `ai-balancer`. El bridge falla el turno con `agy stalled for <N>m with no output` después de `inactivityTimeoutMin` minutos sin salida (5 por defecto; se configura en `~/.pi/agent/antigravity-bridge/config.json` o con `AGY_INACTIVITY_TIMEOUT_MIN`, en minutos enteros, mínimo 1). Después, el pool cambia de modelo con el reintento normal de Pi. Los subagentes de Gentle AI se rinden a los 4 minutos aproximadamente si no reciben un primer evento, así que con 2 el pool alcanza a cambiar de modelo antes.
 
 ### La reescritura a 429
@@ -286,7 +287,7 @@ Si todos los candidatos de un pool se agotan en simultáneo, los reintentos auto
 1. Detecta que `failoverAlternative` devolvió `undefined`.
 2. Se activa pasando a estado disparado (`tripped = true`).
 3. Guarda un punto de control persistente en `data/circuit-breaker-checkpoint.json` con el ID de sesión, proyecto, marca temporal y tiempo límite de reapertura.
-4. Detiene el ciclo de reintentos y emite una alerta en la interfaz.
+4. Termina el turno con un aviso claro que nombra el pool y cuándo vuelve el primer candidato (`ops.poolExhausted`), en lugar del texto de error del proveedor. El aviso se muestra en la interfaz y es también el error que devuelve un subagente, así que funciona sin interfaz. Evita toda palabra que Pi reintenta, de modo que el turno termina sin ciclar, y la sesión sigue abierta: el siguiente turno se enruta normalmente cuando un candidato reabre, sin recargar.
 
 ---
 
@@ -799,4 +800,4 @@ Superposición operativa en terminal que muestra la velocidad de consumo de susc
 **R**: En `~/.gentle-shell/config/gentle-ai/profiles.json`, asigne al rol un modelo físico directo (ej. `"model": "anthropic/claude-3-5-sonnet"`) en lugar de `"pool/..."`. Los modelos directos omiten `ai-balancer` en su totalidad.
 
 ### P: ¿Qué sucede si todos los proveedores de un pool agotan su cuota?
-**R**: Primero, si hay un préstamo automático activo para ese pool, sus tareas pasan al modelo prestado. Si no, responde automáticamente el modelo final configurado (`lastResort` en `pools.json`), con un aviso. Si también está agotado (o no hay uno), la sesión principal muestra un menú para esperar, elegir cualquier modelo de sus suscripciones con cuota, compactar o cancelar, y se dispara el Circuit Breaker: detiene los reintentos automáticos, registra un punto de control de emergencia en `data/circuit-breaker-checkpoint.json` y alerta al usuario indicando el tiempo más cercano de reapertura.
+**R**: Primero, si hay un préstamo automático activo para ese pool, sus tareas pasan al modelo prestado. Si no, responde automáticamente el modelo final configurado (`lastResort` en `pools.json`), con un aviso. Si también está agotado (o no hay uno), la sesión principal muestra un menú para esperar, elegir cualquier modelo de sus suscripciones con cuota, compactar o cancelar, y se dispara el Circuit Breaker: detiene los reintentos automáticos, registra un punto de control de emergencia en `data/circuit-breaker-checkpoint.json` y termina el turno con un aviso que nombra el pool y el tiempo más cercano de reapertura, también sin interfaz (subagentes).

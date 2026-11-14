@@ -12,6 +12,7 @@ import { t } from "./i18n/index.ts";
 import { pixelBar, pixelText, type ColorMode, type PixelColor } from "./pixel.ts";
 import type { RoutingStrategy } from "./router.ts";
 import { ROLE_CATALOG, THINKING_DEFAULT, buildAvailableModelTargets, displayModel, displayThinking } from "./setup-advisor.ts";
+import { isHighConsumptionModel } from "./setup.ts";
 import {
 	SETUP_STEPS,
 	applyAutoAssignRoles,
@@ -172,7 +173,14 @@ const rowCells = (s: SetupStepperState, row: StepRow, mode: ColorMode = "none"):
 		const route = s.roles[row.role];
 		const model = displayModel(route?.model ?? "(unassigned)");
 		const level = route?.thinking ?? THINKING_DEFAULT;
-		const modelColor: PixelColor | undefined = route?.model === undefined ? "slate" : route.model.startsWith("pool/") ? "sky" : undefined;
+		const modelColor: PixelColor | undefined =
+			route?.model === undefined
+				? "slate"
+				: isHighConsumptionModel(route.model)
+					? "bad"
+					: route.model.startsWith("pool/")
+						? "sky"
+						: undefined;
 		return [
 			row.role,
 			modelColor ? pixelText(modelColor, model, mode) : model,
@@ -266,6 +274,9 @@ export function renderStepper(screen: StepperScreen, ui: StepperUi): StepperView
 		for (const warning of s.pools.map(poolCostWarning)) if (warning) body.push(...wrapIndented(`! ${warning}`, boxInner).map(line => paint("warn", line)));
 	}
 	if (s.step === "roles") body.push(...wrap(t("setup.stepper.rolesHint"), boxInner).map(line => paint("dim", line)));
+	if (s.step === "roles" && Object.values(s.roles).some(r => r?.model && isHighConsumptionModel(r.model))) {
+		body.push(...wrapIndented(`⚠ ${t("setup.fableWarning")}`, boxInner).map(line => pixelText("bad", line, mode)));
+	}
 	if (s.step === "roles" && s.advisorSummary) body.push(...wrap(t("setup.stepper.advisorSummary", { summary: s.advisorSummary }), boxInner).map(line => paint("dim", line)));
 	const headers = s.step === "providers" ? ["provider", "status", "source", "enabled"] : s.step === "roles" ? ["role", "model", "thinking"] : [];
 	const grid =

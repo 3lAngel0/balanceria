@@ -120,7 +120,7 @@ flowchart TD
 
 > [!IMPORTANT]
 > **Only roles assigned to a virtual pool (`pool/<id>`) are balanced.**
-> If a role is configured with a direct model (e.g. `anthropic/claude-3-5-sonnet` or `antigravity/gemini-3-8-flash`), Gentle Shell calls that provider directly. `ai-balancer` is bypassed completely, and automatic quota failover will not occur.
+> If a role is configured with a direct model (e.g. `anthropic/claude-3-5-sonnet` or `antigravity/gemini-3-8-flash`), Gentle Shell calls that provider directly. `ai-balancer` is bypassed completely, and automatic quota failover will not occur. When that direct model runs out of usage, the turn ends with a clear notice (also what a subagent hands back) instead of the provider's raw text: it names the model, says when it comes back (or that no time is known), and says the session is still open. (A stall or timeout on a direct model keeps the provider's own error so Pi can retry it; you only get a "stopped responding" notice.) The way out it suggests is real: an alternative model with quota left and a pool that has a candidate left, if your `pools.json` defines one, otherwise just `/model` and `/balancer`.
 
 ### Profiles vs. Pools vs. Bridges: The Key Difference
 
@@ -241,7 +241,7 @@ flowchart TD
     
     AltCheck -- No: All exhausted --> TripCB[Trip Circuit Breaker]
     TripCB --> SaveCkpt[Save checkpoint to data/circuit-breaker-checkpoint.json]
-    SaveCkpt --> NotifyUser[Notify User: All providers spent · Retries halted]
+    SaveCkpt --> NotifyUser[Replace the error with the pool-spent notice:<br>pool name + soonest return time · Retries halted]
     
     AltCheck -- Yes: Alternative found --> Rewrite[Rewrite error to retryable 429:<br><i>429 rate limit: ai-balancer failover, provider spent</i>]
     Rewrite --> PiRetry[Pi native retry engine triggers]
@@ -266,6 +266,7 @@ Recognized patterns:
 - **Claude Code CLI**: `"You're out of extra usage · resets 6:30pm"`.
 - **Generic Rate Limits**: `"resource_exhausted"`, `"usage limit reached"`.
 - **Process Stalls & Timeouts**: CLI or bridge processes that hang without output trigger a stall classification with a 6-minute cooldown (`DEFAULT_STALL_COOLDOWN_MS = 360_000`).
+- **Errors that state no reset** (the generic `RESOURCE_EXHAUSTED (code 429): Resource has been exhausted (e.g. check quota).`): when the latest usage reading of that quota key still shows margin, the 429 is probably momentary (server capacity or a cap `agy /usage` does not report), so the key is not locked until the weekly/5h reset. It gets a short escalating cooldown instead: 6 minutes, then 30 minutes, then 2 hours from the third consecutive error on, the same ladder as stalls. A usage reading with margin does not lift it; a successful turn clears it and restarts the ladder. The `exhausted` event carries `shortCooldown: true` so every session that folds `events.jsonl` agrees. Errors that state their reset (`Resets in 154h55m28s`, `resets 1:50:00 AM`) are still locked until it, and a key with no margin (0%) still adopts the known reset. The model still fails over to the next candidate right away.
 - **How fast a stall is detected**: the Antigravity bridge decides that, not `ai-balancer`. It fails a turn with `agy stalled for <N>m with no output` after `inactivityTimeoutMin` minutes without output (default 5; set it in `~/.pi/agent/antigravity-bridge/config.json` or with `AGY_INACTIVITY_TIMEOUT_MIN`, whole minutes, minimum 1). A pool then fails over through Pi's normal retry. Gentle AI subagents give up after about 4 minutes without a first event, so a value of 2 lets a pool switch models before that.
 
 ### The 429 Rewrite Trick
@@ -286,7 +287,7 @@ If all candidates in a pool are exhausted simultaneously, automated retries woul
 1. Detects that `failoverAlternative` returned `undefined`.
 2. Trips into `tripped = true`.
 3. Saves a persistent checkpoint in `data/circuit-breaker-checkpoint.json` with the session ID, project name, timestamp, and earliest reset deadline.
-4. Halts the retry loop and alerts the user in the UI.
+4. Ends the turn with a clear notice naming the pool and when the soonest candidate comes back (`ops.poolExhausted`), in place of the provider's own error text. The notice is shown in the UI and is also the error a subagent hands back, so it works without a UI. It avoids every word Pi retries on, so the turn ends instead of looping, and the session stays open: the next turn routes normally once a candidate reopens, with no reload.
 
 ---
 
@@ -799,4 +800,4 @@ Operational overlay showing real-time subscription burn velocity (`+X%/h`), rese
 **A**: In `~/.gentle-shell/config/gentle-ai/profiles.json`, configure the role with a direct physical model (e.g. `"model": "anthropic/claude-3-5-sonnet"`) instead of a `"pool/..."` string. Direct models bypass `ai-balancer` completely.
 
 ### Q: What happens if every provider in a pool runs out of quota?
-**A**: First, an active automatic loan for that pool moves its tasks to the borrowed model. Otherwise the configured last-resort model (`lastResort` in `pools.json`) answers automatically with a warning notice. If that is spent too (or none is set), the main session shows a menu to wait, pick any model of your subscriptions with quota left, compact, or cancel, and the Circuit Breaker activates: it halts automated retries, writes an emergency checkpoint to `data/circuit-breaker-checkpoint.json`, and alerts the user with the earliest reopening time.
+**A**: First, an active automatic loan for that pool moves its tasks to the borrowed model. Otherwise the configured last-resort model (`lastResort` in `pools.json`) answers automatically with a warning notice. If that is spent too (or none is set), the main session shows a menu to wait, pick any model of your subscriptions with quota left, compact, or cancel, and the Circuit Breaker activates: it halts automated retries, writes an emergency checkpoint to `data/circuit-breaker-checkpoint.json`, and ends the turn with a notice that names the pool and the earliest reopening time, also when there is no UI (subagents).

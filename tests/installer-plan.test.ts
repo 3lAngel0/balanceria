@@ -459,3 +459,11 @@ test("settleInstallSnapshot: a successful install keeps its snapshot", () => {
 	assert.deepEqual(settled.backups, snapshot.backups);
 	assert.ok(snapshot.backups[0]! in fs.files);
 });
+
+test("suggestBackups: canonicalizes -acp and -cli variants across providers, prefers -acp, and excludes claude-fable", () => {
+	const claudeWithFable = provider("claude-bridge", ["claude-fable-5-2", "claude-opus-5-5", "claude-sonnet-5-5"]);
+	const agyFork = provider("antigravity", ["claude-fable-5-2-cli", "claude-sonnet-5-5-cli", "gemini-4-argon-cli", "gemini-4-argon-acp"]);
+	const { backups } = suggestBackups([claudeWithFable, agyFork]);
+	assert.deepEqual(backups.map(b => b.id), ["claude-sonnet-5-5"]);
+	assert.deepEqual(backups[0]!.candidates, ["claude-bridge/claude-sonnet-5-5", "antigravity/claude-sonnet-5-5-cli"]);
+});

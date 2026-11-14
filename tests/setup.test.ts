@@ -1015,3 +1015,47 @@ for (const [label, profiles] of [
 		}
 	});
 }
+
+test("detectSystemProviders detects @3d24rd0/pi-antigravity-bridge and generateRecommendedConfig prefers -acp over -cli", () => {
+	const providers = detectSystemProviders({
+		settings: {
+			packages: [
+				"npm:pi-claude-bridge",
+				"npm:@3d24rd0/pi-antigravity-bridge",
+			],
+		},
+		execWhich: () => false,
+		modelsFor: providerId => {
+			if (providerId === "antigravity") {
+				return [
+					"gemini-4-argon-acp",
+					"gemini-4-argon-cli",
+					"gemini-3-8-flash-acp",
+					"gemini-3-8-flash-cli",
+					"claude-sonnet-5-5-cli",
+					"claude-opus-5-5-cli",
+				];
+			}
+			if (providerId === "claude-bridge") {
+				return ["claude-fable-5-2", "claude-opus-5-5", "claude-sonnet-5-5"];
+			}
+			return [];
+		},
+	});
+
+	const agy = providers.find(p => p.id === "antigravity");
+	assert.ok(agy?.detected, "antigravity should be detected via @3d24rd0/pi-antigravity-bridge");
+	assert.ok(agy.availableModels.includes("gemini-4-argon-acp"));
+	assert.ok(agy.availableModels.includes("claude-sonnet-5-5-cli"));
+
+	const rec = generateRecommendedConfig(providers.filter(p => p.detected));
+	const sonnetPool = rec.pools.find(p => p.id === "claude-sonnet-5-5");
+	assert.deepEqual(sonnetPool?.candidates, [
+		"antigravity/claude-sonnet-5-5-cli",
+		"claude-bridge/claude-sonnet-5-5",
+		"antigravity/gemini-3-8-flash-acp",
+	]);
+	const orchPool = rec.pools.find(p => p.id === "orchestrator");
+	assert.ok(orchPool?.candidates.includes("antigravity/gemini-4-argon-acp"));
+	assert.ok(orchPool?.candidates.includes("antigravity/gemini-3-8-flash-acp"));
+});

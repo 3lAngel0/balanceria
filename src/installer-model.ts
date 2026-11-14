@@ -43,7 +43,7 @@ import {
 	type SetupStepperState,
 	type StepperCurrent,
 } from "./setup-stepper.ts";
-import { moveCandidateInList, toggleCandidateInList, type DetectedProvider, type PoolConfig } from "./setup.ts";
+import { isHighConsumptionModel, moveCandidateInList, stripEngineSuffix, toggleCandidateInList, type DetectedProvider, type PoolConfig } from "./setup.ts";
 
 export { friendlyModel };
 
@@ -157,6 +157,7 @@ export interface ChoiceItem {
 	label: string;
 	description: string;
 	recommended?: boolean;
+	dangerWarning?: string;
 }
 export interface ChecklistItem {
 	id: string;
@@ -165,6 +166,7 @@ export interface ChecklistItem {
 	checked: boolean;
 	recommended?: boolean;
 	warning?: string;
+	dangerWarning?: string;
 	assigned?: string;
 }
 export type InstallerControl =
@@ -277,7 +279,7 @@ const poolName = (pool: { id: string; name?: string }) => backupName(pool);
 
 /** A backup member: just the subscription when the backup is for one model, "model · subscription" when it mixes several. */
 function memberLabel(draft: SetupStepperState, pool: PoolConfig, ref: string): string {
-	const single = new Set(pool.candidates.map(modelOf)).size <= 1;
+	const single = new Set(pool.candidates.map(c => stripEngineSuffix(modelOf(c)))).size <= 1;
 	return single ? (draft.detected.find(p => p.id === providerOf(ref))?.label ?? providerOf(ref)) : refLabel(draft, ref);
 }
 
@@ -447,8 +449,8 @@ interface BackupItem {
 function backupItems(draft: SetupStepperState): BackupItem[] {
 	const refs = enabledRefs(draft);
 	return livePools(draft).flatMap(pool => {
-		const models = new Set(pool.candidates.map(modelOf));
-		const extra = refs.filter(ref => models.has(modelOf(ref)) && !pool.candidates.includes(ref));
+		const models = new Set(pool.candidates.map(c => stripEngineSuffix(modelOf(c))));
+		const extra = refs.filter(ref => models.has(stripEngineSuffix(modelOf(ref))) && !pool.candidates.includes(ref));
 		return [...pool.candidates.filter(ref => draft.enabled.includes(providerOf(ref))), ...extra].map(ref => ({ pool, ref }));
 	});
 }
@@ -498,7 +500,14 @@ function wizardContent(state: InstallerState, wizard: BackupWizard): Content {
 					kind: "checklist",
 					items: enabledRefs(draft).map(ref => {
 						const checked = wizard.members.includes(ref);
-						return { id: ref, label: refLabel(draft, ref), detail: "", checked, ...(checked && warning && /flash|claude/i.test(ref) ? { warning } : {}) };
+						return {
+							id: ref,
+							label: refLabel(draft, ref),
+							detail: "",
+							checked,
+							...(checked && warning && /flash|claude/i.test(ref) ? { warning } : {}),
+							...(isHighConsumptionModel(ref) ? { dangerWarning: t("installer.fableWarning") } : {}),
+						};
 					}),
 				},
 				diagram: diagramOf(draft, pool, wizard.members),
@@ -643,7 +652,16 @@ function tasksContent(state: InstallerState): Content {
 		return {
 			title: t("installer.tasks.title"),
 			body: [t("installer.tasks.deepIntro", { tasks: names.join(", ") })],
-			control: { kind: "choice", selected: Math.max(0, refs.indexOf(chosen ?? "")), items: refs.map(ref => ({ id: ref, label: refLabel(draft, ref), description: t("installer.subscriptions.ownLimit") })) },
+			control: {
+				kind: "choice",
+				selected: Math.max(0, refs.indexOf(chosen ?? "")),
+				items: refs.map(ref => ({
+					id: ref,
+					label: refLabel(draft, ref),
+					description: t("installer.subscriptions.ownLimit"),
+					...(isHighConsumptionModel(ref) ? { dangerWarning: t("installer.fableWarning") } : {}),
+				})),
+			},
 			buttons: [button("back"), button("deep-analysis", chosen !== undefined && !analysisRunning(state), true), button("cancel")],
 			help: help("tasks"),
 		};
@@ -664,6 +682,7 @@ function tasksContent(state: InstallerState): Content {
 					label: targetLabel(target, draft.detected) + (target === now ? ` [${t("installer.tasks.current")}]` : ""),
 					description: t(target.startsWith("pool/") ? "installer.tasks.backupDesc" : "installer.tasks.directDesc"),
 					...(target === rec ? { recommended: true } : {}),
+					...(isHighConsumptionModel(target) ? { dangerWarning: t("installer.fableWarning") } : {}),
 				})),
 			},
 			buttons: [button("back"), button("assign-task", true, true), button("cancel")],
@@ -696,6 +715,7 @@ function tasksContent(state: InstallerState): Content {
 					].join(" "),
 					checked: Boolean(rec) && now === rec!.recommendedModel,
 					recommended: true,
+					...(now && isHighConsumptionModel(now) ? { dangerWarning: t("installer.fableWarning") } : {}),
 				};
 			}),
 		},

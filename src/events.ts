@@ -11,7 +11,7 @@ import { QuotaState } from "./state.ts";
 export const EVENTS_FILE = "events.jsonl";
 
 export type BalancerEvent =
-	| { type: "exhausted"; ts: number; key: string; until: number | undefined; reason: string }
+	| { type: "exhausted"; ts: number; key: string; until: number | undefined; reason: string; shortCooldown?: boolean }
 	| { type: "agy-usage"; ts: number; groups: Record<string, AgyGroupUsage> }
 	/** The remaining fraction (0..1) of one quota key, read from its usage endpoint. */
 	| { type: "quota"; ts: number; key: string; remainingFraction: number; resetAt: number | undefined }
@@ -65,7 +65,7 @@ export function foldEvents(events: readonly BalancerEvent[], now: number): Folde
 		if (!event || typeof event !== "object" || !isFiniteNumber(event.ts)) continue;
 		switch (event.type) {
 			case "exhausted":
-				if (typeof event.key === "string") state.markExhausted(event.key, event.until, event.reason, event.ts);
+				if (typeof event.key === "string") state.markExhausted(event.key, event.until, event.reason, event.ts, { shortCooldown: event.shortCooldown === true });
 				break;
 			case "agy-usage":
 				if (event.groups && typeof event.groups === "object") {

@@ -43,6 +43,8 @@ export interface QuotaErrorClassification {
 	resetInMs?: number;
 	/** True when the failure was caused by a process/bridge stall or timeout rather than quota. */
 	isStall?: boolean;
+	/** True when the text mentions no reset at all (not even a clock time): a candidate for a short cooldown. */
+	noStatedReset?: true;
 }
 
 function parseResetDelay(errorMessage: string): number | undefined {
@@ -59,7 +61,8 @@ export function classifyQuotaError(errorMessage: string | undefined): QuotaError
 	}
 	if (!QUOTA_EXHAUSTED_PATTERN.test(errorMessage)) return undefined;
 	const resetInMs = parseResetDelay(errorMessage);
-	return resetInMs === undefined ? { exhausted: true } : { exhausted: true, resetInMs };
+	if (resetInMs !== undefined) return { exhausted: true, resetInMs };
+	return /\bresets?\b|\brefreshes\b/i.test(errorMessage) ? { exhausted: true } : { exhausted: true, noStatedReset: true };
 }
 
 /**

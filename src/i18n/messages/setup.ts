@@ -208,6 +208,7 @@ export const setupMessages = {
 		"setup.col.workflowMode": "Workflow",
 		"setup.workflow.organicDesc": "ODD organic (inline allowed)",
 		"setup.workflow.fullDelegationDesc": "Full delegation (subagents only)",
+		"setup.fableWarning": "HIGH QUOTA DRAIN — claude-fable-* consumes massive quota; claude-opus-5-5 is recommended instead.",
 	},
 	es: {
 		"setup.role.orchestrator.label": "Agente principal (orchestrator)",
@@ -409,5 +410,6 @@ export const setupMessages = {
 		"setup.col.workflowMode": "Flujo",
 		"setup.workflow.organicDesc": "ODD orgánico (permite inline)",
 		"setup.workflow.fullDelegationDesc": "Delegación completa (solo subagentes)",
+		"setup.fableWarning": "ALTO CONSUMO DE CUOTA — claude-fable-* consume muchísimo; se recomienda claude-opus-5-5 en su lugar.",
 	},
 };

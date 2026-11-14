@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { classifyQuotaError, failoverErrorMessage } from "../src/quota-errors.ts";
 import { parseAgyUsage, agyGroupForModel } from "../src/agy-usage.ts";
 import { QuotaState } from "../src/state.ts";
+import { failoverAlternative } from "../src/router.ts";
 
 const AGY_REPORT = {
 	command: {
@@ -222,4 +223,113 @@ test("recordSuccess clears a false exhaustion or stall block and consecutive sta
 	assert.equal(state.isAvailable("antigravity/gemini", T0 + 1000), false);
 	state.recordSuccess("antigravity/gemini", T0 + 2000);
 	assert.equal(state.isAvailable("antigravity/gemini", T0 + 2000), true);
+});
+
+// --- Short, escalating cooldown for a quota error that states no reset, on a key with margin ---
+
+const RESOURCE_EXHAUSTED = "RESOURCE_EXHAUSTED (code 429): Resource has been exhausted (e.g. check quota).";
+const WEEK_RESET = T0 + 150 * HOUR_MS;
+const GEMINI_WEEKLY = (fraction: number) => new Map([["Gemini Models", { remainingFraction: fraction, resetAt: WEEK_RESET }]]);
+
+/** What extension.ts does on a classified error: decide the lock, then record it. */
+function failWith(state: QuotaState, key: string, text: string, now: number) {
+	const quota = classifyQuotaError(text);
+	assert.ok(quota);
+	const plan = state.quotaExhaustionFor(key, quota.resetInMs, now, quota.noStatedReset === true);
+	state.markExhausted(key, plan.until, text, now, { shortCooldown: plan.shortCooldown });
+	return plan;
+}
+
+test("R1: an error with no reset on a key with margin gets a 6 min, then 30 min, then 2 h cooldown, not the weekly reset", () => {
+	const key = "antigravity/gemini";
+	const state = new QuotaState();
+	state.applyAgyUsage(GEMINI_WEEKLY(0.99), T0 - 60_000);
+
+	failWith(state, key, RESOURCE_EXHAUSTED, T0);
+	assert.equal(state.availableAt(key, T0), T0 + 6 * 60_000);
+	assert.equal(state.isAvailable(key, T0 + 6 * 60_000 - 1), false);
+	assert.equal(state.isAvailable(key, T0 + 6 * 60_000 + 1), true, "reopens long before the weekly reset");
+	assert.equal(state.snapshot().get(key)?.exhaustedUntil, T0 + 6 * 60_000);
+
+	const t2 = T0 + 7 * 60_000;
+	failWith(state, key, RESOURCE_EXHAUSTED, t2);
+	assert.equal(state.availableAt(key, t2), t2 + 30 * 60_000);
+
+	const t3 = t2 + 31 * 60_000;
+	failWith(state, key, RESOURCE_EXHAUSTED, t3);
+	assert.equal(state.availableAt(key, t3), t3 + 2 * HOUR_MS);
+	const t4 = t3 + 2 * HOUR_MS + 1;
+	failWith(state, key, RESOURCE_EXHAUSTED, t4);
+	assert.equal(state.availableAt(key, t4), t4 + 2 * HOUR_MS, "stays at 2 h from the third on");
+});
+
+test("R2: a usage reading with margin does not lift the short cooldown; a success clears it and restarts the escalation", () => {
+	const key = "antigravity/gemini";
+	const state = new QuotaState();
+	state.applyAgyUsage(GEMINI_WEEKLY(0.99), T0 - 60_000);
+	failWith(state, key, RESOURCE_EXHAUSTED, T0);
+
+	state.applyAgyUsage(GEMINI_WEEKLY(0.99), T0 + 20_000);
+	assert.equal(state.availableAt(key, T0 + 20_000), T0 + 6 * 60_000, "the reading leaves the cooldown in place");
+	state.setQuotaFraction(key, 0.9, WEEK_RESET, T0 + 30_000);
+	assert.equal(state.availableAt(key, T0 + 30_000), T0 + 6 * 60_000);
+
+	state.recordSuccess(key, T0 + 7 * 60_000);
+	assert.equal(state.isAvailable(key, T0 + 7 * 60_000), true);
+	const t2 = T0 + 8 * 60_000;
+	failWith(state, key, RESOURCE_EXHAUSTED, t2);
+	assert.equal(state.availableAt(key, t2), t2 + 6 * 60_000, "escalation restarted at 6 min");
+});
+
+test("R3: the error is still an exhaustion that fails over to the next candidate right away", () => {
+	const quota = classifyQuotaError(RESOURCE_EXHAUSTED);
+	assert.deepEqual(quota, { exhausted: true, noStatedReset: true });
+	assert.equal(failoverErrorMessage("antigravity"), "429 rate limit: ai-balancer failover, antigravity subscription window is spent");
+	const state = new QuotaState();
+	state.applyAgyUsage(GEMINI_WEEKLY(0.99), T0 - 60_000);
+	failWith(state, "antigravity/gemini", RESOURCE_EXHAUSTED, T0);
+	const candidates = [
+		{ provider: "antigravity", model: "gemini", quotaKey: "antigravity/gemini" },
+		{ provider: "claude-bridge", model: "sonnet", quotaKey: "claude-bridge/claude" },
+	] as unknown as Parameters<typeof failoverAlternative>[0];
+	assert.equal(failoverAlternative(candidates, "antigravity/gemini", state, T0)?.model, "sonnet");
+});
+
+test("R4: stated resets, no-margin keys, claude-bridge wording and stall cooldowns keep their behavior", () => {
+	const key = "antigravity/gemini";
+	// stated reset: locked until it, even with margin
+	const stated = new QuotaState();
+	stated.applyAgyUsage(GEMINI_WEEKLY(0.99), T0 - 60_000);
+	const text = "Individual quota reached. Please upgrade your subscription to increase your limits. Resets in 154h55m28s.";
+	failWith(stated, key, text, T0);
+	assert.equal(stated.availableAt(key, T0), T0 + ((154 * 60 + 55) * 60 + 28) * 1000);
+
+	// no margin: adopts the known reset
+	const spent = new QuotaState();
+	spent.applyAgyUsage(GEMINI_WEEKLY(0), T0 - 60_000);
+	failWith(spent, key, RESOURCE_EXHAUSTED, T0);
+	assert.equal(spent.availableAt(key, T0), WEEK_RESET);
+
+	// claude-bridge wording (a clock-time reset, no "Resets in" delay): same as before, even with margin
+	const bridge = new QuotaState();
+	const bridgeText = "Claude quota exceeded — rate limit (five_hour) — resets 1:50:00 AM: x";
+	assert.deepEqual(classifyQuotaError(bridgeText), { exhausted: true });
+	failWith(bridge, "claude-bridge/claude", bridgeText, T0);
+	assert.equal(bridge.availableAt("claude-bridge/claude", T0), T0 + 30 * 60_000, "no reading: default cooldown");
+	bridge.setQuotaFraction("claude-bridge/claude", 0.4, T0 + 3 * HOUR_MS, T0 + 1000);
+	failWith(bridge, "claude-bridge/claude", bridgeText, T0 + 2000);
+	assert.equal(bridge.availableAt("claude-bridge/claude", T0 + 2000), T0 + 3 * HOUR_MS, "with margin: the known reset, as before");
+
+	// stall: 6 min then 30 min, unchanged
+	const stall = new QuotaState();
+	failWith(stall, key, "Antigravity stalled for 5m with no output", T0);
+	assert.equal(stall.availableAt(key, T0), T0 + 6 * 60_000);
+	failWith(stall, key, "Antigravity stalled for 5m with no output", T0 + 7 * 60_000);
+	assert.equal(stall.availableAt(key, T0 + 7 * 60_000), T0 + 37 * 60_000);
+
+	// a genuine stale provider block is still lifted by a fresher reading with margin
+	const stale = new QuotaState();
+	stale.markExhausted(key, T0 + 105 * HOUR_MS, "Individual quota reached. Resets in 105h", T0);
+	stale.applyAgyUsage(GEMINI_WEEKLY(0.17), T0 + 5 * 60_000);
+	assert.equal(stale.isAvailable(key, T0 + 5 * 60_000), true);
 });

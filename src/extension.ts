@@ -39,7 +39,7 @@ import { appendHistory, legacyRecords, pruneHistory, readHistory, type HistoryDa
 import { topConsumers, withAliases } from "./consumers.ts";
 import { HUD_VIEWS, hudHints, moveCursor, pressRedKey, renderHud, selectedSessionTarget, suggestionEnter, SESSIONS_PER_ROLE, visibleSessions, type HudViewName, type PendingConfirm } from "./hud.ts";
 import { runHudChoice, type HudChoice } from "./hud-actions.ts";
-import { buildExhaustedMenu, directQuotaSuggestion } from "./exhausted-menu.ts";
+import { buildExhaustedMenu, exhaustedDirectOutcome, exhaustedPoolOutcome } from "./exhausted-menu.ts";
 import { loadIntegrations } from "./integrations.ts";
 import { renderPanel, statusLine, statusWithContext, turnTelemetry, renderControlCenter, controlCenterButtons, controlCenterTabLabels, CONTROL_CENTER_TABS, type ControlCenterTab, type OverviewSessionRow, type TurnTelemetry } from "./panel.ts";
 import { ROLE_CATALOG, buildAvailableModelTargets, recommendRolesHeuristic, recommendRolesWithAdvisor, createDefaultCliAiRunner, createModelCliAiRunner, applyRecommendationsToProfile, type AdvisorReport } from "./setup-advisor.ts";
@@ -78,7 +78,7 @@ import { failoverAlternative, routeWithTrace, type Candidate } from "./router.ts
 import { fitWindows, formatSwitchCostReport, routeSwitchCost, type WindowFit } from "./switch-cost.ts";
 import { DecisionChanges, routeDecision } from "./route-log.ts";
 import { CircuitBreaker } from "./circuit-breaker.ts";
-import { runSetupWizard, detectSystemProviders, generateRecommendedConfig, saveProfileRoles, writeConfigSafely, toggleCandidateInList, moveCandidateInList, type DetectedProvider, type PoolConfig } from "./setup.ts";
+import { runSetupWizard, detectSystemProviders, generateRecommendedConfig, resolveModelInCatalog, saveProfileRoles, writeConfigSafely, toggleCandidateInList, moveCandidateInList, type DetectedProvider, type PoolConfig } from "./setup.ts";
 import { buildSessionDetail, buildWebReport, readSessionCwd, snapshotSessionIds, type WebReport } from "./web-data.ts";
 import { webSnapshotHtml } from "./web-page.ts";
 import { bindWebHandlers, formatServeStart, isValidSessionId, parseServeArgs, runningWebServer, sshTunnelHint, startServing, stopServing, type WebHandlers } from "./web-serve.ts";
@@ -428,6 +428,50 @@ export default function aiBalancer(pi: ExtensionAPI) {
 
 	const registeredPools = new Set<string>();
 
+	function resolveCatalogModel(ctx: ExtensionContext, provider: string, model: string) {
+		const exact = ctx.modelRegistry.find(provider, model);
+		if (exact) return exact;
+		const resolved = resolveModelInCatalog(provider, model, (p, m) => Boolean(ctx.modelRegistry.find(p, m)), "-acp");
+		return resolved !== model ? ctx.modelRegistry.find(provider, resolved) : undefined;
+	}
+
+	function hasCatalogModel(ctx: ExtensionContext, provider: string, model: string): boolean {
+		if (provider === POOL_PROVIDER) {
+			return Boolean(ctx.modelRegistry.find(provider, model)) || getLivePools().pools.some(pool => pool.id === model);
+		}
+		return Boolean(resolveCatalogModel(ctx, provider, model));
+	}
+
+	function syncActiveOrchestratorModel(ctx: ExtensionContext, store?: ProfilesStore | null): void {
+		for (const p of getLivePools().pools) registerPool(p);
+		const activeStore = store ?? loadProfilesStore();
+		const activeName = activeStore?.active;
+		const orch = activeName ? activeStore?.profiles?.[activeName]?.orchestrator : undefined;
+		const modelText = typeof orch?.model === "string" ? orch.model.trim() : "";
+		const slash = modelText.indexOf("/");
+		if (slash > 0 && slash < modelText.length - 1) {
+			const provider = modelText.slice(0, slash);
+			const modelId = modelText.slice(slash + 1);
+			const target = provider === POOL_PROVIDER
+				? ctx.modelRegistry.find(POOL_PROVIDER, modelId)
+				: resolveCatalogModel(ctx, provider, modelId);
+			if (target && typeof pi.setModel === "function" && (ctx.model?.provider !== target.provider || ctx.model?.id !== target.id)) {
+				void Promise.resolve(pi.setModel(target)).catch(() => {});
+			}
+		}
+		const thinking = typeof orch?.thinking === "string" ? orch.thinking.trim() : "";
+		if (
+			(thinking === "off" || thinking === "minimal" || thinking === "low" || thinking === "medium" || thinking === "high" || thinking === "xhigh") &&
+			typeof pi.setThinkingLevel === "function"
+		) {
+			try {
+				pi.setThinkingLevel(thinking);
+			} catch {
+				// Ignore if host does not support setThinkingLevel in current state.
+			}
+		}
+	}
+
 	function registerPool(pool: Pool) {
 		if (registeredPools.has(pool.id)) return;
 		registeredPools.add(pool.id);
@@ -521,8 +565,9 @@ export default function aiBalancer(pi: ExtensionAPI) {
 						// A journal failure never blocks the request.
 					}
 				}
-				const model = ctx.modelRegistry.find(choice.provider, choice.model);
+				const model = resolveCatalogModel(ctx, choice.provider, choice.model);
 				if (!model) throw new Error(`ai-balancer: ${choice.provider}/${choice.model} is not in the model catalog`);
+				if (model.id !== choice.model) choice = { ...choice, model: model.id };
 				if (decisionChanges.changed(pool.id, `${choice.provider}/${choice.model}`, trace.decidedBy)) {
 					try {
 						if (!current) throw new Error("no session");
@@ -613,12 +658,8 @@ export default function aiBalancer(pi: ExtensionAPI) {
 		const quota = classifyQuotaError(message.errorMessage);
 		if (!quota) return;
 		const key = quotaKeyFor(message.provider, message.model);
-		const knownReset = fold().state.snapshot().get(key)?.resetAt;
-		const until =
-			quota.resetInMs !== undefined ? Date.now() + quota.resetInMs :
-			knownReset !== undefined && knownReset > Date.now() ? knownReset :
-			undefined;
-		record({ type: "exhausted", ts: Date.now(), key, until, reason: (message.errorMessage ?? "").slice(0, 200) });
+		const { until, shortCooldown } = fold().state.quotaExhaustionFor(key, quota.resetInMs, Date.now(), quota.noStatedReset === true);
+		record({ type: "exhausted", ts: Date.now(), key, until, ...(shortCooldown ? { shortCooldown } : {}), reason: (message.errorMessage ?? "").slice(0, 200) });
 		try {
 			appendHistory(DATA_DIR, {
 				kind: "quota-error",
@@ -636,18 +677,25 @@ export default function aiBalancer(pi: ExtensionAPI) {
 		const { pools } = getLivePools();
 		const fromLabel = friendlyModelLabel(message.provider, message.model);
 
-		// Only sessions on a pool model are rewritten: elsewhere a retry would
-		// hit the same spent subscription again, so surface a clear status hint.
+		// A direct model has no failover and a retry would hit the same spent subscription: the turn ends
+		// with a clear notice (also what a subagent hands back) that points only at ways out that exist.
 		if (ctx.model?.provider !== POOL_PROVIDER) {
-			const toLabel = directQuotaSuggestion({ exhaustedKey: key, lastResort: getLivePools().lastResort, pools, state });
-			const directNotice = toLabel
-				? t("ops.directQuotaHint", { from: fromLabel, to: toLabel })
-				: t("ops.directQuotaHintNone", { from: fromLabel });
-			lastFailoverNote = { text: directNotice, at: Date.now() };
+			const { notice, errorMessage } = exhaustedDirectOutcome({
+				model: fromLabel,
+				exhaustedKey: key,
+				until,
+				stalled: quota.isStall === true,
+				lastResort: getLivePools().lastResort,
+				pools,
+				state,
+				now: Date.now(),
+				t,
+			});
+			lastFailoverNote = { text: notice, at: Date.now() };
 			registerPoolUsage();
 			refreshStatus(ctx);
-			if (ctx.hasUI) ctx.ui.notify(`ai-balancer: ${directNotice}`, "warning");
-			return;
+			if (ctx.hasUI) ctx.ui.notify(notice, "warning");
+			return errorMessage === undefined ? undefined : { message: { ...event.message, errorMessage } as typeof event.message };
 		}
 		const pool = pools.find(candidatePool => candidatePool.id === ctx.model?.id);
 		if (!pool) {
@@ -665,12 +713,13 @@ export default function aiBalancer(pi: ExtensionAPI) {
 				project: basename(ctx.sessionManager.getCwd()),
 				now: Date.now(),
 			});
-			if (ctx.hasUI) {
-				ctx.ui.notify(`ai-balancer: ALL CANDIDATES in pool/${pool.id} are exhausted! Circuit breaker tripped, session checkpointed.`, "error");
-			}
+			// Nothing can take over: the turn ends with a clear notice, in the UI and in the error a
+			// subagent hands back, instead of the provider's own text. Not retryable, so Pi does not loop.
+			const { notice, errorMessage } = exhaustedPoolOutcome({ poolId: pool.id, candidates: pool.candidates, state, now: Date.now(), t });
+			if (ctx.hasUI) ctx.ui.notify(notice, "error");
 			registerPoolUsage();
 			refreshStatus(ctx);
-			return;
+			return { message: { ...event.message, errorMessage } as typeof event.message };
 		}
 		const toLabel = `${alternative.provider}/${alternative.model}`;
 		const failoverNotice = t(quota.isStall ? "ops.failoverStall" : "ops.failoverQuota", {
@@ -988,7 +1037,7 @@ export default function aiBalancer(pi: ExtensionAPI) {
 		const result = applySuggestionToProfile(store, base, newProfileName, { ...selected, target: { ...selected.target, cheaperModel: cheaper } });
 		if (!result.changed) return result.description;
 		try {
-			const { backup } = saveProfilesStore(result.store, read, { hasModel: (provider, model) => Boolean(ctx.modelRegistry.find(provider, model)) });
+			const { backup } = saveProfilesStore(result.store, read, { hasModel: (provider, model) => hasCatalogModel(ctx, provider, model) });
 			return `profile "${newProfileName}" created (backup: ${basename(backup)})`;
 		} catch (err) {
 			return `failed to save profile: ${err instanceof Error ? err.message : String(err)}`;
@@ -1360,7 +1409,8 @@ export default function aiBalancer(pi: ExtensionAPI) {
 											store.profiles[activeProfileName] = currentProfile;
 											try {
 												const read = readProfiles();
-												saveProfilesStore(store, read, { hasModel: (p, m) => Boolean(ctx.modelRegistry.find(p, m)) });
+												saveProfilesStore(store, read, { hasModel: (p, m) => hasCatalogModel(ctx, p, m) });
+												syncActiveOrchestratorModel(ctx, store);
 											} catch {
 												// Non-fatal if model is not in local registry.
 											}
@@ -1411,7 +1461,8 @@ export default function aiBalancer(pi: ExtensionAPI) {
 									store.profiles[activeProfileName] = currentProfile;
 									try {
 										const read = readProfiles();
-										saveProfilesStore(store, read, { hasModel: (p, m) => Boolean(ctx.modelRegistry.find(p, m)) });
+										saveProfilesStore(store, read, { hasModel: (p, m) => hasCatalogModel(ctx, p, m) });
+										syncActiveOrchestratorModel(ctx, store);
 										note = `Assigned ${currentRole.role} → ${chosenModel}`;
 									} catch (err) {
 										note = `Failed to assign model: ${err instanceof Error ? err.message : String(err)}`;
@@ -1448,7 +1499,8 @@ export default function aiBalancer(pi: ExtensionAPI) {
 								store.profiles[activeProfileName] = currentProfile;
 								try {
 									const read = readProfiles();
-									saveProfilesStore(store, read, { hasModel: (p, m) => Boolean(ctx.modelRegistry.find(p, m)) });
+									saveProfilesStore(store, read, { hasModel: (p, m) => hasCatalogModel(ctx, p, m) });
+									syncActiveOrchestratorModel(ctx, store);
 									note = `Set ${currentRole.role} thinking to ${nextThinking}`;
 								} catch (err) {
 									note = `Failed to save thinking: ${err instanceof Error ? err.message : String(err)}`;
@@ -1480,7 +1532,8 @@ export default function aiBalancer(pi: ExtensionAPI) {
 								store.profiles[activeProfileName] = currentProfile;
 								try {
 									const read = readProfiles();
-									saveProfilesStore(store, read, { hasModel: (p, m) => Boolean(ctx.modelRegistry.find(p, m)) });
+									saveProfilesStore(store, read, { hasModel: (p, m) => hasCatalogModel(ctx, p, m) });
+									syncActiveOrchestratorModel(ctx, store);
 									note = `Assigned ${currentRole.role} → ${nextModel}`;
 								} catch (err) {
 									note = `Failed to assign model: ${err instanceof Error ? err.message : String(err)}`;
@@ -1500,7 +1553,8 @@ export default function aiBalancer(pi: ExtensionAPI) {
 									store.profiles[activeProfileName] = currentProfile;
 									try {
 										const read = readProfiles();
-										saveProfilesStore(store, read, { hasModel: (p, m) => Boolean(ctx.modelRegistry.find(p, m)) });
+										saveProfilesStore(store, read, { hasModel: (p, m) => hasCatalogModel(ctx, p, m) });
+										syncActiveOrchestratorModel(ctx, store);
 										note = `Applied recommendation to ${rec.role} → ${rec.recommendedModel} (${rec.thinking})`;
 									} catch (err) {
 										note = `Failed to apply: ${err instanceof Error ? err.message : String(err)}`;
@@ -1659,7 +1713,8 @@ export default function aiBalancer(pi: ExtensionAPI) {
 									);
 									try {
 										const read = readProfiles();
-										saveProfilesStore(store, read, { hasModel: (p, m) => Boolean(ctx.modelRegistry.find(p, m)) });
+										saveProfilesStore(store, read, { hasModel: (p, m) => hasCatalogModel(ctx, p, m) });
+										syncActiveOrchestratorModel(ctx, store);
 										note = `Applied all ${advisor.recommendations.length} recommendations to profile "${activeProfileName}"!`;
 									} catch (err) {
 										note = `Failed to apply recommendations: ${err instanceof Error ? err.message : String(err)}`;
@@ -1821,7 +1876,7 @@ export default function aiBalancer(pi: ExtensionAPI) {
 
 	const runClassicSetup = (ctx: ExtensionContext): Promise<boolean> =>
 		runSetupWizard(ctx, ROOT, {
-			hasModel: (provider, model) => Boolean(ctx.modelRegistry.find(provider, model)),
+			hasModel: (provider, model) => hasCatalogModel(ctx, provider, model),
 			agyBin: AGY_BIN,
 			onOpenControlCenter: () => openControlCenter(ctx),
 		});
@@ -2024,10 +2079,11 @@ export default function aiBalancer(pi: ExtensionAPI) {
 				current,
 				profilesPath: DEFAULT_PROFILES_PATH,
 				writeConfig: writeConfigSafely,
-				writeProfiles: (name, roles, workflow) => saveProfileRoles(DEFAULT_PROFILES_PATH, name, roles, (provider, model) => Boolean(ctx.modelRegistry.find(provider, model)), workflow),
+				writeProfiles: (name, roles, workflow) => saveProfileRoles(DEFAULT_PROFILES_PATH, name, roles, (provider, model) => hasCatalogModel(ctx, provider, model), workflow),
 			});
 			const settled = settleInstallSnapshot(snapshot, result, nodeInstallFs);
 			if (settled.keep) installerSnapshots.push(snapshot);
+			if (result.ok) syncActiveOrchestratorModel(ctx);
 			return result.ok ? { ok: true, written: result.written, backups: settled.backups, profilesError: result.profilesError, grantsError: result.grantsError } : { ok: false, error: result.error ?? "", backups: settled.backups };
 		},
 		undo: backups => {
@@ -2289,7 +2345,7 @@ export default function aiBalancer(pi: ExtensionAPI) {
 		};
 		const store = loadProfilesStore();
 		const current: StepperCurrent = { pools: readJson("pools.json"), integrations: readJson("integrations.json"), profiles: store };
-		const recommended = generateRecommendedConfig(detected.filter(p => p.detected), { hasModel: (provider, model) => Boolean(ctx.modelRegistry.find(provider, model)) }).pools;
+		const recommended = generateRecommendedConfig(detected.filter(p => p.detected), { hasModel: (provider, model) => hasCatalogModel(ctx, provider, model) }).pools;
 		let screen = initScreen(initStepper(detected, recommended, store?.profiles?.[store.active ?? ""] ?? {}, store?.workflow?.[store.active ?? ""]), current);
 
 		const effect = await ctx.ui.custom<"save" | "cancel" | "discard" | "none">(
@@ -2357,12 +2413,13 @@ export default function aiBalancer(pi: ExtensionAPI) {
 			current,
 			profilesPath: DEFAULT_PROFILES_PATH,
 			writeConfig: writeConfigSafely,
-			writeProfiles: (name, roles, workflow) => saveProfileRoles(DEFAULT_PROFILES_PATH, name, roles, (provider, model) => Boolean(ctx.modelRegistry.find(provider, model)), workflow),
+			writeProfiles: (name, roles, workflow) => saveProfileRoles(DEFAULT_PROFILES_PATH, name, roles, (provider, model) => hasCatalogModel(ctx, provider, model), workflow),
 		});
 		if (!result.ok) {
 			ctx.ui.notify(`ai-balancer: ${t("setup.stepper.saveFailed", { error: result.error ?? "" })}`, "error");
 			return;
 		}
+		syncActiveOrchestratorModel(ctx);
 		if (result.profilesError) ctx.ui.notify(`ai-balancer: ${t("setup.stepper.profilesFailed", { error: result.profilesError })}`, "warning");
 		ctx.ui.notify(`ai-balancer: ${t("setup.stepper.saved", { files: result.written.join(", ") })}${result.backups.length ? ` (backups: ${result.backups.join(", ")})` : ""}`, "info");
 		refreshStatus(ctx);
@@ -2543,7 +2600,7 @@ export default function aiBalancer(pi: ExtensionAPI) {
 				const result = applyDraft({
 					paths,
 					dataDir: DATA_DIR,
-					hasModel: (p, m) => Boolean(ctx.modelRegistry.find(p, m)),
+					hasModel: (p, m) => hasCatalogModel(ctx, p, m),
 				});
 				const filesDesc = result.files.map(f => `${basename(f.path)} (backup ${basename(f.backup)})`).join(", ");
 				const poolsNote = result.files.some(f => f.path === paths.poolsPath) ? " pools.json takes effect after /reload or a Pi restart." : "";
@@ -2616,8 +2673,7 @@ export default function aiBalancer(pi: ExtensionAPI) {
 						return;
 					}
 					// A pool target is one of this balancer's virtual models.
-					const hasModel = (p: string, m: string) =>
-						p === POOL_PROVIDER ? getLivePools().pools.some(pool => pool.id === m) : ctx.modelRegistry.find(p, m) !== undefined;
+					const hasModel = (p: string, m: string) => hasCatalogModel(ctx, p, m);
 					keepLoanInProfile(loan, read, { path: DEFAULT_PROFILES_PATH, now, hasModel });
 				}
 				writeLoans(DATA_DIR, nextLoans);

@@ -2,7 +2,7 @@ import { emphasize, parseHintButtons, type HintButton, type MouseTarget } from "
 import type { FoldedEvents } from "./events.ts";
 import type { CircuitBreakerStatus } from "./circuit-breaker.ts";
 import type { ProfileConfig } from "./profiles.ts";
-import type { DetectedProvider, PoolConfig } from "./setup.ts";
+import { isHighConsumptionModel, type DetectedProvider, type PoolConfig } from "./setup.ts";
 import {
 	displayModel,
 	displayThinking,
@@ -301,7 +301,13 @@ export function renderControlCenter(input: ControlCenterRenderInput): string[] {
 	const category = (cat: RoleCategory) => chip(t(`setup.category.${cat}`), CATEGORY_COLOR[cat], mode);
 	const strategyChip = (name: string | undefined) => chip(name ?? "hybrid", STRATEGY_COLOR[name ?? "hybrid"] ?? "steel", mode);
 	const modelCell = (value: string) =>
-		value === UNASSIGNED ? pixelText("slate", displayModel(value), mode) : value.startsWith("pool/") ? pixelText("sky", value, mode) : value;
+		value === UNASSIGNED
+			? pixelText("slate", displayModel(value), mode)
+			: isHighConsumptionModel(value)
+				? pixelText("bad", value, mode)
+				: value.startsWith("pool/")
+					? pixelText("sky", value, mode)
+					: value;
 	const thinkingCell = (level: string) => {
 		const { pips, color } = THINKING_PIPS[level] ?? { pips: 0, color: "slate" as PixelColor };
 		return `${pixelText(color, "▰".repeat(pips) + "▱".repeat(3 - pips), mode)} ${pixelText("steel", displayThinking(level), mode)}`;
@@ -420,6 +426,9 @@ export function renderControlCenter(input: ControlCenterRenderInput): string[] {
 			if (idx === cur) {
 				lines.push(tone("dim", `      ${t("setup.cc.task", { purpose: row.purpose })}`));
 				lines.push(tone("dim", `      ${t("setup.cc.effective", { target: displayModel(row.effectiveTarget) })}`));
+				if (isHighConsumptionModel(row.configuredModel) || isHighConsumptionModel(row.effectiveTarget)) {
+					lines.push(pixelText("bad", `      ⚠ ${t("setup.fableWarning")}`, mode));
+				}
 				if (row.configuredModel !== UNASSIGNED && !row.configuredModel.startsWith("pool/")) lines.push(tone("warning", `      ${t("installer.tasks.noBackup")}`));
 				if (input.rolePickerOpen && input.rolePickerTargets && input.rolePickerTargets.length > 0) {
 					lines.push(tone("accent", `      ${t("setup.cc.pickTarget", { role: roleLabel(row.role) })}`));
@@ -429,7 +438,8 @@ export function renderControlCenter(input: ControlCenterRenderInput): string[] {
 						const tPrefix = tIdx === pCur ? "      ▸ " : "        ";
 						const recTag = rec && rec.recommendedModel === target ? ` (${t("setup.tag.recommended")})` : "";
 						const curTag = row.configuredModel === target ? ` [${t("setup.tag.current")}]` : "";
-						const tLine = `${tPrefix}${target}${curTag}${recTag}`;
+						const fableTag = isHighConsumptionModel(target) ? ` ${pixelText("bad", `[⚠ ${t("setup.fableWarning")}]`, mode)}` : "";
+						const tLine = `${tPrefix}${target}${curTag}${recTag}${fableTag}`;
 						lines.push(tIdx === pCur ? tone("accent", tLine) : tLine);
 					});
 				}

@@ -444,6 +444,7 @@ export const installerMessages = {
 		"installer.help.focus.target.direct.if": "When that subscription runs out, the task stops until it recovers.",
 		"installer.help.focus.task.purpose": "Uses {level} of your quota. Recommended: {model}.",
 		"installer.help.focus.task.if": "Ticking it assigns the recommended model; press Enter to pick another one.",
+		"installer.fableWarning": "HIGH QUOTA DRAIN — Fable consumes massive quota. Claude Opus 5.5 is recommended instead (you can still choose Fable if you want).",
 	},
 	es: {
 		"installer.step.welcome": "Bienvenida",
@@ -887,5 +888,6 @@ export const installerMessages = {
 		"installer.help.focus.target.direct.if": "Cuando esa suscripción se agota, la tarea se frena hasta que se recupere.",
 		"installer.help.focus.task.purpose": "Consume {level} de tu uso. Recomendado: {model}.",
 		"installer.help.focus.task.if": "Marcarla asigna el modelo recomendado; Enter para elegir otro.",
+		"installer.fableWarning": "ALTO CONSUMO DE CUOTA — Fable consume muchísimo uso. Se recomienda Claude Opus 5.5 en su lugar (igual podés elegir Fable si querés).",
 	},
 };

@@ -131,3 +131,22 @@ test("foldEvents clears a false exhaustion when a later usage event produces out
 	assert.equal(folded.state.isAvailable("antigravity/gemini", NOW), true);
 	assert.equal(folded.lastRoute?.model, "gemini-3-8-flash");
 });
+
+test("R2 (fold): a short-cooldown exhaustion survives replay and a later usage reading with margin; old events stay readable", () => {
+	const key = "antigravity/gemini-4-argon";
+	const reading = (ts: number): BalancerEvent => ({ type: "agy-usage", ts, groups: { "Gemini 4 Argon": { remainingFraction: 0.97, resetAt: NOW + 150 * HOUR } } });
+	const events: BalancerEvent[] = [
+		reading(NOW - 60_000),
+		{ type: "exhausted", ts: NOW, key, until: undefined, shortCooldown: true, reason: "RESOURCE_EXHAUSTED (code 429): Resource has been exhausted (e.g. check quota)." },
+		reading(NOW + 20_000),
+	];
+	const { state } = foldEvents(events, NOW + 30_000);
+	assert.equal(state.availableAt(key, NOW + 30_000), NOW + 6 * 60_000);
+	assert.equal(state.isAvailable(key, NOW + 6 * 60_000 + 1), true);
+
+	// the same event after a JSONL round trip, and an old event without the field
+	const roundTrip = JSON.parse(JSON.stringify(events)) as BalancerEvent[];
+	assert.equal(foldEvents(roundTrip, NOW + 30_000).state.availableAt(key, NOW + 30_000), NOW + 6 * 60_000);
+	const old = foldEvents([{ type: "exhausted", ts: NOW, key, until: NOW + 150 * HOUR, reason: "x" }, reading(NOW + 20_000)], NOW + 30_000);
+	assert.equal(old.state.isAvailable(key, NOW + 30_000), true, "old events keep the lifted-by-reading behavior");
+});

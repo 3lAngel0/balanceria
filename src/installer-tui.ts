@@ -87,7 +87,7 @@ function controlRows(control: InstallerControl, cursor: number, width: number, m
 	const rows: Row[] = [];
 	const pointer = (on: boolean) => (on ? pixelText("sky", "▸", mode) : " ");
 	const dim = (text: string) => pixelText("steel", text, mode);
-	const details = (item: number, lines: string[], hit: InstallerAction, color?: "gold") => {
+	const details = (item: number, lines: string[], hit: InstallerAction, color?: "gold" | "bad") => {
 		for (const line of lines) rows.push({ item, text: INDENT + (color ? pixelText(color, line, mode) : dim(line)), hits: [{ start: 0, end: width, action: hit }] });
 	};
 	switch (control.kind) {
@@ -99,6 +99,7 @@ function controlRows(control: InstallerControl, cursor: number, width: number, m
 				const hit: InstallerAction = { type: "select", index: i };
 				rows.push({ item: i, text: `${pointer(i === cursor)} ${on ? "(●)" : "( )"} ${label}${tag}`, hits: [{ start: 0, end: width, action: hit }] });
 				details(i, wrap(item.description, Math.max(10, width - INDENT.length)), hit);
+				if (item.dangerWarning) details(i, wrap(`⚠ ${item.dangerWarning}`, Math.max(10, width - INDENT.length)), hit, "bad");
 			});
 			break;
 		case "checklist":
@@ -109,6 +110,7 @@ function controlRows(control: InstallerControl, cursor: number, width: number, m
 				rows.push({ item: i, text: `${pointer(i === cursor)} ${item.checked ? "[x]" : "[ ]"} ${item.label}${assigned}`, hits: [{ start: 0, end: width, action: hit }] });
 				if (item.detail) details(i, wrap(item.detail, Math.max(10, width - INDENT.length)), detailHit);
 				if (item.warning) details(i, wrap(`⚠ ${item.warning}`, Math.max(10, width - INDENT.length)), detailHit, "gold");
+				if (item.dangerWarning) details(i, wrap(`⚠ ${item.dangerWarning}`, Math.max(10, width - INDENT.length)), detailHit, "bad");
 			});
 			break;
 		case "progress":
